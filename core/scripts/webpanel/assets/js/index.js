@@ -11,8 +11,8 @@ function updateServerInfo() {
             document.getElementById('server-ipv4').textContent = `IPv4: ${data.server_ipv4 || 'N/A'}`;
             document.getElementById('server-ipv6').textContent = `IPv6: ${data.server_ipv6 || 'N/A'}`;
 
-            document.getElementById('download-speed').textContent = `🔽 Download: ${data.download_speed}`;
-            document.getElementById('upload-speed').textContent = `🔼 Upload: ${data.upload_speed}`;
+            document.getElementById('download-speed').textContent = `🔽 Загрузка: ${data.download_speed}`;
+            document.getElementById('upload-speed').textContent = `🔼 Отдача: ${data.upload_speed}`;
             document.getElementById('tcp-connections').textContent = `TCP: ${data.tcp_connections}`;
             document.getElementById('udp-connections').textContent = `UDP: ${data.udp_connections}`;
 
@@ -45,11 +45,11 @@ function updateServiceBox(serviceName, status) {
     const statusBox = document.getElementById(serviceName + '-status-box');
 
     if (status === true) {
-        statusElement.textContent = 'Active';
+        statusElement.textContent = 'On';
         statusBox.classList.remove('bg-danger');
         statusBox.classList.add('bg-success');
     } else {
-        statusElement.textContent = 'Inactive';
+        statusElement.textContent = 'Off';
         statusBox.classList.remove('bg-success');
         statusBox.classList.add('bg-danger');
     }

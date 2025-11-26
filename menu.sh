@@ -1170,8 +1170,9 @@ display_advance_menu() {
     echo -e "${cyan}[15] ${NC}↝ Перезапустить Hysteria"
     echo -e "${cyan}[16] ${NC}↝ Обновить ядро Hysteria"
     echo -e "${cyan}[17] ${NC}↝ Limit IP"
-    echo -e "${red}[18] ${NC}↝ Удалить Hysteria"
-	echo -e "${red}[19] ${NC}↝ Полное удаление (Asgaroth Gate)"
+	echo -e "${green}[18] ${NC}↝ Cloudflare SSL (DNS API)"
+    echo -e "${red}[19] ${NC}↝ Удалить Hysteria"
+	echo -e "${red}[20] ${NC}↝ Полное удаление (Asgaroth Gate)"
     echo -e "${red}[0] ${NC}↝ Назад в главное меню"
     echo -e "${LPurple}◇──────────────────────────────────────────────────────────────────────◇${NC}"
     echo -ne "${yellow}➜ Введите опцию: ${NC}"
@@ -1201,8 +1202,9 @@ advance_menu() {
             15) python3 $CLI_PATH restart-hysteria2 ;;
             16) python3 $CLI_PATH update-hysteria2 ;;
             17) ip_limit_handler ;;
-            18) python3 $CLI_PATH uninstall-hysteria2 ;;
-			19) bash /etc/hysteria/core/scripts/cleanup.sh 
+			18) bash /etc/hysteria/core/scripts/cloudflare_setup.sh ;;
+            19) python3 $CLI_PATH uninstall-hysteria2 ;;
+			20) bash /etc/hysteria/core/scripts/cleanup.sh 
 			exit 0 ;;
             0) return ;;
             *) echo "Неверная опция. Пожалуйста, попробуйте снова." ;;
