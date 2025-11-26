@@ -211,7 +211,7 @@ edit_subpath() {
     update_caddy_file_normalsub "$HYSTERIA_DOMAIN" "$HYSTERIA_PORT" "$new_path" "$AIOHTTP_LISTEN_ADDRESS" "$AIOHTTP_LISTEN_PORT"
     echo -e "${green}Caddyfile для Подписок обновлен с новым подпутем.${NC}"
 
-    echo -e "${yellow}Перезапуск службы hysteria-normal-sub для перезагрузки окружения...${NC}"
+    echo -e "${yellow}Перезапуск службы подписок hysteria для перезагрузки окружения...${NC}"
     systemctl restart hysteria-normal-sub.service
 
     echo -e "${yellow}Перезагрузка конфигурации Caddy...${NC}"

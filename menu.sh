@@ -605,8 +605,8 @@ singbox_handler() {
 
 normalsub_handler() {
     while true; do
-        echo -e "${cyan}1.${NC} Запустить сервис Normal-Sub"
-        echo -e "${red}2.${NC} Остановить сервис Normal-Sub"
+        echo -e "${cyan}1.${NC} Запустить сервис Подписок"
+        echo -e "${red}2.${NC} Остановить сервис Подписок"
         echo -e "${yellow}3.${NC} Изменить SUBPATH"
         echo "0. Назад"
         read -p "Выберите опцию: " option
@@ -660,7 +660,7 @@ normalsub_handler() {
                         echo "Ошибка: SUBPATH должен содержать хотя бы одну заглавную букву, одну строчную букву и одну цифру."
                     else
                         python3 $CLI_PATH normal-sub -a edit_subpath -sp "$subpath"
-                        # echo "SUBPATH updated successfully!"
+                        # echo "SUBPATH Успешно обновлен!"
                         break
                     fi
                 done
@@ -958,9 +958,9 @@ masquerade_handler() {
 
 ip_limit_handler() {
     while true; do
-        echo -e "${cyan}1.${NC} Запустить сервис лимита IP"
-        echo -e "${red}2.${NC} Остановить сервис лимита IP"
-        echo -e "${yellow}3.${NC} Изменить конфигурацию лимита IP"
+        echo -e "${cyan}1.${NC} Запустить сервис Limit IP"
+        echo -e "${red}2.${NC} Остановить сервис Limit IP"
+        echo -e "${yellow}3.${NC} Изменить конфигурацию Limit IP"
         echo "0. Назад"
         read -p "Выберите опцию: " option
 
@@ -971,7 +971,7 @@ ip_limit_handler() {
                 else
                     while true; do
                         read -e -p "Введите длительность блокировки (сек, по умолчанию: 60): " block_duration
-                        block_duration=${block_duration:-60} # Default to 60 if empty
+                        block_duration=${block_duration:-60}
                         if ! [[ "$block_duration" =~ ^[0-9]+$ ]]; then
                             echo "Неверная длительность блокировки. Пожалуйста, введите число."
                         else
@@ -981,7 +981,7 @@ ip_limit_handler() {
 
                     while true; do
                         read -e -p "Введите макс. кол-во IP на пользователя (по умолчанию: 1): " max_ips
-                        max_ips=${max_ips:-1} # Default to 1 if empty
+                        max_ips=${max_ips:-1} 
                         if ! [[ "$max_ips" =~ ^[0-9]+$ ]]; then
                             echo "Неверное макс. кол-во IP. Пожалуйста, введите число."
                         else
@@ -1033,7 +1033,7 @@ ip_limit_handler() {
                 if [[ "$updated" == "true" ]]; then
                     python3 $CLI_PATH config-ip-limit --block-duration "$block_duration" --max-ips "$max_ips"
                 else
-                    echo "Изменения в конфигурацию лимита IP не внесены."
+                    echo "Изменения в конфигурацию Limit IP не внесены."
                 fi
                 ;;
             0)
@@ -1046,7 +1046,6 @@ ip_limit_handler() {
     done
 }
 
-# Function to display the main menu
 display_main_menu() {
     clear
     tput setaf 7 ; tput setab 4 ; tput bold
@@ -1160,17 +1159,17 @@ display_advance_menu() {
     echo -e "${red}[4] ${NC}↝ Удалить WARP"
     echo -e "${green}[5] ${NC}↝ Telegram Бот"
     echo -e "${green}[6] ${NC}↝ SingBox Подписка(${red}Устарело${NC})"
-    echo -e "${green}[7] ${NC}↝ Подписка"
+    echo -e "${green}[7] ${NC}↝ Подписки"
     echo -e "${green}[8] ${NC}↝ Web Panel"
     echo -e "${cyan}[9] ${NC}↝ Изменить порт Hysteria"
     echo -e "${cyan}[10] ${NC}↝ Изменить SNI Hysteria"
     echo -e "${cyan}[11] ${NC}↝ Управление OBFS"
     echo -e "${cyan}[12] ${NC}↝ Изменить IP"
-    echo -e "${cyan}[13] ${NC}↝ Обновить файлы Geo"
+    echo -e "${cyan}[13] ${NC}↝ Обновить Geo-файлы"
     echo -e "${cyan}[14] ${NC}↝ Управление маскировкой (Masquerade)"
     echo -e "${cyan}[15] ${NC}↝ Перезапустить Hysteria"
     echo -e "${cyan}[16] ${NC}↝ Обновить ядро Hysteria"
-    echo -e "${cyan}[17] ${NC}↝ Меню лимита IP"
+    echo -e "${cyan}[17] ${NC}↝ Limit IP"
     echo -e "${red}[18] ${NC}↝ Удалить Hysteria"
 	echo -e "${red}[19] ${NC}↝ Полное удаление (Asgaroth Gate)"
     echo -e "${red}[0] ${NC}↝ Назад в главное меню"

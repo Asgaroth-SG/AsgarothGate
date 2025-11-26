@@ -209,7 +209,7 @@ EOF
     systemctl daemon-reload
     systemctl enable ${SERVICE_NAME}
     systemctl start ${SERVICE_NAME}
-    log_message "INFO" "Служба ограничителя IP запущена"
+    log_message "INFO" "Служба Limit IP запущена"
 }
 
 uninstall_service() {
