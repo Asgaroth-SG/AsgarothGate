@@ -1,0 +1,530 @@
+{% extends 'base.html' %}
+
+{% block title %}Настройки{% endblock %}
+
+{% block content %}
+<div class='content-header'>
+    <div class='container-fluid'>
+        <div class='row mb-2'>
+            <div class='col-sm-6'>
+                <h1 class='m-0'>Настройки</h1>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class='content'
+    data-server-services-status-url="{{ url_for('server_services_status_api') }}"
+    data-get-ip-url="{{ url_for('get_ip_api') }}"
+    data-get-all-nodes-url="{{ url_for('get_all_nodes') }}"
+    data-add-node-url="{{ url_for('add_node') }}"
+    data-delete-node-url="{{ url_for('delete_node') }}"
+    data-get-all-extra-configs-url="{{ url_for('get_all_extra_configs') }}"
+    data-add-extra-config-url="{{ url_for('add_extra_config') }}"
+    data-delete-extra-config-url="{{ url_for('delete_extra_config') }}"
+    data-normal-sub-get-subpath-url="{{ url_for('normal_sub_get_subpath_api') }}"
+    data-telegram-get-interval-url="{{ url_for('telegram_get_interval_api') }}"
+    data-get-ip-limit-config-url="{{ url_for('get_ip_limit_config_api') }}"
+    data-normal-sub-edit-subpath-url="{{ url_for('normal_sub_edit_subpath_api') }}"
+    data-setup-decoy-url="{{ url_for('setup_decoy_api') }}"
+    data-stop-decoy-url="{{ url_for('stop_decoy_api') }}"
+    data-get-decoy-status-url="{{ url_for('get_decoy_status_api') }}"
+    data-telegram-start-url="{{ url_for('telegram_start_api') }}"
+    data-telegram-stop-url="{{ url_for('telegram_stop_api') }}"
+    data-telegram-set-interval-url="{{ url_for('telegram_set_interval_api') }}"
+    data-normal-sub-start-url="{{ url_for('normal_sub_start_api') }}"
+    data-normal-sub-stop-url="{{ url_for('normal_sub_stop_api') }}"
+    data-edit-ip-url="{{ url_for('edit_ip_api') }}"
+    data-backup-url="{{ url_for('backup_api') }}"
+    data-restore-url="{{ url_for('restore_api') }}"
+    data-start-ip-limit-url="{{ url_for('start_ip_limit_api') }}"
+    data-stop-ip-limit-url="{{ url_for('stop_ip_limit_api') }}"
+    data-clean-ip-limit-url="{{ url_for('clean_ip_limit_api') }}"
+    data-config-ip-limit-url="{{ url_for('config_ip_limit_api') }}"
+    data-status-warp-url="{{ url_for('status_warp') }}"
+    data-install-warp-url="{{ url_for('install_warp') }}"
+    data-uninstall-warp-url="{{ url_for('uninstall_warp') }}"
+    data-configure-warp-url="{{ url_for('configure_warp') }}"
+>
+    <div class='container-fluid'>
+        <div class='row'>
+            <div class='col-lg-12'>
+                <div class='card card-primary card-outline card-tabs'>
+                    <div class='card-header p-0 pt-1 border-bottom-0'>
+                        <ul class='nav nav-pills' id='custom-tabs-three-tab' role='tablist'
+                            style="margin-left: 20px; margin-top: 10px;">
+                            <li class='nav-item'>
+                                <a class='nav-link active' id='subs-tab' data-toggle='pill' href='#subs' role='tab'
+                                    aria-controls='subs' aria-selected='false'><i class="fas fa-link"></i>
+                                    Подписки</a>
+                            </li>
+                            <li class='nav-item'>
+                                <a class='nav-link' id='telegram-tab' data-toggle='pill' href='#telegram' role='tab'
+                                    aria-controls='telegram' aria-selected='true'><i class="fab fa-telegram"></i>
+                                    Telegram Бот</a>
+                            </li>
+                            <li class='nav-item'>
+                                <a class='nav-link' id='ip-tab' data-toggle='pill' href='#change_ip' role='tab'
+                                    aria-controls='change_ip' aria-selected='false'><i class="fas fa-network-wired"></i>
+                                    Управление IP</a>
+                            </li>
+                            <li class='nav-item'>
+                                <a class='nav-link' id='extra-config-tab' data-toggle='pill' href='#extra-config' role='tab'
+                                    aria-controls='extra-config' aria-selected='false'><i class="fas fa-plus-circle"></i>
+                                    Доп. Конфиги</a>
+                            </li>
+                            <li class='nav-item'>
+                                <a class='nav-link' id='backup-tab' data-toggle='pill' href='#backup' role='tab'
+                                    aria-controls='backup' aria-selected='false'><i class="fas fa-download"></i>
+                                    Бэкап</a>
+                            </li>
+                            <li class='nav-item'>
+                                <a class='nav-link' id='ip-limit-tab' data-toggle='pill' href='#ip-limit' role='tab'
+                                    aria-controls='ip-limit' aria-selected='false'><i class="fas fa-user-slash"></i>
+                                    Лимит IP</a>
+                            </li>
+                             <li class='nav-item'>
+                                <a class='nav-link' id='decoy-tab' data-toggle='pill' href='#decoy' role='tab'
+                                    aria-controls='decoy' aria-selected='false'><i class="fas fa-mask"></i>
+                                    Сайт-маскировка</a>
+                            </li>
+                            <li class='nav-item'>
+                                <a class='nav-link' id='warp-tab-link' data-toggle='pill' href='#warp-content' role='tab'
+                                    aria-controls='warp-content' aria-selected='false'><i class="fas fa-cloud"></i> WARP</a>
+                            </li>
+                        </ul>
+                    </div>
+                    <div class='card-body' style="margin-left: 25px;">
+                        <div class='tab-content' id='custom-tabs-three-tabContent'>
+
+                            <div class='tab-pane fade show active' id='subs' role='tabpanel' aria-labelledby='subs-tab'>
+                                <ul class='nav nav-tabs' id='subs-tabs' role='tablist'>
+                                    <li class='nav-item'>
+                                        <a class='nav-link active' id='normal-tab' data-toggle='tab' href='#normal' role='tab'
+                                            aria-controls='normal' aria-selected='true'><strong>Управление службой</strong></a>
+                                    </li>
+                                    <li class='nav-item normal-sub-config-tab-li' style="display: none;">
+                                        <a class='nav-link' id='normal-sub-config-link-tab' data-toggle='tab' href='#normal-sub-config-content' role='tab'
+                                            aria-controls='normal-sub-config-content' aria-selected='false'><strong>Настройка ссылки</strong></a>
+                                    </li>
+                                </ul>
+                                <div class='tab-content' id='subs-tabs-content'>
+                                     <br>
+                                    <div class='tab-pane fade show active' id='normal' role='tabpanel' aria-labelledby='normal-tab'>
+                                        <form id="normal_sub_service_form">
+                                            <div class='form-group'>
+                                                <label for='normal_domain'>Домен:</label>
+                                                <input type='text' class='form-control' id='normal_domain'
+                                                    placeholder='sub.example.com'>
+                                                <div class="invalid-feedback">
+                                                    Пожалуйста, введите корректный домен (без http:// или https://).
+                                                </div>
+                                            </div>
+                                            <div class='form-group'>
+                                                <label for='normal_port'>Порт:</label>
+                                                <input type='text' class='form-control' id='normal_port'
+                                                    placeholder='например, 8080'>
+                                                <div class="invalid-feedback">
+                                                    Пожалуйста, введите корректный номер порта.
+                                                </div>
+                                            </div>
+                                            <button id="normal_start" type='button' class='btn btn-success'>
+                                               <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                                Запустить службу
+                                            </button>
+                                            <button id="normal_stop" type='button' class='btn btn-danger'
+                                                style="display: none;">Остановить службу</button>
+                                        </form>
+                                    </div>
+                                    <div class='tab-pane fade' id='normal-sub-config-content' role='tabpanel' aria-labelledby='normal-sub-config-link-tab'>
+                                        <form id="normal_sub_config_form">
+                                            <div class='form-group'>
+                                                <label for='normal_subpath_input'>Сегмент пути подписки:</label>
+                                                <input type='text' class='form-control' id='normal_subpath_input'
+                                                    placeholder='например, mysub (будет /mysub/...)'>
+                                                <div class="invalid-feedback">
+                                                    Пожалуйста, введите корректный подпуть (только буквы и цифры, например, mysub).
+                                                </div>
+                                            </div>
+                                            <button id="normal_subpath_save_btn" type='button' class='btn btn-primary'>
+                                               <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                                Сохранить путь
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class='tab-pane fade' id='telegram' role='tabpanel' aria-labelledby='telegram-tab'>
+                                <form id="telegram_form">
+                                    <div class='form-group' data-group="start-only">
+                                        <label for='telegram_api_token'>API Токен:</label>
+                                        <input type='text' class='form-control' id='telegram_api_token'
+                                            placeholder='Введите токен API'>
+                                        <div class="invalid-feedback">
+                                            Пожалуйста, введите корректный API Токен.
+                                        </div>
+                                    </div>
+                                    <div class='form-group' data-group="start-only">
+                                        <label for='telegram_admin_id'>ID Админа:</label>
+                                        <input type='text' class='form-control' id='telegram_admin_id'
+                                            placeholder='Введите ID Админа'>
+                                        <div class="invalid-feedback">
+                                            Пожалуйста, введите корректный ID Админа.
+                                        </div>
+                                    </div>
+                                    <div class='form-group'>
+                                        <label for='telegram_backup_interval'>Интервал авто-бэкапа (часы):</label>
+                                        <input type='number' class='form-control' id='telegram_backup_interval' min="1"
+                                            placeholder='например, 12 (По умолчанию)'>
+                                        <div class="invalid-feedback">
+                                            Пожалуйста, введите корректное положительное число для интервала.
+                                        </div>
+                                    </div>
+                                    <button id="telegram_start" type='button' class='btn btn-success'>
+                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>Запустить</button>
+                                    <button id="telegram_save_interval" type='button' class='btn btn-primary'
+                                        style="display: none;">Сохранить интервал</button>
+                                    <button id="telegram_stop" type='button' class='btn btn-danger'
+                                        style="display: none;">Остановить</button>
+                                </form>
+                            </div>
+
+                            <div class='tab-pane fade' id='change_ip' role='tabpanel' aria-labelledby='ip-tab'>
+                                <div class="card card-outline card-primary">
+                                    <div class="card-header">
+                                        <h3 class="card-title">IP / Домен локального сервера</h3>
+                                    </div>
+                                    <div class="card-body">
+                                        <form id="change_ip_form">
+                                            <div class='form-group'>
+                                                <label for='ipv4'>IPv4 / Домен:</label>
+                                                <input type='text' class='form-control' id='ipv4' placeholder='Введите IPv4 или Домен' value="{{ ipv4 or '' }}">
+                                                <div class="invalid-feedback">Пожалуйста, введите корректный IPv4 адрес или Домен.</div>
+                                            </div>
+                                            <div class='form-group'>
+                                                <label for='ipv6'>IPv6 / Домен:</label>
+                                                <input type='text' class='form-control' id='ipv6' placeholder='Введите IPv6 или Домен' value="{{ ipv6 or '' }}">
+                                                <div class="invalid-feedback">Пожалуйста, введите корректный IPv6 адрес или Домен.</div>
+                                            </div>
+                                            <button id="ip_change" type='button' class='btn btn-primary'>Сохранить</button>
+                                        </form>
+                                    </div>
+                                </div>
+                            
+                                <div class="card card-outline card-secondary mt-4">
+                                    <div class="card-header">
+                                        <h3 class="card-title">Внешние узлы (Nodes)</h3>
+                                    </div>
+                                    <div class="card-body">
+                                        <div class="table-responsive">
+                                            <table class="table table-bordered table-striped" id="nodes_table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Название</th>
+                                                        <th>IP/Домен</th>
+                                                        <th>Порт</th>
+                                                        <th>SNI</th>
+                                                        <th>OBFS</th>
+                                                        <th>Небезопасно</th>
+                                                        <th>Pin SHA256</th>
+                                                        <th>Действие</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody></tbody>
+                                            </table>
+                                        </div>
+                                        <div id="no_nodes_message" class="alert alert-info" style="display: none;">
+                                            Внешние узлы не настроены.
+                                        </div>
+                            
+                                        <hr>
+                                        <h5>Добавить новый узел</h5>
+                                        <form id="add_node_form">
+                                            <div class="form-row">
+                                                <div class="form-group col-md-6">
+                                                    <label for="node_name">Имя узла</label>
+                                                    <input type="text" class="form-control" id="node_name" placeholder="например, Node-US">
+                                                    <div class="invalid-feedback">Пожалуйста, введите уникальное имя.</div>
+                                                </div>
+                                                <div class="form-group col-md-6">
+                                                    <label for="node_ip">IP Адрес / Домен</label>
+                                                    <input type="text" class="form-control" id="node_ip" placeholder="например, node.example.com или 1.2.3.4">
+                                                    <div class="invalid-feedback">Пожалуйста, введите корректный IP или домен.</div>
+                                                </div>
+                                            </div>
+                                            <div class="form-row">
+                                                <div class="form-group col-md-3">
+                                                    <label for="node_port">Порт</label>
+                                                    <input type="number" class="form-control" id="node_port" placeholder="например, 443">
+                                                    <div class="invalid-feedback">Пожалуйста, введите корректный порт (1-65535).</div>
+                                                </div>
+                                                <div class="form-group col-md-3">
+                                                    <label for="node_obfs">OBFS</label>
+                                                    <input type="text" class="form-control" id="node_obfs" placeholder="obfs-пароль">
+                                                    <div class="invalid-feedback">OBFS не может быть пустым, если указан.</div>
+                                                </div>
+                                                <div class="form-group col-md-6">
+                                                    <label for="node_sni">SNI</label>
+                                                    <input type="text" class="form-control" id="node_sni" placeholder="например, yourdomain.com">
+                                                    <div class="invalid-feedback">Пожалуйста, введите корректное доменное имя (не IP).</div>
+                                                </div>
+                                            </div>
+                                            <div class="form-group">
+                                                <label for="node_pin">Pin SHA256</label>
+                                                <input type="text" class="form-control" id="node_pin" placeholder="5D:23:0E:E9:10:AB:96:E0:43...">
+                                                <div class="invalid-feedback">Неверный формат SHA256 pin.</div>
+                                            </div>
+                                            <div class="form-group">
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="node_insecure">
+                                                    <label class="form-check-label" for="node_insecure">
+                                                        Небезопасно (Allow Insecure)
+                                                    </label>
+                                                </div>
+                                            </div>
+                                            <button type="button" id="add_node_btn" class="btn btn-success">
+                                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                                Добавить узел
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class='tab-pane fade' id='extra-config' role='tabpanel' aria-labelledby='extra-config-tab'>
+                                <div class="card card-outline card-info">
+                                    <div class="card-header">
+                                        <h3 class="card-title">Внешние прокси-конфигурации для подписок</h3>
+                                    </div>
+                                    <div class="card-body">
+                                        <p>Добавьте внешние прокси-ссылки (Vmess, Vless, SS, Trojan), чтобы включить их в подписки всех пользователей.</p>
+                                        <div class="table-responsive">
+                                            <table class="table table-bordered table-striped" id="extra_configs_table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>Название</th>
+                                                        <th>URI</th>
+                                                        <th>Действие</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody></tbody>
+                                            </table>
+                                        </div>
+                                        <div id="no_extra_configs_message" class="alert alert-info" style="display: none;">
+                                            Внешние конфигурации еще не добавлены.
+                                        </div>
+                            
+                                        <hr>
+                                        <h5>Добавить новую конфигурацию</h5>
+                                        <form id="add_extra_config_form" class="form-inline">
+                                            <div class="form-group mb-2 mr-sm-2">
+                                                <label for="extra_config_name" class="sr-only">Название</label>
+                                                <input type="text" class="form-control" id="extra_config_name" placeholder="например, My-Vmess-Link">
+                                                <div class="invalid-feedback">Пожалуйста, введите уникальное название.</div>
+                                            </div>
+                                            <div class="form-group mb-2 mr-sm-2 flex-grow-1">
+                                                <label for="extra_config_uri" class="sr-only">URI</label>
+                                                <input type="text" class="form-control w-100" id="extra_config_uri" placeholder="vmess://...">
+                                                <div class="invalid-feedback">URI должен начинаться с vmess://, vless://, ss:// или trojan://.</div>
+                                            </div>
+                                            <button type="button" id="add_extra_config_btn" class="btn btn-success mb-2">
+                                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                                Добавить конфиг
+                                            </button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+
+
+                            <div class='tab-pane fade' id='backup' role='tabpanel' aria-labelledby='backup-tab'>
+                                <div class="row">
+                                    <div class="col-md-6">
+                                        <div class="card card-outline card-success h-100">
+                                            <div class="card-header">
+                                                <h3 class="card-title"><i class="fas fa-upload"></i> Восстановить из бэкапа</h3>
+                                            </div>
+                                            <div class="card-body">
+                                                <p>Загрузите ранее скачанный .zip файл резервной копии, чтобы восстановить настройки панели и конфигурацию Hysteria.</p>
+                                                <div class="form-group">
+                                                     <label for="backup_file">Выберите файл бэкапа (.zip):</label>
+                                                     <input type="file" class="form-control-file" id="backup_file" accept=".zip">
+                                                </div>
+                                                <button id="upload_backup" type='button' class='btn btn-success btn-block'>
+                                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                                    Загрузить и восстановить
+                                                </button>
+                                                <div class="progress mt-3" style="display: none;">
+                                                  <div id="backup_progress_bar" class="progress-bar progress-bar-striped progress-bar-animated" role="progressbar" style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">0%</div>
+                                                </div>
+                                               <div id="backup_status" class="mt-2 small"></div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-md-6">
+                                        <div class="card card-outline card-primary h-100">
+                                            <div class="card-header">
+                                                <h3 class="card-title"><i class="fas fa-download"></i> Создать новый бэкап</h3>
+                                            </div>
+                                            <div class="card-body d-flex flex-column justify-content-center">
+                                                <p>Скачать .zip файл, содержащий полную резервную копию настроек панели и конфигурации Hysteria.</p>
+                                                <button id="download_backup" type='button' class='btn btn-primary btn-block mt-auto'>Скачать бэкап</button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class='tab-pane fade' id='ip-limit' role='tabpanel' aria-labelledby='ip-limit-tab'>
+                                <ul class='nav nav-tabs' id='ip-limit-tabs' role='tablist'>
+                                    <li class='nav-item'>
+                                        <a class='nav-link active' id='ip-limit-service-tab' data-toggle='tab' href='#ip-limit-service'
+                                            role='tab' aria-controls='ip-limit-service'
+                                            aria-selected='true'><strong>Управление службой</strong></a>
+                                    </li>
+                                    <li class='nav-item ip-limit-config-tab-li' style="display: none;">
+                                        <a class='nav-link' id='ip-limit-config-tab' data-toggle='tab' href='#ip-limit-config-content' role='tab'
+                                            aria-controls='ip-limit-config-content' aria-selected='false'><strong>Конфигурация</strong></a>
+                                    </li>
+                                </ul>
+                                <div class='tab-content' id='ip-limit-tabs-content'>
+                                    <br>
+                                    <div class='tab-pane fade show active' id='ip-limit-service' role='tabpanel'
+                                        aria-labelledby='ip-limit-service-tab'>
+                                        <form id="ip_limit_service_form">
+                                            <button id="ip_limit_start" type='button' class='btn btn-success'>
+                                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                                Запустить
+                                            </button>
+                                            <button id="ip_limit_stop" type='button' class='btn btn-danger' style="display: none;">Остановить</button>
+                                            <button id="ip_limit_clean" type='button' class='btn btn-warning' style="display: none; margin-left: 5px;">Очистить базу</button>
+                                        </form>
+                                    </div>
+
+                                    <div class='tab-pane fade' id='ip-limit-config-content' role='tabpanel' aria-labelledby='ip-limit-config-tab'>
+                                        <form id="ip_limit_config_form">
+                                            <div class='form-group'>
+                                                <label for='block_duration'>Длительность блокировки (секунды):</label>
+                                                <input type='text' class='form-control' id='block_duration'
+                                                    placeholder='Введите длительность блокировки' value="">
+                                                <div class="invalid-feedback">
+                                                    Пожалуйста, введите корректное положительное число для длительности.
+                                                </div>
+                                            </div>
+                                            <div class='form-group'>
+                                                <label for='max_ips'>Макс. IP на пользователя:</label>
+                                                <input type='text' class='form-control' id='max_ips'
+                                                    placeholder='Введите макс. кол-во IP' value="">
+                                                <div class="invalid-feedback">
+                                                    Пожалуйста, введите корректное положительное число для макс. IP.
+                                                </div>
+                                            </div>
+                                            <button id="ip_limit_change_config" type='button' class='btn btn-primary'>Сохранить конфигурацию</button>
+                                        </form>
+                                    </div>
+                                </div>
+                            </div>
+                             <div class='tab-pane fade' id='decoy' role='tabpanel' aria-labelledby='decoy-tab'>
+                                <form id="decoy_form">
+                                    <div class='form-group'>
+                                        <label for='decoy_domain'>Домен:</label>
+                                        <input type='text' class='form-control' id='decoy_domain'
+                                            placeholder='Введите домен'>
+                                        <div class="invalid-feedback">
+                                            Пожалуйста, введите корректный домен (без http:// или https://).
+                                        </div>
+                                    </div>
+                                    <div class='form-group'>
+                                        <label for='decoy_path'>Путь к файлам сайта-маскировки:</label>
+                                        <input type='text' class='form-control' id='decoy_path'
+                                            placeholder='Введите путь к файлам сайта'>
+                                        <div class="invalid-feedback">
+                                            Пожалуйста, введите корректный путь к директории.
+                                        </div>
+                                    </div>
+                                    <button id="decoy_setup" type='button' class='btn btn-success'>
+                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                        Настроить маскировку
+                                    </button>
+                                    <button id="decoy_stop" type='button' class='btn btn-danger' style="display: none;">Остановить маскировку</button>
+                                </form>
+
+                                <div class="mt-4">
+                                    <h5>Статус маскировки</h5>
+                                    <div id="decoy_status_container" class="p-3 border rounded">
+                                        <div id="decoy_status_message">Загрузка статуса...</div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class='tab-pane fade' id='warp-content' role='tabpanel' aria-labelledby='warp-tab-link'>
+                                <div id="warp_initial_controls">
+                                    <div class='alert alert-info'>Служба WARP не активна.</div>
+                                    <button id="warp_start_btn" type='button' class='btn btn-success mt-3'>
+                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                        Установить и запустить WARP
+                                    </button>
+                                </div>
+
+                                <div id="warp_active_controls" style="display: none;">
+                                     <div class='alert alert-success mb-3'>Служба WARP активна.</div>
+
+                                    <div class="card card-outline card-secondary">
+                                        <div class="card-header">
+                                            <h3 class="card-title"><i class="fas fa-cogs"></i> Конфигурация маршрутизации WARP</h3>
+                                        </div>
+                                        <div class="card-body">
+                                            <form id="warp_config_form">
+                                                <div class="form-group">
+                                                    <div class="custom-control custom-switch">
+                                                        <input type="checkbox" class="custom-control-input" id="warp_all_traffic">
+                                                        <label class="custom-control-label" for="warp_all_traffic">Маршрутизировать ВЕСЬ трафик через WARP</label>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <div class="custom-control custom-switch">
+                                                        <input type="checkbox" class="custom-control-input" id="warp_popular_sites">
+                                                        <label class="custom-control-label" for="warp_popular_sites">Маршрутизировать популярные сайты через WARP</label>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <div class="custom-control custom-switch">
+                                                        <input type="checkbox" class="custom-control-input" id="warp_domestic_sites">
+                                                        <label class="custom-control-label" for="warp_domestic_sites">Маршрутизировать отечественные сайты через WARP</label>
+                                                    </div>
+                                                </div>
+                                                <div class="form-group">
+                                                    <div class="custom-control custom-switch">
+                                                        <input type="checkbox" class="custom-control-input" id="warp_block_adult_sites">
+                                                        <label class="custom-control-label" for="warp_block_adult_sites">Блокировать сайты для взрослых (WARP Family DNS)</label>
+                                                    </div>
+                                                </div>
+                                                <button id="warp_save_config_btn" type='button' class='btn btn-primary'>
+                                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                                    Сохранить конфигурацию
+                                                </button>
+                                            </form>
+                                        </div>
+                                    </div>
+                                    <button id="warp_stop_btn" type='button' class='btn btn-danger mt-3'>
+                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                        Остановить и удалить WARP
+                                    </button>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block javascripts %}
+<script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+<script src="{{ url_for('assets', path='js/settings.js') }}"></script>
+{% endblock %}
