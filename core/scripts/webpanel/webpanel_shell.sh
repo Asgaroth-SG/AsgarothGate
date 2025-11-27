@@ -4,6 +4,7 @@ define_colors
 
 CADDY_CONFIG_FILE="/etc/hysteria/core/scripts/webpanel/Caddyfile"
 WEBPANEL_ENV_FILE="/etc/hysteria/core/scripts/webpanel/.env"
+NORMALSUB_ENV_FILE="/etc/hysteria/core/scripts/normalsub/.env"
 
 install_dependencies() {
     sudo apt update -y > /dev/null 2>&1
@@ -34,7 +35,7 @@ update_env_file() {
     local port=$2
     local admin_username=$3
     local admin_password=$4
-    local admin_password_hash=$(echo -n "$admin_password" | sha256sum | cut -d' ' -f1) # хешируем пароль
+    local admin_password_hash=$(echo -n "$admin_password" | sha256sum | cut -d' ' -f1)
     local expiration_minutes=$5
     local debug=$6
     local decoy_path=$7
@@ -61,66 +62,129 @@ EOL
 update_caddy_file() {
     source /etc/hysteria/core/scripts/webpanel/.env
     
+    local SUB_PATH=""
+    local SUB_PORT="28261"
+    local SUB_DOMAIN=""
+    local SUB_EXT_PORT=""
+    
+    if [ -f "$NORMALSUB_ENV_FILE" ]; then
+        local sub_path_val=$(grep "^SUBPATH=" "$NORMALSUB_ENV_FILE" | cut -d'=' -f2)
+        local sub_port_val=$(grep "^AIOHTTP_LISTEN_PORT=" "$NORMALSUB_ENV_FILE" | cut -d'=' -f2)
+        local sub_dom_val=$(grep "^HYSTERIA_DOMAIN=" "$NORMALSUB_ENV_FILE" | cut -d'=' -f2)
+        local sub_ext_p_val=$(grep "^HYSTERIA_PORT=" "$NORMALSUB_ENV_FILE" | cut -d'=' -f2)
+        
+        [ -n "$sub_path_val" ] && SUB_PATH="$sub_path_val"
+        [ -n "$sub_port_val" ] && SUB_PORT="$sub_port_val"
+        [ -n "$sub_dom_val" ] && SUB_DOMAIN="$sub_dom_val"
+        [ -n "$sub_ext_p_val" ] && SUB_EXT_PORT="$sub_ext_p_val"
+    fi
+
     if [ -z "$DOMAIN" ] || [ -z "$ROOT_PATH" ] || [ -z "$PORT" ]; then
         echo -e "${red}Ошибка: Отсутствует одна или несколько переменных окружения.${NC}"
         return 1
     fi
 
-    if [ -n "$DECOY_PATH" ] && [ "$DECOY_PATH" != "None" ] && [ "$PORT" -eq 443 ]; then
-        cat <<EOL > "$CADDY_CONFIG_FILE"
+    cat <<EOL > "$CADDY_CONFIG_FILE"
 {
     admin off
     auto_https disable_redirects
+    # Глобально отключаем HTTP/3 (UDP), чтобы не конфликтовать с Hysteria
+    servers {
+        protocols h1 h2
+    }
 }
+EOL
+
+    cat <<EOL >> "$CADDY_CONFIG_FILE"
 
 $DOMAIN:$PORT {
+    # Веб-панель
     route /$ROOT_PATH/* {
-
         reverse_proxy http://127.0.0.1:28260
     }
+EOL
+
+    local MERGE_SUBS=false
+    if [ -n "$SUB_PATH" ] && [ "$SUB_DOMAIN" == "$DOMAIN" ] && [ "$SUB_EXT_PORT" == "$PORT" ]; then
+        MERGE_SUBS=true
+        cat <<EOL >> "$CADDY_CONFIG_FILE"
+    
+    # Подписки
+    route /$SUB_PATH/* {
+        reverse_proxy http://127.0.0.1:$SUB_PORT {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Port {server_port}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+EOL
+    fi
+
+    cat <<EOL >> "$CADDY_CONFIG_FILE"
     
     @otherPaths {
         not path /$ROOT_PATH/*
+EOL
+    
+    if [ "$MERGE_SUBS" = true ]; then
+        echo "        not path /$SUB_PATH/*" >> "$CADDY_CONFIG_FILE"
+    fi
+
+    cat <<EOL >> "$CADDY_CONFIG_FILE"
     }
     
     handle @otherPaths {
-        root * $DECOY_PATH
-        file_server
+EOL
+
+    if [ -n "$DECOY_PATH" ] && [ "$DECOY_PATH" != "None" ]; then
+        echo "        root * $DECOY_PATH" >> "$CADDY_CONFIG_FILE"
+        echo "        file_server" >> "$CADDY_CONFIG_FILE"
+    else
+        echo "        abort" >> "$CADDY_CONFIG_FILE"
+    fi
+
+    cat <<EOL >> "$CADDY_CONFIG_FILE"
     }
 }
 EOL
-    else
-        cat <<EOL > "$CADDY_CONFIG_FILE"
-# Global configuration (Глобальная конфигурация)
-{
-    admin off
-    auto_https disable_redirects
-}
 
-# Listen for incoming requests on the specified domain and port (Прослушивание входящих запросов)
-$DOMAIN:$PORT {
-    route /$ROOT_PATH/* {
-        reverse_proxy http://127.0.0.1:28260
+    if [ -n "$SUB_PATH" ] && ([ "$SUB_DOMAIN" != "$DOMAIN" ] || [ "$SUB_EXT_PORT" != "$PORT" ]); then
+        
+        cat <<EOL >> "$CADDY_CONFIG_FILE"
+
+$SUB_DOMAIN:$SUB_EXT_PORT {
+    route /$SUB_PATH/* {
+        reverse_proxy http://127.0.0.1:$SUB_PORT {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Port {server_port}
+            header_up X-Forwarded-Proto {scheme}
+        }
     }
     
+    # Блокируем всё остальное на домене подписок
     @blocked {
-        not path /$ROOT_PATH/*
+        not path /$SUB_PATH/*
     }
-    
     abort @blocked
 }
 EOL
+    fi
 
-        if [ -n "$DECOY_PATH" ] && [ "$DECOY_PATH" != "None" ] && [ "$PORT" -ne 443 ]; then
-            cat <<EOL >> "$CADDY_CONFIG_FILE"
+    local SUBS_ON_443=false
+    if [ "$SUB_EXT_PORT" == "443" ] && [ -n "$SUB_PATH" ]; then
+        SUBS_ON_443=true
+    fi
 
-# Decoy site on port 443 (Сайт-маскировка на порту 443)
+    if [ -n "$DECOY_PATH" ] && [ "$DECOY_PATH" != "None" ] && [ "$PORT" -ne 443 ] && [ "$SUBS_ON_443" = false ]; then
+        cat <<EOL >> "$CADDY_CONFIG_FILE"
+
 $DOMAIN:443 {
     root * $DECOY_PATH
     file_server
 }
 EOL
-        fi
     fi
 }
 
@@ -291,26 +355,8 @@ stop_decoy_site() {
     
     sed -i "/DECOY_PATH=/d" /etc/hysteria/core/scripts/webpanel/.env
     
-    cat <<EOL > "$CADDY_CONFIG_FILE"
-# Global configuration
-{
-    admin off
-    auto_https disable_redirects
-}
-
-# Listen for incoming requests on the specified domain and port
-$DOMAIN:$PORT {
-    route /$ROOT_PATH/* {
-        reverse_proxy http://127.0.0.1:28260
-    }
-    
-    @blocked {
-        not path /$ROOT_PATH/*
-    }
-    
-    abort @blocked
-}
-EOL
+    DECOY_PATH=""
+    update_caddy_file
     
     systemctl restart hysteria-caddy.service
     
@@ -318,7 +364,7 @@ EOL
     if [ "$was_separate_port" = true ]; then
         echo -e "${green}Порт 443 больше не обслуживается Caddy.${NC}"
     else
-        echo -e "${green}Пути на порту 443, не относящиеся к веб-панели, теперь будут возвращать ошибку соединения вместо показа сайта-маскировки.${NC}"
+        echo -e "${green}Пути на порту 443, не относящиеся к веб-панели, теперь будут возвращать ошибку соединения (или 403 Forbidden).${NC}"
     fi
 }
 
@@ -579,7 +625,10 @@ case "$1" in
     api-token)
         show_webpanel_api_token
         ;;
-    *)
+    genconfig)
+        update_caddy_file
+        ;;	
+	*)
         echo -e "${red}Использование: $0 {start|stop|decoy|stopdecoy|resetcreds|changeexp|changeroot|changedomain|url|api-token} [опции]${NC}"
         echo -e "${yellow}start <DOMAIN> <PORT> [ADMIN_USERNAME] [ADMIN_PASSWORD] [EXPIRATION_MINUTES] [DEBUG] [DECOY_PATH]${NC}"
         echo -e "${yellow}stop${NC}"

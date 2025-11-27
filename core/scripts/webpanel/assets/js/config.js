@@ -19,7 +19,7 @@ document.addEventListener('DOMContentLoaded', function () {
             hideErrorMessage();
         } catch (error) {
             updateSaveButton(false);
-            showErrorMessage("Invalid JSON! Please correct the errors.");
+            showErrorMessage("Некорректный JSON! Пожалуйста, исправьте ошибки.");
         }
     }
 
@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function showErrorMessage(message) {
         Swal.fire({
-            title: "Error",
+            title: "Ошибка",
             text: message,
             icon: "error",
             showConfirmButton: false,
@@ -50,12 +50,12 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function saveJson() {
         Swal.fire({
-            title: 'Are you sure?',
-            text: 'Do you want to save the changes?',
+            title: 'Вы уверены?',
+            text: 'Вы хотите сохранить изменения?',
             icon: 'warning',
             showCancelButton: true,
-            confirmButtonText: 'Yes, save it!',
-            cancelButtonText: 'Cancel',
+            confirmButtonText: 'Да, сохранить!',
+            cancelButtonText: 'Отмена',
             reverseButtons: true
         }).then((result) => {
             if (result.isConfirmed) {
@@ -65,10 +65,10 @@ document.addEventListener('DOMContentLoaded', function () {
                     body: JSON.stringify(editor.get())
                 })
                 .then(() => {
-                    Swal.fire('Saved!', 'Your changes have been saved.', 'success');
+                    Swal.fire('Сохранено!', 'Ваши изменения были сохранены.', 'success');
                 })
                 .catch(error => {
-                    Swal.fire('Error!', 'There was an error saving your data.', 'error');
+                    Swal.fire('Ошибка!', 'Произошла ошибка при сохранении данных.', 'error');
                     console.error("Error saving JSON:", error);
                 });
             }
@@ -80,10 +80,10 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(response => response.json())
             .then(json => {
                 editor.set(json);
-                Swal.fire('Success!', 'Your JSON has been loaded.', 'success');
+                Swal.fire('Успешно!', 'JSON успешно загружен.', 'success');
             })
             .catch(error => {
-                Swal.fire('Error!', 'There was an error loading your JSON.', 'error');
+                Swal.fire('Ошибка!', 'Произошла ошибка при загрузке JSON.', 'error');
                 console.error("Error loading JSON:", error);
             });
     }

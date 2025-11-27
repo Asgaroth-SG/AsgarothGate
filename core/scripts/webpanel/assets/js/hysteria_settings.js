@@ -25,14 +25,14 @@ $(document).ready(function () {
 
     function confirmAction(actionName, callback) {
         Swal.fire({
-            title: `Are you sure?`,
-            text: `Do you really want to ${actionName}?`,
+            title: `Вы уверены?`,
+            text: `Вы действительно хотите ${actionName}?`,
             icon: "warning",
             showCancelButton: true,
             confirmButtonColor: "#3085d6",
             cancelButtonColor: "#d33",
-            confirmButtonText: "Yes, proceed!",
-            cancelButtonText: "Cancel"
+            confirmButtonText: "Да, выполнить!",
+            cancelButtonText: "Отмена"
         }).then((result) => {
             if (result.isConfirmed) {
                 callback();
@@ -53,7 +53,7 @@ $(document).ready(function () {
                 }
             },
             success: function (response) {
-                Swal.fire("Success!", successMessage, "success").then(() => {
+                Swal.fire("Успешно!", successMessage, "success").then(() => {
                     if (showReload) {
                         location.reload();
                     } else {
@@ -64,11 +64,11 @@ $(document).ready(function () {
                 });
             },
             error: function (xhr, status, error) {
-                let errorMessage = "An unexpected error occurred.";
+                let errorMessage = "Произошла непредвиденная ошибка.";
                 if (xhr.responseJSON && xhr.responseJSON.detail) {
                     const detail = xhr.responseJSON.detail;
                     if (Array.isArray(detail)) {
-                        errorMessage = detail.map(err => `Error in '${err.loc[1]}': ${err.msg}`).join('\n');
+                        errorMessage = detail.map(err => `Ошибка в '${err.loc[1]}': ${err.msg}`).join('\n');
                     } else if (typeof detail === 'string') {
                         let userMessage = detail;
                         const failMarker = 'failed with exit code';
@@ -82,7 +82,7 @@ $(document).ready(function () {
                         errorMessage = userMessage;
                     }
                 }
-                Swal.fire("Error!", errorMessage, "error");
+                Swal.fire("Ошибка!", errorMessage, "error");
                 console.error("AJAX Error:", status, error, xhr.responseText);
             },
             complete: function() {
@@ -149,7 +149,7 @@ $(document).ready(function () {
                 updateObfsUI(data.obfs);
             },
             error: function (xhr, status, error) {
-                $("#obfs_status_message").html('<span class="text-danger">Failed to fetch OBFS status.</span>');
+                $("#obfs_status_message").html('<span class="text-danger">Не удалось получить статус OBFS.</span>');
                 console.error("Failed to fetch OBFS status:", error, xhr.responseText);
                  $("#obfs_enable_btn").hide();
                 $("#obfs_disable_btn").hide();
@@ -158,7 +158,13 @@ $(document).ready(function () {
     }
 
     function updateObfsUI(statusMessage) {
-        $("#obfs_status_message").text(statusMessage);
+        // Переводим статусное сообщение от сервера, если оно на английском, или используем как есть
+        let displayMessage = statusMessage;
+        if (statusMessage === "OBFS is active.") displayMessage = "OBFS активен.";
+        if (statusMessage === "OBFS is not active.") displayMessage = "OBFS выключен.";
+
+        $("#obfs_status_message").text(displayMessage);
+        
         if (statusMessage === "OBFS is active.") {
             $("#obfs_enable_btn").hide();
             $("#obfs_disable_btn").show();
@@ -175,12 +181,12 @@ $(document).ready(function () {
     }
 
     function enableObfs() {
-        confirmAction("enable OBFS", function () {
+        confirmAction("включить OBFS", function () {
             sendRequest(
                 API_URLS.enableObfs,
                 "GET",
                 null,
-                "OBFS enabled successfully!",
+                "OBFS успешно включен!",
                 "#obfs_enable_btn",
                 false,
                 fetchObfsStatus
@@ -189,12 +195,12 @@ $(document).ready(function () {
     }
 
     function disableObfs() {
-        confirmAction("disable OBFS", function () {
+        confirmAction("выключить OBFS", function () {
             sendRequest(
                 API_URLS.disableObfs,
                 "GET",
                 null,
-                "OBFS disabled successfully!",
+                "OBFS успешно выключен!",
                 "#obfs_disable_btn",
                 false,
                 fetchObfsStatus
@@ -206,8 +212,8 @@ $(document).ready(function () {
         if (!validateForm('port_form')) return;
         const port = $("#hysteria_port").val();
         const url = API_URLS.setPortTemplate.replace("PORT_PLACEHOLDER", port);
-        confirmAction("change the port", function () {
-            sendRequest(url, "GET", null, "Port changed successfully!", "#port_change");
+        confirmAction("изменить порт", function () {
+            sendRequest(url, "GET", null, "Порт успешно изменен!", "#port_change");
         });
     }
 
@@ -215,22 +221,28 @@ $(document).ready(function () {
         if (!validateForm('sni_form')) return;
         const domain = $("#sni_domain").val();
         const url = API_URLS.setSniTemplate.replace("SNI_PLACEHOLDER", domain);
-        confirmAction("change the SNI", function () {
-            sendRequest(url, "GET", null, "SNI changed successfully!", "#sni_change");
+        confirmAction("изменить SNI", function () {
+            sendRequest(url, "GET", null, "SNI успешно изменен!", "#sni_change");
         });
     }
 
     function updateGeo(country) {
-        const countryName = country.charAt(0).toUpperCase() + country.slice(1);
+        // Локализация названий стран для диалога
+        const countryNames = {
+            'iran': 'Ирана',
+            'china': 'Китая',
+            'russia': 'России'
+        };
+        const countryName = countryNames[country] || country;
         const buttonId = `#geo_update_${country}`;
         const url = API_URLS.updateGeoTemplate.replace('COUNTRY_PLACEHOLDER', country);
 
-        confirmAction(`update the Geo files for ${countryName}`, function () {
+        confirmAction(`обновить Geo-файлы для ${countryName}`, function () {
             sendRequest(
                 url,
                 "GET",
                 null,
-                `Geo files for ${countryName} updated successfully!`,
+                `Geo-файлы для ${countryName} успешно обновлены!`,
                 buttonId,
                 false,
                 null

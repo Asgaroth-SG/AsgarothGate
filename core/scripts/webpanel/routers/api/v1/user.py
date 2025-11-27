@@ -47,7 +47,8 @@ async def add_user_api(body: AddUserInputBody):
                             detail=f"{str(e)}")
 
     try:
-        cli_api.add_user(body.username, body.traffic_limit, body.expiration_days, body.password, body.creation_date, body.unlimited, body.note)
+        # Добавляем поддержку max_ips при создании
+        cli_api.add_user(body.username, body.traffic_limit, body.expiration_days, body.password, body.creation_date, body.unlimited, body.note, max_ips=body.max_ips)
         return DetailResponse(detail=f'User {body.username} has been added.')
     except cli_api.CommandExecutionError as e:
         if "User already exists" in str(e):
@@ -171,8 +172,21 @@ async def edit_user_api(username: str, body: EditUserInputBody):
     try:
         cli_api.kick_users_by_name([username])
         cli_api.traffic_status(display_output=False)
-        cli_api.edit_user(username, body.new_username, body.new_password, body.new_traffic_limit, body.new_expiration_days,
-                          body.renew_password, body.renew_creation_date, body.blocked, body.unlimited_ip, body.note, max_ips=body.max_ips)
+        
+        # Передаем новый параметр max_ips в функцию редактирования
+        cli_api.edit_user(
+            username=username,
+            new_username=body.new_username,
+            new_password=body.new_password,
+            new_traffic_limit=body.new_traffic_limit,
+            new_expiration_days=body.new_expiration_days,
+            renew_password=body.renew_password,
+            renew_creation_date=body.renew_creation_date,
+            blocked=body.blocked,
+            unlimited_ip=body.unlimited_ip,
+            note=body.note,
+            max_ips=body.max_ips  # <--- Добавлено
+        )
         return DetailResponse(detail=f'User {username} has been edited.')
     except Exception as e:
         raise HTTPException(status_code=400, detail=f'Error: {str(e)}')

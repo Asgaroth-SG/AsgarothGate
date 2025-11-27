@@ -12,6 +12,7 @@ class User(BaseModel):
     day_usage: str
     enable: bool
     unlimited_ip: bool
+    max_ips: int = 0
     online_count: int = 0
     note: Optional[str] = None
 

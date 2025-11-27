@@ -1,0 +1,35 @@
+{
+    admin off
+    auto_https disable_redirects
+    # Глобально отключаем HTTP/3 (UDP), чтобы не конфликтовать с Hysteria
+    servers {
+        protocols h1 h2
+    }
+}
+
+cloud.asgaroth.ru:443 {
+    # Веб-панель
+    route /83e79aeebd648b23e07d29db0aff362a/* {
+        reverse_proxy http://127.0.0.1:28260
+    }
+    
+    # Подписки
+    route /i9wbZybYR8G9mMUinAjmpr8gbTioqfyA/* {
+        reverse_proxy http://127.0.0.1:28261 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Port {server_port}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+    
+    @otherPaths {
+        not path /83e79aeebd648b23e07d29db0aff362a/*
+        not path /i9wbZybYR8G9mMUinAjmpr8gbTioqfyA/*
+    }
+    
+    handle @otherPaths {
+        root * /var/www/cloud.asgaroth.ru/
+        file_server
+    }
+}

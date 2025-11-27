@@ -20,6 +20,19 @@
 <body class="hold-transition sidebar-mini sidebar-collapse" 
       data-version-url="{{ url_for('get_version_info') }}" 
       data-check-version-url="{{ url_for('check_version_info') }}">
+
+    <script>
+        (function() {
+            try {
+                // Проверяем настройку в localStorage (ключ совпадает с base.js)
+                var isEnabled = localStorage.getItem('darkMode') === 'enabled';
+                if (isEnabled) {
+                    document.body.classList.add('dark-mode');
+                }
+            } catch (e) {}
+        })();
+    </script>
+
     <div class="wrapper">
         
         <div id="updateBar" class="m-0 rounded-0 border-0" style="display: none; position: relative; z-index: 1100; background: linear-gradient(135deg, #4f46e5 0%, #8b5cf6 100%); box-shadow: 0 4px 12px rgba(0,0,0,0.15); border-bottom: 1px solid rgba(0,0,0,0.1);">

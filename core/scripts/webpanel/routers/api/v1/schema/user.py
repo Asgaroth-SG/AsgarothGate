@@ -22,8 +22,10 @@ class UserInfoResponse(BaseModel):
 class UserListResponse(RootModel):
     root: List[UserInfoResponse]
 
+
 class UsernamesRequest(BaseModel):
     usernames: List[str]
+
 
 class AddUserInputBody(BaseModel):
     username: str
@@ -33,6 +35,7 @@ class AddUserInputBody(BaseModel):
     creation_date: Optional[str] = None
     unlimited: bool = False
     note: Optional[str] = None
+    max_ips: Optional[int] = Field(0, description="Personal IP limit (0 = global default)")
 
     @field_validator('username')
     def validate_username(cls, v):
@@ -58,14 +61,14 @@ class AddBulkUsersInputBody(BaseModel):
 
 class EditUserInputBody(BaseModel):
     new_username: Optional[str] = Field(None, description="The new username for the user.")
-    new_password: Optional[str] = Field(None, description="The new password for the user. Leave empty to keep the current one.")
+    new_password: Optional[str] = Field(None, description="The new password. Leave empty to keep current.")
     new_traffic_limit: Optional[int] = Field(None, description="The new traffic limit in GB.")
     new_expiration_days: Optional[int] = Field(None, description="The new expiration in days.")
-    renew_password: bool = Field(False, description="Whether to renew the user's password. Used by legacy clients like the bot.")
-    renew_creation_date: bool = Field(False, description="Whether to renew the user's account creation date.")
-    blocked: Optional[bool] = Field(None, description="Whether the user is blocked.")
-    unlimited_ip: Optional[bool] = Field(None, description="Whether the user has unlimited IP access.")
-    max_ips: Optional[int] = Field(None, description="Whether the user has limit IP access.")
+    renew_password: bool = Field(False, description="Whether to renew the user's password.")
+    renew_creation_date: bool = Field(False, description="Whether to renew the user's creation date.")
+    blocked: Optional[bool] = Field(None, description="Block status.")
+    unlimited_ip: Optional[bool] = Field(None, description="Unlimited IP status.")
+    max_ips: Optional[int] = Field(None, description="Personal IP limit.")
     note: Optional[str] = Field(None, description="A note for the user.")
 
     @field_validator('new_username')
@@ -74,9 +77,11 @@ class EditUserInputBody(BaseModel):
             raise ValueError('Username can only contain letters, numbers, and underscores.')
         return v
 
+
 class NodeUri(BaseModel):
     name: str
     uri: str
+
 
 class UserUriResponse(BaseModel):
     username: str

@@ -111,14 +111,14 @@ $(document).ready(function () {
 
     function confirmAction(actionName, callback) {
         Swal.fire({
-            title: `Are you sure?`,
-            text: `Do you really want to ${actionName}?`,
+            title: `Вы уверены?`,
+            text: `Вы действительно хотите ${actionName}?`,
             icon: "warning",
             showCancelButton: true,
             confirmButtonColor: "#3085d6",
             cancelButtonColor: "#d33",
-            confirmButtonText: "Yes, proceed!",
-            cancelButtonText: "Cancel"
+            confirmButtonText: "Да, выполнить!",
+            cancelButtonText: "Отмена"
         }).then((result) => {
             if (result.isConfirmed) {
                 callback();
@@ -139,7 +139,7 @@ $(document).ready(function () {
                 }
             },
             success: function (response) {
-                Swal.fire("Success!", successMessage, "success").then(() => {
+                Swal.fire("Успешно!", successMessage, "success").then(() => {
                     if (showReload) {
                         location.reload();
                     } else {
@@ -150,11 +150,11 @@ $(document).ready(function () {
                 });
             },
             error: function (xhr, status, error) {
-                let errorMessage = "An unexpected error occurred.";
+                let errorMessage = "Произошла непредвиденная ошибка.";
                 if (xhr.responseJSON && xhr.responseJSON.detail) {
                     const detail = xhr.responseJSON.detail;
                     if (Array.isArray(detail)) {
-                        errorMessage = detail.map(err => `Error in '${err.loc[1]}': ${err.msg}`).join('\n');
+                        errorMessage = detail.map(err => `Ошибка в '${err.loc[1]}': ${err.msg}`).join('\n');
                     } else if (typeof detail === 'string') {
                         let userMessage = detail;
                         const failMarker = 'failed with exit code';
@@ -168,7 +168,7 @@ $(document).ready(function () {
                         errorMessage = userMessage;
                     }
                 }
-                Swal.fire("Error!", errorMessage, "error");
+                Swal.fire("Ошибка!", errorMessage, "error");
                 console.error("AJAX Error:", status, error, xhr.responseText);
             },
             complete: function() {
@@ -218,7 +218,7 @@ $(document).ready(function () {
             } else if (id === 'node_obfs') {
                 fieldValid = true;
             } else {
-                if (input.attr('placeholder') && input.attr('placeholder').includes('Enter') && !input.attr('id').startsWith('ipv')) {
+                if (input.attr('placeholder') && (input.attr('placeholder').includes('Enter') || input.attr('placeholder').includes('Введите')) && !input.attr('id').startsWith('ipv')) {
                      fieldValid = input.val().trim() !== "";
                 }
             }
@@ -242,7 +242,7 @@ $(document).ready(function () {
             },
             error: function (xhr, status, error) {
                 console.error("Failed to fetch service status:", error, xhr.responseText);
-                 Swal.fire("Error!", "Could not fetch service statuses.", "error");
+                 Swal.fire("Ошибка!", "Не удалось получить статусы служб.", "error");
             }
         });
 
@@ -267,7 +267,7 @@ $(document).ready(function () {
                 renderNodes(nodes);
             },
             error: function(xhr) {
-                Swal.fire("Error!", "Failed to fetch external nodes list.", "error");
+                Swal.fire("Ошибка!", "Не удалось получить список внешних узлов.", "error");
                 console.error("Error fetching nodes:", xhr.responseText);
             }
         });
@@ -284,14 +284,14 @@ $(document).ready(function () {
                 const row = `<tr>
                                 <td>${escapeHtml(node.name)}</td>
                                 <td>${escapeHtml(node.ip)}</td>
-                                <td>${escapeHtml(node.port || 'N/A')}</td>
-                                <td>${escapeHtml(node.sni || 'N/A')}</td>
-                                <td>${escapeHtml(node.obfs || 'N/A')}</td>
-                                <td>${escapeHtml(node.insecure ? 'True' : 'False')}</td>
-                                <td>${escapeHtml(node.pinSHA256 || 'N/A')}</td>
+                                <td>${escapeHtml(node.port || 'Н/Д')}</td>
+                                <td>${escapeHtml(node.sni || 'Н/Д')}</td>
+                                <td>${escapeHtml(node.obfs || 'Н/Д')}</td>
+                                <td>${escapeHtml(node.insecure ? 'Да' : 'Нет')}</td>
+                                <td>${escapeHtml(node.pinSHA256 || 'Н/Д')}</td>
                                 <td>
                                     <button class="btn btn-xs btn-danger delete-node-btn" data-name="${escapeHtml(node.name)}">
-                                        <i class="fas fa-trash"></i> Delete
+                                        <i class="fas fa-trash"></i> Удалить
                                     </button>
                                 </td>
                             </tr>`;
@@ -320,12 +320,12 @@ $(document).ready(function () {
         if (obfs) data.obfs = obfs;
         if (pinSHA256) data.pinSHA256 = pinSHA256;
 
-        confirmAction(`add the node '${name}'`, function () {
+        confirmAction(`добавить узел '${name}'`, function () {
             sendRequest(
                 API_URLS.addNode,
                 "POST",
                 data,
-                `Node '${name}' added successfully!`,
+                `Узел '${name}' успешно добавлен!`,
                 "#add_node_btn",
                 false,
                 function() {
@@ -338,12 +338,12 @@ $(document).ready(function () {
     }
 
     function deleteNode(nodeName) {
-         confirmAction(`delete the node '${nodeName}'`, function () {
+         confirmAction(`удалить узел '${nodeName}'`, function () {
             sendRequest(
                 API_URLS.deleteNode,
                 "POST",
                 { name: nodeName },
-                `Node '${nodeName}' deleted successfully!`,
+                `Узел '${nodeName}' успешно удален!`,
                 null,
                 false,
                 fetchNodes
@@ -359,7 +359,7 @@ $(document).ready(function () {
                 renderExtraConfigs(configs);
             },
             error: function(xhr) {
-                Swal.fire("Error!", "Failed to fetch extra configurations.", "error");
+                Swal.fire("Ошибка!", "Не удалось получить дополнительные конфигурации.", "error");
                 console.error("Error fetching extra configs:", xhr.responseText);
             }
         });
@@ -379,7 +379,7 @@ $(document).ready(function () {
                                 <td title="${escapeHtml(config.uri)}">${escapeHtml(shortUri)}</td>
                                 <td>
                                     <button class="btn btn-xs btn-danger delete-extra-config-btn" data-name="${escapeHtml(config.name)}">
-                                        <i class="fas fa-trash"></i> Delete
+                                        <i class="fas fa-trash"></i> Удалить
                                     </button>
                                 </td>
                             </tr>`;
@@ -397,12 +397,12 @@ $(document).ready(function () {
         const name = $("#extra_config_name").val().trim();
         const uri = $("#extra_config_uri").val().trim();
 
-        confirmAction(`add the configuration '${name}'`, function () {
+        confirmAction(`добавить конфигурацию '${name}'`, function () {
             sendRequest(
                 API_URLS.addExtraConfig,
                 "POST",
                 { name: name, uri: uri },
-                `Configuration '${name}' added successfully!`,
+                `Конфигурация '${name}' успешно добавлена!`,
                 "#add_extra_config_btn",
                 false,
                 function() {
@@ -416,12 +416,12 @@ $(document).ready(function () {
     }
 
     function deleteExtraConfig(configName) {
-         confirmAction(`delete the configuration '${configName}'`, function () {
+         confirmAction(`удалить конфигурацию '${configName}'`, function () {
             sendRequest(
                 API_URLS.deleteExtraConfig,
                 "POST",
                 { name: configName },
-                `Configuration '${configName}' deleted successfully!`,
+                `Конфигурация '${configName}' успешно удалена!`,
                 null,
                 false,
                 fetchExtraConfigs
@@ -448,7 +448,7 @@ $(document).ready(function () {
                     $("#telegram_stop").show();
                     $("#telegram_save_interval").show();
                     if ($form.find(".alert-info").length === 0) {
-                       $form.prepend(`<div class='alert alert-info'>Service is running. You can stop it or change the backup interval.</div>`);
+                       $form.prepend(`<div class='alert alert-info'>Служба работает. Вы можете остановить её или изменить интервал бэкапа.</div>`);
                     }
                     fetchTelegramBackupInterval();
                 } else {
@@ -472,7 +472,7 @@ $(document).ready(function () {
                     $normalStartBtn.hide();
                     $normalStopBtn.show();
                     if ($normalForm.find(".alert-info").length === 0) {
-                        $normalForm.prepend(`<div class='alert alert-info'>NormalSub service is running. You can stop it or configure its subpath.</div>`);
+                        $normalForm.prepend(`<div class='alert alert-info'>Служба подписки работает. Вы можете остановить её или настроить путь.</div>`);
                     }
                     $normalSubConfigTabLi.show();
                     fetchNormalSubPath();
@@ -498,7 +498,7 @@ $(document).ready(function () {
                    $configTabLi.show();
                    fetchIpLimitConfig();
                    if ($ipLimitServiceForm.find(".alert-info").length === 0) {
-                       $ipLimitServiceForm.prepend(`<div class='alert alert-info'>IP-Limit service is running. You can stop it if needed.</div>`);
+                       $ipLimitServiceForm.prepend(`<div class='alert alert-info'>Служба IP-Limit работает. Вы можете остановить её при необходимости.</div>`);
                    }
                 } else {
                    $("#ip_limit_start").show();
@@ -587,12 +587,12 @@ $(document).ready(function () {
         if (!validateForm('normal_sub_config_form')) return;
         const subpath = $("#normal_subpath_input").val();
 
-        confirmAction("change the NormalSub subpath to '" + subpath + "'", function () {
+        confirmAction("изменить путь подписки на '" + subpath + "'", function () {
             sendRequest(
                 API_URLS.normalSubEditSubpath,
                 "PUT",
                 { subpath: subpath },
-                "NormalSub subpath updated successfully!",
+                "Путь подписки успешно обновлен!",
                 "#normal_subpath_save_btn",
                 false,
                 fetchNormalSubPath
@@ -604,12 +604,12 @@ $(document).ready(function () {
         if (!validateForm('decoy_form')) return;
         const domain = $("#decoy_domain").val();
         const path = $("#decoy_path").val();
-        confirmAction("set up the decoy site", function () {
+        confirmAction("установить сайт-маскировку", function () {
             sendRequest(
                 API_URLS.setupDecoy,
                 "POST",
                 { domain: domain, decoy_path: path },
-                "Decoy site setup initiated successfully!",
+                "Запрос на установку маскировки отправлен!",
                 "#decoy_setup",
                 false,
                 function() { setTimeout(fetchDecoyStatus, 1000); }
@@ -618,12 +618,12 @@ $(document).ready(function () {
     }
 
     function stopDecoy() {
-        confirmAction("stop the decoy site", function () {
+        confirmAction("остановить сайт-маскировку", function () {
             sendRequest(
                 API_URLS.stopDecoy,
                 "POST",
                 null,
-                "Decoy site stop initiated successfully!",
+                "Запрос на остановку маскировки отправлен!",
                 "#decoy_stop",
                 false,
                 function() { setTimeout(fetchDecoyStatus, 1000); }
@@ -639,7 +639,7 @@ $(document).ready(function () {
                 updateDecoyStatusUI(data);
             },
             error: function (xhr, status, error) {
-                $("#decoy_status_message").html('<div class="alert alert-danger">Failed to fetch decoy status.</div>');
+                $("#decoy_status_message").html('<div class="alert alert-danger">Не удалось получить статус маскировки.</div>');
                 console.error("Failed to fetch decoy status:", error, xhr.responseText);
             }
         });
@@ -657,20 +657,20 @@ $(document).ready(function () {
             $setupBtn.hide();
             $stopBtn.show();
             if ($alertInfo.length === 0) {
-                $form.prepend(`<div class='alert alert-info'>Decoy site is running. You can stop it if needed.</div>`);
+                $form.prepend(`<div class='alert alert-info'>Маскировка работает. Вы можете остановить её при необходимости.</div>`);
             } else {
-                $alertInfo.text('Decoy site is running. You can stop it if needed.');
+                $alertInfo.text('Маскировка работает. Вы можете остановить её при необходимости.');
             }
             $("#decoy_status_message").html(`
-                <strong>Status:</strong> <span class="text-success">Active</span><br>
-                <strong>Path:</strong> ${data.path || 'N/A'}
+                <strong>Статус:</strong> <span class="text-success">Активен</span><br>
+                <strong>Путь:</strong> ${data.path || 'Н/Д'}
             `);
         } else {
             $formGroups.show();
             $setupBtn.show();
             $stopBtn.hide();
             $alertInfo.remove();
-            $("#decoy_status_message").html('<strong>Status:</strong> <span class="text-danger">Not Active</span>');
+            $("#decoy_status_message").html('<strong>Статус:</strong> <span class="text-danger">Не активен</span>');
         }
     }
 
@@ -688,24 +688,24 @@ $(document).ready(function () {
             data.backup_interval = parseInt(backupInterval);
         }
 
-        confirmAction("start the Telegram bot", function () {
+        confirmAction("запустить Telegram бота", function () {
             sendRequest(
                 API_URLS.telegramStart,
                 "POST",
                 data,
-                "Telegram bot started successfully!",
+                "Telegram бот успешно запущен!",
                 "#telegram_start"
             );
         });
     }
 
     function stopTelegram() {
-        confirmAction("stop the Telegram bot", function () {
+        confirmAction("остановить Telegram бота", function () {
             sendRequest(
                 API_URLS.telegramStop,
                 "DELETE",
                 null,
-                "Telegram bot stopped successfully!",
+                "Telegram бот успешно остановлен!",
                 "#telegram_stop"
             );
         });
@@ -716,7 +716,7 @@ $(document).ready(function () {
         let backupInterval = $("#telegram_backup_interval").val();
 
         if (!backupInterval) {
-             Swal.fire("Error!", "Backup interval cannot be empty.", "error");
+             Swal.fire("Ошибка!", "Интервал бэкапа не может быть пустым.", "error");
             return;
         }
 
@@ -724,12 +724,12 @@ $(document).ready(function () {
             backup_interval: parseInt(backupInterval)
         };
 
-        confirmAction(`change the backup interval to ${backupInterval} hours`, function () {
+        confirmAction(`изменить интервал бэкапа на ${backupInterval} ч.`, function () {
             sendRequest(
                 API_URLS.telegramSetInterval,
                 "POST",
                 data,
-                "Backup interval updated successfully!",
+                "Интервал бэкапа успешно обновлен!",
                 "#telegram_save_interval",
                 false,
                 fetchTelegramBackupInterval
@@ -742,24 +742,24 @@ $(document).ready(function () {
         if (!validateForm('normal_sub_service_form')) return;
         const domain = $("#normal_domain").val();
         const port = $("#normal_port").val();
-        confirmAction("start the normal subscription", function () {
+        confirmAction("запустить службу подписки", function () {
             sendRequest(
                 API_URLS.normalSubStart,
                 "POST",
                 { domain: domain, port: port },
-                "Normal subscription started successfully!",
+                "Служба подписки успешно запущена!",
                 "#normal_start"
             );
         });
     }
 
     function stopNormal() {
-        confirmAction("stop the normal subscription", function () {
+        confirmAction("остановить службу подписки", function () {
             sendRequest(
                 API_URLS.normalSubStop,
                 "DELETE",
                 null,
-                "Normal subscription stopped successfully!",
+                "Служба подписки успешно остановлена!",
                 "#normal_stop"
             );
         });
@@ -769,12 +769,12 @@ $(document).ready(function () {
         if (!validateForm('change_ip_form')) return;
         const ipv4 = $("#ipv4").val().trim() || null;
         const ipv6 = $("#ipv6").val().trim() || null;
-        confirmAction("save the new IP settings", function () {
+        confirmAction("сохранить настройки IP", function () {
             sendRequest(
                 API_URLS.editIp,
                 "POST",
                 { ipv4: ipv4, ipv6: ipv6 },
-                "IP settings saved successfully!",
+                "Настройки IP успешно сохранены!",
                 "#ip_change"
             );
         });
@@ -782,7 +782,7 @@ $(document).ready(function () {
 
     function downloadBackup() {
         window.location.href = API_URLS.backup;
-         Swal.fire("Starting Download", "Your backup download should start shortly.", "info");
+         Swal.fire("Начало загрузки", "Загрузка бэкапа начнется автоматически.", "info");
     }
 
     function uploadBackup() {
@@ -790,15 +790,15 @@ $(document).ready(function () {
         var file = fileInput.files[0];
 
         if (!file) {
-            Swal.fire("Error!", "Please select a file to upload.", "error");
+            Swal.fire("Ошибка!", "Пожалуйста, выберите файл для загрузки.", "error");
             return;
         }
         if (!file.name.toLowerCase().endsWith('.zip')) {
-           Swal.fire("Error!", "Only .zip files are allowed for restore.", "error");
+           Swal.fire("Ошибка!", "Разрешены только файлы .zip для восстановления.", "error");
            return;
         }
 
-        confirmAction(`restore the system from the selected backup file (${file.name})`, function() {
+        confirmAction(`восстановить систему из файла (${file.name})`, function() {
             var formData = new FormData();
             formData.append('file', file);
 
@@ -809,7 +809,7 @@ $(document).ready(function () {
             progressContainer.style.display = 'block';
             progressBar.style.width = '0%';
             progressBar.setAttribute('aria-valuenow', 0);
-            statusDiv.innerText = 'Uploading...';
+            statusDiv.innerText = 'Загрузка...';
             statusDiv.className = 'mt-2';
 
             $.ajax({
@@ -825,7 +825,7 @@ $(document).ready(function () {
                             var percentComplete = Math.round((evt.loaded / evt.total) * 100);
                             progressBar.style.width = percentComplete + '%';
                             progressBar.setAttribute('aria-valuenow', percentComplete);
-                            statusDiv.innerText = `Uploading... ${percentComplete}%`;
+                            statusDiv.innerText = `Загрузка... ${percentComplete}%`;
                         }
                     }, false);
                     return xhr;
@@ -833,19 +833,19 @@ $(document).ready(function () {
                 success: function(response) {
                     progressBar.style.width = '100%';
                     progressBar.classList.add('bg-success');
-                    statusDiv.innerText = 'Backup restored successfully! Reloading page...';
+                    statusDiv.innerText = 'Бэкап успешно восстановлен! Перезагрузка страницы...';
                     statusDiv.className = 'mt-2 text-success';
-                    Swal.fire("Success!", "Backup restored successfully!", "success").then(() => {
+                    Swal.fire("Успешно!", "Бэкап успешно восстановлен!", "success").then(() => {
                             location.reload();
                     });
                     console.log("Restore Success:", response);
                 },
                 error: function(xhr, status, error) {
                     progressBar.classList.add('bg-danger');
-                    let detail = (xhr.responseJSON && xhr.responseJSON.detail) ? xhr.responseJSON.detail : 'Check console for details.';
-                    statusDiv.innerText = `Error restoring backup: ${detail}`;
+                    let detail = (xhr.responseJSON && xhr.responseJSON.detail) ? xhr.responseJSON.detail : 'Проверьте консоль для деталей.';
+                    statusDiv.innerText = `Ошибка восстановления: ${detail}`;
                     statusDiv.className = 'mt-2 text-danger';
-                    Swal.fire("Error!", `Failed to restore backup. ${detail}`, "error");
+                    Swal.fire("Ошибка!", `Не удалось восстановить бэкап. ${detail}`, "error");
                     console.error("Restore Error:", status, error, xhr.responseText);
                 },
                 complete: function() {
@@ -856,36 +856,36 @@ $(document).ready(function () {
     }
 
     function startIPLimit() {
-         confirmAction("start the IP Limit service", function () {
+         confirmAction("запустить службу IP Limit", function () {
             sendRequest(
                 API_URLS.startIpLimit,
                 "POST",
                 null,
-                "IP Limit service started successfully!",
+                "Служба IP Limit успешно запущена!",
                 "#ip_limit_start"
             );
         });
     }
 
     function stopIPLimit() {
-         confirmAction("stop the IP Limit service", function () {
+         confirmAction("остановить службу IP Limit", function () {
             sendRequest(
                 API_URLS.stopIpLimit,
                 "POST",
                 null,
-                "IP Limit service stopped successfully!",
+                "Служба IP Limit успешно остановлена!",
                 "#ip_limit_stop"
             );
         });
     }
 
     function cleanIPLimit() {
-        confirmAction("clean the IP Limit database and unblock all IPs", function () {
+        confirmAction("очистить базу IP Limit и разблокировать все IP", function () {
            sendRequest(
                API_URLS.cleanIpLimit,
                "POST",
                null,
-               "IP Limit database cleaned successfully!",
+               "База IP Limit успешно очищена!",
                "#ip_limit_clean",
                true
            );
@@ -896,12 +896,12 @@ $(document).ready(function () {
         if (!validateForm('ip_limit_config_form')) return;
         const blockDuration = $("#block_duration").val();
         const maxIps = $("#max_ips").val();
-         confirmAction("save the IP Limit configuration", function () {
+         confirmAction("сохранить конфигурацию IP Limit", function () {
             sendRequest(
                 API_URLS.configIpLimit,
                 "POST",
                 { block_duration: parseInt(blockDuration), max_ips: parseInt(maxIps) },
-                "IP Limit configuration saved successfully!",
+                "Конфигурация IP Limit успешно сохранена!",
                 "#ip_limit_change_config",
                 false,
                 fetchIpLimitConfig
@@ -923,7 +923,7 @@ $(document).ready(function () {
                 $("#warp_active_controls").show();
             },
             error: function (xhr, status, error) {
-                let errorMsg = "Failed to fetch WARP configuration.";
+                let errorMsg = "Не удалось получить конфигурацию WARP.";
                  if (xhr.responseJSON && xhr.responseJSON.detail) {
                     errorMsg = xhr.responseJSON.detail;
                 }
@@ -935,24 +935,24 @@ $(document).ready(function () {
                     if ($("#warp_config_form").length > 0) {
                        $("#warp_config_form")[0].reset();
                     }
-                    Swal.fire("Info", "WARP service might not be fully configured. Please try reinstalling if issues persist.", "info");
+                    Swal.fire("Инфо", "Служба WARP возможно не полностью настроена. Попробуйте переустановить, если проблема сохранится.", "info");
                 } else {
                      if ($("#warp_config_form").length > 0) {
                        $("#warp_config_form")[0].reset();
                     }
-                     Swal.fire("Warning", "Could not load current WARP configuration values. Please check manually or re-save.", "warning");
+                     Swal.fire("Внимание", "Не удалось загрузить текущие настройки WARP. Пожалуйста, проверьте вручную или пересохраните.", "warning");
                 }
             }
         });
     }
 
     $("#warp_start_btn").on("click", function() {
-        confirmAction("install and start WARP", function () {
+        confirmAction("установить и запустить WARP", function () {
             sendRequest(
                 API_URLS.installWarp,
                 "POST",
                 null,
-                "WARP installation request sent. The page will reload.",
+                "Запрос на установку WARP отправлен. Страница будет перезагружена.",
                 "#warp_start_btn",
                 true
             );
@@ -960,12 +960,12 @@ $(document).ready(function () {
     });
 
     $("#warp_stop_btn").on("click", function() {
-        confirmAction("stop and uninstall WARP", function () {
+        confirmAction("остановить и удалить WARP", function () {
             sendRequest(
                 API_URLS.uninstallWarp,
                 "DELETE",
                 null,
-                "WARP uninstallation request sent. The page will reload.",
+                "Запрос на удаление WARP отправлен. Страница будет перезагружена.",
                 "#warp_stop_btn",
                 true
             );
@@ -979,12 +979,12 @@ $(document).ready(function () {
             domestic_sites: $("#warp_domestic_sites").is(":checked"),
             block_adult_sites: $("#warp_block_adult_sites").is(":checked")
         };
-        confirmAction("save WARP configuration", function () {
+        confirmAction("сохранить конфигурацию WARP", function () {
             sendRequest(
                 API_URLS.configureWarp,
                 "POST",
                 configData,
-                "WARP configuration saved successfully!",
+                "Конфигурация WARP успешно сохранена!",
                 "#warp_save_config_btn",
                 false,
                 fetchWarpFullStatusAndConfig

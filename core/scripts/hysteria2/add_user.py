@@ -5,23 +5,13 @@ import sys
 import os
 import subprocess
 import re
+import argparse
 from datetime import datetime
 from db.database import db
 
-def add_user(username, traffic_gb, expiration_days, password=None, unlimited_user=False, note=None, creation_date=None):
-    if not username or not traffic_gb or not expiration_days:
-        print(f"Usage: {sys.argv[0]} <username> <traffic_limit_GB> <expiration_days> [password] [unlimited_user (true/false)] [note] [creation_date]")
-        return 1
-
+def add_user(username, traffic_gb, expiration_days, password=None, unlimited_user=False, note=None, creation_date=None, max_ips=0):
     if db is None:
         print("Error: Database connection failed. Please ensure MongoDB is running and configured.")
-        return 1
-
-    try:
-        traffic_bytes = int(float(traffic_gb) * 1073741824)
-        expiration_days = int(expiration_days)
-    except ValueError:
-        print("Error: Traffic limit and expiration days must be numeric.")
         return 1
 
     username_lower = username.lower()
@@ -42,6 +32,14 @@ def add_user(username, traffic_gb, expiration_days, password=None, unlimited_use
         return 1
 
     try:
+        traffic_bytes = int(float(traffic_gb) * 1073741824)
+        expiration_days = int(expiration_days)
+        max_ips = int(max_ips)
+    except ValueError:
+        print("Error: Numeric fields must be valid numbers.")
+        return 1
+
+    try:
         if db.get_user(username_lower):
             print("User already exists.")
             return 1
@@ -53,7 +51,8 @@ def add_user(username, traffic_gb, expiration_days, password=None, unlimited_use
             "expiration_days": expiration_days,
             "blocked": False,
             "unlimited_user": unlimited_user,
-            "status": "On-hold"
+            "status": "On-hold",
+            "max_ips": max_ips 
         }
         
         if note:
@@ -83,18 +82,26 @@ def add_user(username, traffic_gb, expiration_days, password=None, unlimited_use
         return 1
 
 if __name__ == "__main__":
-    if len(sys.argv) < 4 or len(sys.argv) > 8:
-        print(f"Usage: {sys.argv[0]} <username> <traffic_limit_GB> <expiration_days> [password] [unlimited_user (true/false)] [note] [creation_date]")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(description="Add a new user.")
+    parser.add_argument("-u", "--username", required=True)
+    parser.add_argument("-t", "--traffic-limit", required=True)
+    parser.add_argument("-e", "--expiration-days", required=True)
+    parser.add_argument("-p", "--password", default=None)
+    parser.add_argument("--unlimited", action='store_true')
+    parser.add_argument("-n", "--note", default=None)
+    parser.add_argument("-c", "--creation-date", default=None)
+    parser.add_argument("--max-ips", default=0, type=int) # Новый аргумент
 
-    username = sys.argv[1]
-    traffic_gb = sys.argv[2]
-    expiration_days = sys.argv[3]
-    password = sys.argv[4] if len(sys.argv) > 4 and sys.argv[4] else None
-    unlimited_user_str = sys.argv[5] if len(sys.argv) > 5 else "false"
-    unlimited_user = unlimited_user_str.lower() == 'true'
-    note = sys.argv[6] if len(sys.argv) > 6 and sys.argv[6] else None
-    creation_date = sys.argv[7] if len(sys.argv) > 7 and sys.argv[7] else None
+    args = parser.parse_args()
 
-    exit_code = add_user(username, traffic_gb, expiration_days, password, unlimited_user, note, creation_date)
+    exit_code = add_user(
+        args.username, 
+        args.traffic_limit, 
+        args.expiration_days, 
+        args.password, 
+        args.unlimited, 
+        args.note, 
+        args.creation_date,
+        args.max_ips
+    )
     sys.exit(exit_code)

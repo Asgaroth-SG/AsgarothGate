@@ -36,11 +36,11 @@ $(function () {
         url: versionUrl,
         type: 'GET',
         success: function (response) {
-             $('#panel-version').text(`Version: ${response.current_version || 'N/A'}`);
+             $('#panel-version').text(`Версия: ${response.current_version || 'Н/Д'}`);
         },
         error: function (error) {
             console.error("Error fetching version:", error);
-            $('#panel-version').text('Version: Error');
+            $('#panel-version').text('Версия: Ошибка');
         }
     });
 
@@ -57,10 +57,10 @@ $(function () {
     }
 
     function showUpdateBar(version, changelog) {
-        $('#updateMessage').text(`Version ${version} is now available`);
+        $('#updateMessage').text(`Доступна версия ${version}`);
         
         const converter = new showdown.Converter();
-        const htmlChangelog = changelog ? converter.makeHtml(changelog) : '<p>No changelog available.</p>';
+        const htmlChangelog = changelog ? converter.makeHtml(changelog) : '<p>Список изменений недоступен.</p>';
         $('#changelogText').html(htmlChangelog);
 
         $('#updateBar').slideDown(300);

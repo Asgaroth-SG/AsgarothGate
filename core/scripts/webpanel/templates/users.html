@@ -131,7 +131,7 @@
                             <th class="d-none d-md-table-cell text-nowrap">За день</th>
                             <th class="d-none d-md-table-cell">Активен</th>
                             <th class="d-none d-md-table-cell">Примечание</th>
-                            <th class="d-none d-md-table-cell text-nowrap requires-iplimit-service" style="display: none;">Безлим. IP</th>
+                            <th class="d-none d-md-table-cell text-nowrap requires-iplimit-service" style="display: none;">Unlimited IP</th>
                             <th class="d-none d-md-table-cell text-nowrap">Конфиги</th>
                             <th class="d-none d-md-table-cell text-nowrap">Действия</th>
                             <th class="d-md-none text-center">Детали</th>
@@ -270,6 +270,20 @@
                                     <input type="text" class="form-control" id="addNote" name="note">
                                 </div>
                             </div>
+							<div class="form-group requires-iplimit-service" style="display: none;">
+									<label for="addMaxIps">Limit IP
+										<i class="fas fa-info-circle text-muted ml-1" 
+											data-toggle="tooltip" 
+											title="0 = использовать глобальный лимит.">
+										</i>
+									</label>
+							<div class="input-group">
+								<div class="input-group-prepend">
+									<span class="input-group-text"><i class="fas fa-network-wired"></i></span>
+								</div>
+							<input type="number" class="form-control" id="addMaxIps" name="max_ips" placeholder="0" value="0">
+							</div>
+							</div>
                             <div class="form-check mb-3 requires-iplimit-service" style="display: none;">
                                 <input type="checkbox" class="form-check-input" id="addUnlimited" name="unlimited">
                                 <label class="form-check-label" for="addUnlimited">
@@ -395,7 +409,7 @@
                         </div>
                     </div>
 					<div class="form-group requires-iplimit-service" style="display: none;">
-					     <label for="editMaxIps">Персональный лимит IP
+					     <label for="editMaxIps">Limit IP
 							<i class="fas fa-info-circle text-muted ml-1" 
 								data-toggle="tooltip" 
 								title="Укажите 0, чтобы использовать глобальный лимит из настроек.">

@@ -228,6 +228,11 @@ $(function () {
 
         jsonData.unlimited = jsonData.unlimited === 'on';
 
+        // --- НОВОЕ: Обработка max_ips при создании ---
+        const maxIpsVal = $("#addMaxIps").val();
+        jsonData.max_ips = maxIpsVal ? parseInt(maxIpsVal) : 0;
+        // ---------------------------------------------
+
         Swal.fire({
             title: 'Adding...',
             text: 'Please wait',
@@ -283,9 +288,7 @@ $(function () {
             .done(userData => {
                 passwordInput.val(userData.password || '');
                 
-                // --- НОВОЕ: Загружаем max_ips ---
                 $("#editMaxIps").val(userData.max_ips || 0);
-                // ------------------------------
                 
                 validatePassword('#editPassword', '#editPasswordError');
             })
@@ -311,11 +314,9 @@ $(function () {
         const jsonData = Object.fromEntries(formData.entries());
         jsonData.blocked = jsonData.blocked === 'on';
         jsonData.unlimited_ip = jsonData.unlimited_ip === 'on';
-        
-        // --- НОВОЕ: Обрабатываем max_ips ---
+
         const maxIpsVal = $("#editMaxIps").val();
         jsonData.max_ips = maxIpsVal ? parseInt(maxIpsVal) : 0;
-        // -----------------------------------
 
         Swal.fire({
             title: 'Updating...',
@@ -378,7 +379,7 @@ $(function () {
         $.getJSON(url, response => {
             [
                // { type: "IPv4", link: response.ipv4 },
-               // { type: "IPv6", link: response.ipv6 },
+               // { type: "IPv6", link: response.ipv6 }, 
                 { type: "Подписка", link: response.normal_sub }
             ].forEach(config => {
                 if (!config.link) return;
@@ -491,6 +492,9 @@ $(function () {
     $('#addUserModal').on('show.bs.modal', function () {
         $('#addUserForm, #addBulkUsersForm').trigger('reset');
         $('#addUsernameError, #addBulkPrefixError').text('');
+        
+        Object.assign(document.getElementById('addMaxIps'), {value: 0});
+        
         Object.assign(document.getElementById('addTrafficLimit'), {value: 30});
         Object.assign(document.getElementById('addExpirationDays'), {value: 30});
         Object.assign(document.getElementById('addBulkTrafficLimit'), {value: 30});
