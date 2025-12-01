@@ -295,7 +295,7 @@ def add_user(username: str, traffic_limit: int, expiration_days: int, password: 
         
     run_cmd(command)
 
-def bulk_user_add(traffic_gb: float, expiration_days: int, count: int, prefix: str, start_number: int, unlimited: bool):
+def bulk_user_add(traffic_gb: float, expiration_days: int, count: int, prefix: str, start_number: int, unlimited: bool, max_ips: int = 0):
     """
     Executes the bulk user creation script with specified parameters.
     """
@@ -306,7 +306,8 @@ def bulk_user_add(traffic_gb: float, expiration_days: int, count: int, prefix: s
         '--expiration-days', str(expiration_days),
         '--count', str(count),
         '--prefix', prefix,
-        '--start-number', str(start_number)
+        '--start-number', str(start_number),
+        '--max-ips', str(max_ips)
     ]
 
     if unlimited:

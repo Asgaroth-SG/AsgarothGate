@@ -12,6 +12,24 @@ $(document).ready(function () {
         updateGeoTemplate: contentSection.dataset.updateGeoUrlTemplate
     };
 
+    // --- Функция перевода ошибок с бэкенда ---
+    function translateError(errorMsg) {
+        if (!errorMsg) return "Произошла неизвестная ошибка.";
+        if (typeof errorMsg !== 'string') return "Ошибка формата данных.";
+
+        // Системные ошибки
+        if (errorMsg.includes("failed with exit code")) return "Ошибка выполнения команды на сервере.";
+        if (errorMsg.includes("No such file or directory")) return "Файл конфигурации не найден.";
+        if (errorMsg.includes("Permission denied")) return "Отказано в доступе (ошибка прав).";
+        if (errorMsg.includes("Address already in use")) return "Этот порт уже занят другой программой.";
+        
+        // Ошибки валидации
+        if (errorMsg.includes("Invalid port")) return "Указан недопустимый порт.";
+        if (errorMsg.includes("Invalid domain")) return "Некорректный домен.";
+        
+        return errorMsg; // Возвращаем оригинал, если перевод не найден
+    }
+
     function isValidDomain(domain) {
         if (!domain) return false;
         const lowerDomain = domain.toLowerCase();
@@ -71,6 +89,7 @@ $(document).ready(function () {
                         errorMessage = detail.map(err => `Ошибка в '${err.loc[1]}': ${err.msg}`).join('\n');
                     } else if (typeof detail === 'string') {
                         let userMessage = detail;
+                        // Очистка технических деталей Python, если они есть
                         const failMarker = 'failed with exit code';
                         const markerIndex = detail.indexOf(failMarker);
                         if (markerIndex > -1) {
@@ -82,7 +101,8 @@ $(document).ready(function () {
                         errorMessage = userMessage;
                     }
                 }
-                Swal.fire("Ошибка!", errorMessage, "error");
+                // Применяем перевод
+                Swal.fire("Ошибка!", translateError(errorMessage), "error");
                 console.error("AJAX Error:", status, error, xhr.responseText);
             },
             complete: function() {
@@ -158,25 +178,32 @@ $(document).ready(function () {
     }
 
     function updateObfsUI(statusMessage) {
-        // Переводим статусное сообщение от сервера, если оно на английском, или используем как есть
         let displayMessage = statusMessage;
-        if (statusMessage === "OBFS is active.") displayMessage = "OBFS активен.";
-        if (statusMessage === "OBFS is not active.") displayMessage = "OBFS выключен.";
+        
+        // Перевод статусов OBFS
+        if (statusMessage && statusMessage.includes("active")) {
+             if (statusMessage.includes("not active")) {
+                 displayMessage = "OBFS выключен.";
+             } else {
+                 displayMessage = "OBFS активен.";
+             }
+        } else if (statusMessage === "OBFS is active.") { 
+             displayMessage = "OBFS активен.";
+        } else if (statusMessage === "OBFS is not active.") {
+             displayMessage = "OBFS выключен.";
+        }
 
         $("#obfs_status_message").text(displayMessage);
         
-        if (statusMessage === "OBFS is active.") {
+        // Логика UI
+        if (displayMessage === "OBFS активен.") {
             $("#obfs_enable_btn").hide();
             $("#obfs_disable_btn").show();
             $("#obfs_status_container").removeClass("border-danger border-warning alert-danger alert-warning").addClass("border-success alert-success");
-        } else if (statusMessage === "OBFS is not active.") {
+        } else {
             $("#obfs_enable_btn").show();
             $("#obfs_disable_btn").hide();
             $("#obfs_status_container").removeClass("border-success border-danger alert-success alert-danger").addClass("border-warning alert-warning");
-        } else {
-            $("#obfs_enable_btn").hide();
-            $("#obfs_disable_btn").hide();
-            $("#obfs_status_container").removeClass("border-success border-warning alert-success alert-warning").addClass("border-danger alert-danger");
         }
     }
 
@@ -227,7 +254,6 @@ $(document).ready(function () {
     }
 
     function updateGeo(country) {
-        // Локализация названий стран для диалога
         const countryNames = {
             'iran': 'Ирана',
             'china': 'Китая',

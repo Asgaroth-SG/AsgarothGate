@@ -27,7 +27,7 @@ def cli():
 def install_hysteria2(port: int, sni: str):
     try:
         cli_api.install_hysteria2(port, sni)
-        click.echo(f'Hysteria2 installed successfully on port {port} with SNI {sni}.')
+        click.echo(f'Hysteria2 успешно установлен на порт {port} с SNI {sni}.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -36,7 +36,7 @@ def install_hysteria2(port: int, sni: str):
 def uninstall_hysteria2():
     try:
         cli_api.uninstall_hysteria2()
-        click.echo('Hysteria2 uninstalled successfully.')
+        click.echo('Hysteria2 успешно удален.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -45,7 +45,7 @@ def uninstall_hysteria2():
 def update_hysteria2():
     try:
         cli_api.update_hysteria2()
-        click.echo('Hysteria2 updated successfully.')
+        click.echo('Hysteria2 успешно обновлен.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -54,7 +54,7 @@ def update_hysteria2():
 def restart_hysteria2():
     try:
         cli_api.restart_hysteria2()
-        click.echo('Hysteria2 restarted successfully.')
+        click.echo('Hysteria2 успешно перезапущен.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -64,7 +64,7 @@ def restart_hysteria2():
 def change_hysteria2_port(port: int):
     try:
         cli_api.change_hysteria2_port(port)
-        click.echo(f'Hysteria2 port changed to {port} successfully.')
+        click.echo(f'Порт Hysteria2 успешно изменен на {port}.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -74,7 +74,7 @@ def change_hysteria2_port(port: int):
 def change_hysteria2_sni(sni: str):
     try:
         cli_api.change_hysteria2_sni(sni)
-        click.echo(f'Hysteria2 SNI changed to {sni} successfully.')
+        click.echo(f'SNI Hysteria2 успешно изменен на {sni}.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -83,7 +83,7 @@ def change_hysteria2_sni(sni: str):
 def backup_hysteria2():
     try:
         cli_api.backup_hysteria2()
-        click.echo('Hysteria configuration backed up successfully.')
+        click.echo('Конфигурация Hysteria успешно сохранена в бэкап.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -93,7 +93,7 @@ def restore_hysteria2(backup_file_path):
     """Restores Hysteria configuration from a backup ZIP file."""
     try:
         cli_api.restore_hysteria2(backup_file_path)
-        click.echo('Hysteria configuration restored successfully.')
+        click.echo('Конфигурация Hysteria успешно восстановлена.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -109,7 +109,7 @@ def list_users():
         if res:
             pretty_print(res)
         else:
-            click.echo('No users found.')
+            click.echo('Пользователи не найдены.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -132,11 +132,11 @@ def get_user(username: str):
 @click.option('--creation-date', '-c', required=False, help='Creation date for the user (YYYY-MM-DD)', type=str)
 @click.option('--unlimited', is_flag=True, default=False, help='Exempt user from IP limit checks.')
 @click.option('--note', '-n', required=False, help='An optional note for the user', type=str)
-@click.option('--max-ips', '-mi', required=False, default=0, help='Max IP limit (0 = global)', type=int) # Новая опция
+@click.option('--max-ips', '-mi', required=False, default=0, help='Max IP limit (0 = global)', type=int)
 def add_user(username: str, traffic_limit: int, expiration_days: int, password: str, creation_date: str, unlimited: bool, note: str, max_ips: int):
     try:
         cli_api.add_user(username, traffic_limit, expiration_days, password, creation_date, unlimited, note, max_ips)
-        click.echo(f"User '{username}' added successfully.")
+        click.echo(f"Пользователь '{username}' успешно добавлен.")
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -147,13 +147,14 @@ def add_user(username: str, traffic_limit: int, expiration_days: int, password: 
 @click.option('--prefix', '-p', required=True, help='Prefix for usernames.', type=str)
 @click.option('--start-number', '-s', default=1, help='Starting number for username suffix.', type=int)
 @click.option('--unlimited', is_flag=True, default=False, help='Flag to mark users as unlimited (exempt from IP limits).')
-def bulk_user_add(traffic_gb: float, expiration_days: int, count: int, prefix: str, start_number: int, unlimited: bool):
+@click.option('--max-ips', '-mi', required=False, default=0, help='Max IP limit (0 = global)', type=int) 
+def bulk_user_add(traffic_gb: float, expiration_days: int, count: int, prefix: str, start_number: int, unlimited: bool, max_ips: int):
     """Adds multiple users in bulk."""
     try:
-        cli_api.bulk_user_add(traffic_gb, expiration_days, count, prefix, start_number, unlimited)
-        click.echo(f"Successfully initiated the creation of {count} users with prefix '{prefix}'.")
+        cli_api.bulk_user_add(traffic_gb, expiration_days, count, prefix, start_number, unlimited, max_ips)
+        click.echo(f"Успешно инициировано создание {count} пользователей с префиксом '{prefix}'.")
     except Exception as e:
-        click.echo(f'Error during bulk user addition: {e}', err=True)
+        click.echo(f'Ошибка при массовом добавлении пользователей: {e}', err=True)
 
 @cli.command('edit-user')
 @click.option('--username', '-u', required=True, help='Username for the user to edit', type=str)
@@ -182,7 +183,7 @@ def edit_user(username: str, new_username: str, new_password: str, new_traffic_l
             unlimited_ip=unlimited_ip, 
             note=note
         )
-        click.echo(f"User '{username}' updated successfully.")
+        click.echo(f"Пользователь '{username}' успешно обновлен.")
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -192,7 +193,7 @@ def edit_user(username: str, new_username: str, new_password: str, new_traffic_l
 def reset_user(username: str):
     try:
         cli_api.reset_user(username)
-        click.echo(f"User '{username}' reset successfully.")
+        click.echo(f"Пользователь '{username}' успешно сброшен.")
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -202,7 +203,7 @@ def reset_user(username: str):
 def remove_user(usernames: tuple[str]):
     """Removes one or more users."""
     if not usernames:
-        click.echo("No usernames provided.", err=True)
+        click.echo("Не указаны имена пользователей.", err=True)
         return
         
     try:
@@ -210,7 +211,7 @@ def remove_user(usernames: tuple[str]):
         cli_api.kick_users_by_name(usernames_list)
         cli_api.traffic_status(display_output=False)
         cli_api.remove_users(usernames_list)
-        click.echo(f"Users '{', '.join(usernames)}' removed successfully.")
+        click.echo(f"Пользователи '{', '.join(usernames)}' успешно удалены.")
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -219,7 +220,7 @@ def remove_user(usernames: tuple[str]):
 def kick_user(usernames: tuple[str]):
     """Kicks one or more users by username."""
     if not usernames:
-        click.echo("No usernames provided.", err=True)
+        click.echo("Не указаны имена пользователей.", err=True)
         return
         
     try:
@@ -241,7 +242,7 @@ def show_user_uri(username: str, qrcode: bool, ipv: int, all: bool, singbox: boo
         if res:
             click.echo(res)
         else:
-            click.echo(f"URI for user '{username}' could not be generated.")
+            click.echo(f"Не удалось сгенерировать URI для пользователя '{username}'.")
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -256,7 +257,7 @@ def show_user_uri_json(usernames: list[str]):
         if res:
             pretty_print(res)
         else:
-            click.echo('No user URIs could be generated.')
+            click.echo('Не удалось сгенерировать URI для пользователей.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -281,7 +282,7 @@ def server_info():
         if res:
             pretty_print(res)
         else:
-            click.echo('Server information not available.')
+            click.echo('Информация о сервере недоступна.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -300,10 +301,10 @@ def manage_obfs(remove: bool, generate: bool, check: bool):
 
         if generate:
             cli_api.enable_hysteria2_obfs()
-            click.echo('OBFS enabled successfully.')
+            click.echo('OBFS успешно включен.')
         elif remove:
             cli_api.disable_hysteria2_obfs()
-            click.echo('OBFS disabled successfully.')
+            click.echo('OBFS успешно выключен.')
         elif check:
             status_output = cli_api.check_hysteria2_obfs()
             click.echo(status_output)
@@ -325,14 +326,14 @@ def ip_address(edit: bool, ipv4: str, ipv6: str):
     try:
         if not edit:
             cli_api.add_ip_address()
-            click.echo('IP addresses added successfully.')
+            click.echo('IP-адреса успешно добавлены.')
             return
 
         if not ipv4 and not ipv6:
             raise click.UsageError('Error: You must specify either -4 or -6')
 
         cli_api.edit_ip_address(ipv4, ipv6)
-        click.echo('IP address configuration updated successfully.')
+        click.echo('Конфигурация IP-адресов успешно обновлена.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -394,7 +395,7 @@ def generate_cert():
 def update_geo(country: str):
     try:
         cli_api.update_geo(country)
-        click.echo(f'Geo files for {country} updated successfully.')
+        click.echo(f'Geo-файлы для {country} успешно обновлены.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -412,10 +413,10 @@ def masquerade(remove: bool, enable: str):
 
         if enable:
             cli_api.enable_hysteria2_masquerade(enable)
-            click.echo('Masquerade enabled successfully.')
+            click.echo('Маскировка успешно включена.')
         elif remove:
             cli_api.disable_hysteria2_masquerade()
-            click.echo('Masquerade disabled successfully.')
+            click.echo('Маскировка успешно выключена.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -478,7 +479,7 @@ def get_extra_config(name: str):
 def install_tcp_brutal():
     try:
         cli_api.install_tcp_brutal()
-        click.echo('TCP Brutal installed successfully.')
+        click.echo('TCP Brutal успешно установлен.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -487,7 +488,7 @@ def install_tcp_brutal():
 def install_warp():
     try:
         cli_api.install_warp()
-        click.echo('WARP installed successfully.')
+        click.echo('WARP успешно установлен.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -496,7 +497,7 @@ def install_warp():
 def uninstall_warp():
     try:
         cli_api.uninstall_warp()
-        click.echo('WARP uninstalled successfully.')
+        click.echo('WARP успешно удален.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -522,7 +523,7 @@ def configure_warp_cmd(set_all_traffic: str | None,
             domestic_sites_state=set_domestic_sites, 
             block_adult_sites_state=set_block_adult_sites
         )
-        click.echo('WARP configuration update process initiated.')
+        click.echo('Запущен процесс обновления конфигурации WARP.')
     except Exception as e:
         click.echo(f'Error configuring WARP: {e}', err=True)
 
@@ -533,7 +534,7 @@ def warp_status():
         if res:
             pretty_print(res)
         else:
-            click.echo('WARP status not available.')
+            click.echo('WARP статус недоступен.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -550,15 +551,15 @@ def telegram(action: str, token: str, adminid: str, interval: int):
             if not token or not adminid:
                 raise click.UsageError('Error: --token and --adminid are required for the start action.')
             cli_api.start_telegram_bot(token, adminid, interval)
-            click.echo(f'Telegram bot started successfully.')
+            click.echo(f'Telegram бот успешно запущен.')
         elif action == 'stop':
             cli_api.stop_telegram_bot()
-            click.echo(f'Telegram bot stopped successfully.')
+            click.echo(f'Telegram бот успешно остановлен.')
         elif action == 'set_backup_interval':
             if interval is None:
                 raise click.UsageError('Error: --interval is required for the set_backup_interval action.')
             cli_api.set_telegram_bot_backup_interval(interval)
-            click.echo(f'Telegram bot backup interval set to {interval} hours.')
+            click.echo(f'Интервал бэкапа Telegram бота установлен на {interval} ч.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -573,10 +574,10 @@ def singbox(action: str, domain: str, port: int):
             if not domain or not port:
                 raise click.UsageError('Error: Both --domain and --port are required for the start action.')
             cli_api.start_singbox(domain, port)
-            click.echo(f'Singbox started successfully.')
+            click.echo(f'Singbox успешно запущен.')
         elif action == 'stop':
             cli_api.stop_singbox()
-            click.echo(f'Singbox stopped successfully.')
+            click.echo(f'Singbox успешно остановлен.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -594,15 +595,15 @@ def normalsub(action: str, domain: str, port: int, subpath: str):
             if not domain or not port:
                 raise click.UsageError('Error: Both --domain and --port are required for the start action.')
             cli_api.start_normalsub(domain, port)
-            click.echo(f'NormalSub started successfully.')
+            click.echo(f'NormalSub успешно запущен.')
         elif action == 'stop':
             cli_api.stop_normalsub()
-            click.echo(f'NormalSub stopped successfully.')
+            click.echo(f'NormalSub успешно остановлен.')
         elif action == 'edit_subpath':
             if not subpath:
                 raise click.UsageError('Error: --subpath is required for the edit_subpath action.')
             cli_api.edit_normalsub_subpath(subpath)
-            click.echo(f'NormalSub subpath updated to {subpath} successfully.')
+            click.echo(f'Subpath NormalSub успешно обновлен на {subpath}.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -634,14 +635,14 @@ def webpanel(action: str, domain: str, port: int, admin_username: str, admin_pas
                 raise click.Abort('Error: hysteria-caddy.service service is not running.')
 
             url = cli_api.get_webpanel_url()
-            click.echo(f'Hysteria web panel is now running. The service is accessible on: {url}')
+            click.echo(f'Веб-панель Hysteria запущена. Сервис доступен по адресу: {url}')
             if decoy_path:
-                click.echo(f'Decoy site configured using path: {decoy_path}')
+                click.echo(f'Сайт-маскировка настроен по пути: {decoy_path}')
         elif action == 'stop':
             if decoy_path: 
                  click.echo('Warning: --decoy-path option is ignored for the stop action.', err=True)
             cli_api.stop_webpanel()
-            click.echo(f'WebPanel stopped successfully.')
+            click.echo(f'WebPanel успешно остановлена.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -652,8 +653,8 @@ def setup_webpanel_decoy(domain: str, decoy_path: str):
     """Sets up or updates the decoy site for the running Web Panel."""
     try:
         cli_api.setup_webpanel_decoy(domain, decoy_path)
-        click.echo(f'Web Panel decoy site configured successfully for domain {domain} using path {decoy_path}.')
-        click.echo('Note: Caddy service was restarted.')
+        click.echo(f'Сайт-маскировка для Web Panel успешно настроен для домена {domain} по пути {decoy_path}.')
+        click.echo('Примечание: сервис Caddy был перезапущен.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -662,8 +663,8 @@ def stop_webpanel_decoy():
     """Stops the decoy site functionality for the Web Panel."""
     try:
         cli_api.stop_webpanel_decoy()
-        click.echo(f'Web Panel decoy site stopped and configuration removed successfully.')
-        click.echo('Note: Caddy service was restarted.')
+        click.echo(f'Сайт-маскировка для Web Panel остановлен, конфигурация удалена.')
+        click.echo('Примечание: сервис Caddy был перезапущен.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -671,7 +672,7 @@ def stop_webpanel_decoy():
 def get_web_panel_url():
     try:
         url = cli_api.get_webpanel_url()
-        click.echo(f'Hysteria web panel is now running. The service is accessible on: {url}')
+        click.echo(f'Веб-панель Hysteria запущена. Сервис доступен по адресу: {url}')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -697,12 +698,12 @@ def reset_webpanel_creds(new_username: str | None, new_password: str | None):
         
         message_parts = []
         if new_username:
-            message_parts.append(f"username to '{new_username}'")
+            message_parts.append(f"имя пользователя на '{new_username}'")
         if new_password:
-            message_parts.append("password")
+            message_parts.append("пароль")
         
-        click.echo(f'WebPanel admin {" and ".join(message_parts)} updated successfully.')
-        click.echo('WebPanel service has been restarted.')
+        click.echo(f'Администратор WebPanel: {" и ".join(message_parts)} — успешно обновлены.')
+        click.echo('Сервис WebPanel был перезапущен.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -726,8 +727,8 @@ def change_webpanel_exp(minutes: int):
     """Changes the session expiration time for the WebPanel."""
     try:
         cli_api.change_webpanel_expiration(minutes)
-        click.echo(f'WebPanel session expiration successfully updated to {minutes} minutes.')
-        click.echo('WebPanel service has been restarted.')
+        click.echo(f'Время действия сессии WebPanel успешно обновлено на {minutes} минут.')
+        click.echo('Сервис WebPanel был перезапущен.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -738,10 +739,10 @@ def change_webpanel_root(path: str | None):
     """Changes the root path for the WebPanel."""
     try:
         cli_api.change_webpanel_root_path(path)
-        click.echo(f'WebPanel root path updated successfully.')
+        click.echo(f'Корневой путь WebPanel успешно обновлен.')
         new_url = cli_api.get_webpanel_url()
-        click.echo(f'New URL is accessible on: {new_url}')
-        click.echo('WebPanel and Caddy services have been restarted.')
+        click.echo(f'Новый URL доступен по адресу: {new_url}')
+        click.echo('Сервисы WebPanel и Caddy были перезапущены.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -756,10 +757,10 @@ def change_webpanel_domain_port(domain: str | None, port: int | None):
             raise click.UsageError('Error: You must provide either --domain or --port, or both.')
         
         cli_api.change_webpanel_domain_port(domain, port)
-        click.echo(f'WebPanel domain/port configuration updated successfully.')
+        click.echo(f'Конфигурация домена/порта WebPanel успешно обновлена.')
         new_url = cli_api.get_webpanel_url()
-        click.echo(f'New URL is accessible on: {new_url}')
-        click.echo('Caddy service has been restarted.')
+        click.echo(f'Новый URL доступен по адресу: {new_url}')
+        click.echo('Сервис Caddy был перезапущен.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -804,7 +805,7 @@ def start_ip_limit():
     """Starts the IP limiter service."""
     try:
         cli_api.start_ip_limiter()
-        click.echo('IP Limiter service started successfully.')
+        click.echo('Служба IP Limiter успешно запущена.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -813,7 +814,7 @@ def stop_ip_limit():
     """Stops the IP limiter service."""
     try:
         cli_api.stop_ip_limiter()
-        click.echo('IP Limiter service stopped successfully.')
+        click.echo('Служба IP Limiter успешно остановлена.')
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -822,7 +823,7 @@ def clean_ip_limit():
     """Cleans the IP limiter database and unblocks all IPs."""
     try:
         cli_api.clean_ip_limiter()
-        click.echo('IP Limiter database and block list have been cleaned successfully.')
+        click.echo('База данных IP Limiter и список блокировок успешно очищены.')
     except Exception as e:
         click.echo(f'Error cleaning IP limiter: {e}', err=True)
 
@@ -833,7 +834,7 @@ def config_ip_limit(block_duration: int, max_ips: int):
     """Configures the IP limiter service parameters."""
     try:
         cli_api.config_ip_limiter(block_duration, max_ips)
-        click.echo('IP Limiter configuration updated successfully.')
+        click.echo('Конфигурация IP Limiter успешно обновлена.')
         if block_duration is not None:
             click.echo(f'  Block Duration: {block_duration} seconds')
         if max_ips is not None:

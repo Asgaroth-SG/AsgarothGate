@@ -9,7 +9,7 @@
 
 cloud.asgaroth.ru:443 {
     # Веб-панель
-    route /83e79aeebd648b23e07d29db0aff362a/* {
+    route /598efbb863ced539bc361113151cd279/* {
         reverse_proxy http://127.0.0.1:28260
     }
     
@@ -24,12 +24,11 @@ cloud.asgaroth.ru:443 {
     }
     
     @otherPaths {
-        not path /83e79aeebd648b23e07d29db0aff362a/*
+        not path /598efbb863ced539bc361113151cd279/*
         not path /i9wbZybYR8G9mMUinAjmpr8gbTioqfyA/*
     }
     
     handle @otherPaths {
-        root * /var/www/cloud.asgaroth.ru/
-        file_server
+        abort
     }
 }

@@ -24,6 +24,14 @@ class User(BaseModel):
 
     @staticmethod
     def __parse_user_data(user_data: dict) -> dict:
+        # Безопасное получение и конвертация max_ips
+        raw_max_ips = user_data.get('max_ips')
+        try:
+            # Если значение есть (не None), пробуем превратить в число. Иначе 0.
+            max_ips = int(raw_max_ips) if raw_max_ips is not None else 0
+        except (ValueError, TypeError):
+            max_ips = 0
+
         essential_keys = [
             'password', 
             'max_download_bytes', 
@@ -42,6 +50,7 @@ class User(BaseModel):
                 'day_usage': 'N/A',
                 'enable': False,
                 'unlimited_ip': False,
+                'max_ips': max_ips, # Используем обработанное значение
                 'online_count': 0,
                 'note': user_data.get('note', None)
             }
@@ -73,7 +82,7 @@ class User(BaseModel):
         quota_bytes = user_data.get('max_download_bytes', 0)
         
         used_formatted = User.__format_traffic(used_bytes)
-        quota_formatted = "Unlimited" if quota_bytes <= 0 else User.__format_traffic(quota_bytes)
+        quota_formatted = "Безлимит" if quota_bytes <= 0 else User.__format_traffic(quota_bytes)
         
         percentage = 0
         if quota_bytes > 0:
@@ -91,6 +100,7 @@ class User(BaseModel):
             'day_usage': day_usage,
             'enable': not user_data.get('blocked', False),
             'unlimited_ip': user_data.get('unlimited_user', False),
+            'max_ips': max_ips, # Используем обработанное значение
             'online_count': user_data.get('online_count', 0),
             'note': user_data.get('note', None)
         }

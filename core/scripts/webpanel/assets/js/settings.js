@@ -40,6 +40,28 @@ $(document).ready(function () {
     fetchNodes();
     fetchExtraConfigs();
 
+    // --- Перевод ошибок ---
+    function translateError(errorMsg) {
+        if (!errorMsg) return "Произошла неизвестная ошибка.";
+        if (typeof errorMsg !== 'string') return errorMsg;
+        
+        const map = {
+            "failed with exit code": "Ошибка выполнения системной команды.",
+            "No such file or directory": "Файл или каталог не найден.",
+            "Permission denied": "Отказано в доступе.",
+            "Address already in use": "Порт уже занят.",
+            "Connection refused": "Соединение отклонено (служба не запущена?).",
+            "timed out": "Время ожидания истекло.",
+            "Invalid input": "Неверные входные данные.",
+            "already exists": "Уже существует."
+        };
+
+        for (const [key, val] of Object.entries(map)) {
+            if (errorMsg.includes(key)) return val;
+        }
+        return errorMsg; 
+    }
+
     function escapeHtml(text) {
         var map = {
             '&': '&amp;',
@@ -168,7 +190,7 @@ $(document).ready(function () {
                         errorMessage = userMessage;
                     }
                 }
-                Swal.fire("Ошибка!", errorMessage, "error");
+                Swal.fire("Ошибка!", translateError(errorMessage), "error");
                 console.error("AJAX Error:", status, error, xhr.responseText);
             },
             complete: function() {
@@ -843,6 +865,10 @@ $(document).ready(function () {
                 error: function(xhr, status, error) {
                     progressBar.classList.add('bg-danger');
                     let detail = (xhr.responseJSON && xhr.responseJSON.detail) ? xhr.responseJSON.detail : 'Проверьте консоль для деталей.';
+                    
+                    // Перевод ошибки восстановления
+                    detail = translateError(detail);
+                    
                     statusDiv.innerText = `Ошибка восстановления: ${detail}`;
                     statusDiv.className = 'mt-2 text-danger';
                     Swal.fire("Ошибка!", `Не удалось восстановить бэкап. ${detail}`, "error");
@@ -925,7 +951,7 @@ $(document).ready(function () {
             error: function (xhr, status, error) {
                 let errorMsg = "Не удалось получить конфигурацию WARP.";
                  if (xhr.responseJSON && xhr.responseJSON.detail) {
-                    errorMsg = xhr.responseJSON.detail;
+                    errorMsg = translateError(xhr.responseJSON.detail);
                 }
                 console.error("Error fetching WARP config:", errorMsg, xhr.responseText);
 

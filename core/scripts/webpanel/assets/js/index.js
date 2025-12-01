@@ -8,8 +8,8 @@ function updateServerInfo() {
             document.getElementById('online-users').textContent = data.online_users;
             document.getElementById('uptime').textContent = data.uptime;
 
-            document.getElementById('server-ipv4').textContent = `IPv4: ${data.server_ipv4 || 'N/A'}`;
-            document.getElementById('server-ipv6').textContent = `IPv6: ${data.server_ipv6 || 'N/A'}`;
+            document.getElementById('server-ipv4').textContent = `IPv4: ${data.server_ipv4 || 'Н/Д'}`;
+            document.getElementById('server-ipv6').textContent = `IPv6: ${data.server_ipv6 || 'Н/Д'}`;
 
             document.getElementById('download-speed').textContent = `🔽 Загрузка: ${data.download_speed}`;
             document.getElementById('upload-speed').textContent = `🔼 Отдача: ${data.upload_speed}`;
@@ -63,11 +63,13 @@ document.addEventListener('DOMContentLoaded', function () {
 
     const toggleIpBtn = document.getElementById('toggle-ip-visibility');
     const ipAddressesDiv = document.getElementById('ip-addresses');
-    toggleIpBtn.addEventListener('click', function(e) {
-        e.preventDefault();
-        const isBlurred = ipAddressesDiv.style.filter === 'blur(5px)';
-        ipAddressesDiv.style.filter = isBlurred ? 'none' : 'blur(5px)';
-        toggleIpBtn.querySelector('i').classList.toggle('fa-eye');
-        toggleIpBtn.querySelector('i').classList.toggle('fa-eye-slash');
-    });
+    if (toggleIpBtn && ipAddressesDiv) {
+        toggleIpBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            const isBlurred = ipAddressesDiv.style.filter === 'blur(5px)';
+            ipAddressesDiv.style.filter = isBlurred ? 'none' : 'blur(5px)';
+            toggleIpBtn.querySelector('i').classList.toggle('fa-eye');
+            toggleIpBtn.querySelector('i').classList.toggle('fa-eye-slash');
+        });
+    }
 });

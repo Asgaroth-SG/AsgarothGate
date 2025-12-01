@@ -1,28 +1,29 @@
 {% extends "base.html" %}
 
-{% block title %}Пользователи{% endblock %}
+{% block title %}Управление пользователями{% endblock %}
 
 {% block styles %}
 <style>
+    /* Улучшенная компактная таблица */
+    .table-compact td, .table-compact th {
+        padding: 0.25rem 0.5rem !important; /* Очень узкие отступы */
+        font-size: 0.9rem;
+        vertical-align: middle !important;
+    }
     .user-details-content p {
         margin-bottom: 0.5rem;
         display: flex;
         justify-content: space-between;
-        border-bottom: 1px solid #dee2e6;
+        align-items: center;
+        border-bottom: 1px dashed #e9ecef;
         padding-bottom: 0.5rem;
     }
     .user-details-content p:last-child {
         border-bottom: none;
     }
-    .user-details-content strong {
-        margin-right: 10px;
-    }
-    .user-details-actions .btn {
-        margin-right: 5px;
-        margin-bottom: 5px;
-    }
-    .form-check-label i {
-        width: 16px;
+    
+    body.dark-mode .user-details-content p {
+        border-bottom-color: rgba(255,255,255,0.1);
     }
 </style>
 {% endblock %}
@@ -32,7 +33,7 @@
     <div class="container-fluid">
         <div class="row mb-2">
             <div class="col-sm-6">
-                <h1 class="m-0">Пользователи <small class="font-weight-light"></small></h1>
+                <h1 class="m-0">Пользователи</h1>
             </div>
         </div>
     </div>
@@ -53,88 +54,72 @@
     data-search-url="{{ url_for('search_users') }}">
     <div class="container-fluid">
         <div class="card">
-            <div class="card-header">
-                <h3 class="card-title">Список пользователей {% if total_users is defined %}(<span id="user-total-count">{{ total_users }}</span>){% endif %}</h3>
-                <div class="card-tools d-flex align-items-center flex-wrap">
-
-                    <div class="dropdown d-md-none mr-2 mb-2">
-                        <button class="btn btn-sm btn-default dropdown-toggle" type="button" id="filterDropdown" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
-                            <i class="fas fa-filter"></i>
-                        </button>
-                        <div class="dropdown-menu" aria-labelledby="filterDropdown">
-                            <a class="dropdown-item filter-button" href="#" data-filter="all"><i class="fas fa-list fa-fw mr-2"></i> Все</a>
-                            <a class="dropdown-item filter-button" href="#" data-filter="on-hold"><i class="fas fa-pause-circle fa-fw mr-2 text-warning"></i> Пауза</a>
-                            <a class="dropdown-item filter-button" href="#" data-filter="online"><i class="fas fa-wifi fa-fw mr-2 text-info"></i> Онлайн</a>
-                            <a class="dropdown-item filter-button" href="#" data-filter="enable"><i class="fas fa-check fa-fw mr-2 text-success"></i> Активные</a>
-                            <a class="dropdown-item filter-button" href="#" data-filter="disable"><i class="fas fa-ban fa-fw mr-2 text-danger"></i> Отключенные</a>
+            <div class="card-header border-0">
+                <div class="d-flex justify-content-between align-items-center flex-wrap">
+                    <h3 class="card-title mr-3">
+                        Список клиентов 
+                        {% if total_users is defined %}
+                        <span class="badge badge-pill badge-secondary ml-2" id="user-total-count">{{ total_users }}</span>
+                        {% endif %}
+                    </h3>
+                    
+                    <div class="card-tools d-flex align-items-center flex-wrap ml-auto">
+                        <div class="d-flex align-items-center mr-4 mb-1">
+                            <span class="text-muted small font-weight-bold mr-2 text-uppercase" style="letter-spacing: 0.5px;">Фильтры:</span>
+                            
+                            <button type="button" class="btn btn-sm btn-outline-secondary filter-button active mr-1" data-filter="all" title="Все">
+                                Все
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-success filter-button mr-1" data-filter="online" title="Онлайн">
+                                <i class="fas fa-wifi"></i>
+                            </button>
+                             <button type="button" class="btn btn-sm btn-outline-warning filter-button mr-1" data-filter="on-hold" title="Приостановленные">
+                                <i class="fas fa-pause"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-danger filter-button" data-filter="disable" title="Заблокированные">
+                                <i class="fas fa-ban"></i>
+                            </button>
                         </div>
-                    </div>
 
-                    <div class="mr-2 mb-2 d-none d-md-block">
-                        <button type="button" class="btn btn-sm btn-default filter-button" data-filter="all">
-                            <i class="fas fa-list"></i> Все
-                        </button>
-                    </div>
-                    <div class="mr-2 mb-2 d-none d-md-block">
-                        <button type="button" class="btn btn-sm btn-warning filter-button" data-filter="on-hold">
-                            <i class="fas fa-pause-circle"></i> Пауза
-                        </button>
-                    </div>
-                    <div class="mr-2 mb-2 d-none d-md-block">
-                        <button type="button" class="btn btn-sm btn-info filter-button" data-filter="online">
-                            <i class="fas fa-wifi"></i> Онлайн
-                        </button>
-                    </div>
-                    <div class="mr-2 mb-2 d-none d-md-block">
-                        <button type="button" class="btn btn-sm btn-success filter-button" data-filter="enable">
-                            <i class="fas fa-check"></i> Активные
-                        </button>
-                    </div>
-                    <div class="mr-2 mb-2 d-none d-md-block">
-                        <button type="button" class="btn btn-sm btn-danger filter-button" data-filter="disable">
-                            <i class="fas fa-ban"></i> Отключенные
-                        </button>
-                    </div>
+                        <div class="input-group input-group-sm mr-4 mb-1" style="width: 200px;">
+                            <input type="text" id="searchInput" class="form-control" placeholder="Поиск пользователя...">
+                        </div>
 
-                    <div class="input-group input-group-sm" style="width: 200px;">
-                        <input type="text" id="searchInput" class="form-control float-right" placeholder="Поиск">
-                        <div class="input-group-append">
-                            <button type="button" class="btn btn-default" id="searchButton">
-                                <i class="fas fa-search"></i>
+                        <div class="d-flex mb-1">
+                            <button type="button" class="btn btn-sm btn-primary mr-2" data-toggle="modal" data-target="#addUserModal" title="Создать нового">
+                                <i class="fas fa-plus mr-1"></i> Создать
+                            </button>
+                            <button type="button" class="btn btn-sm btn-info mr-2" id="showSelectedLinks" title="Ссылки для выбранных">
+                                <i class="fas fa-link"></i>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-danger" id="deleteSelected" title="Удалить выбранных">
+                                <i class="fas fa-trash"></i>
                             </button>
                         </div>
                     </div>
-                    <button type="button" class="btn btn-sm btn-primary ml-2" data-toggle="modal" data-target="#addUserModal">
-                        <i class="fas fa-plus"></i>
-                    </button>
-                    <button type="button" class="btn btn-sm btn-info ml-2" id="showSelectedLinks">
-                        <i class="fas fa-link"></i>
-                    </button>
-                    <button type="button" class="btn btn-sm btn-danger ml-2" id="deleteSelected">
-                        <i class="fas fa-trash"></i>
-                    </button>
                 </div>
             </div>
+            
             <div class="card-body table-responsive p-0">
-                <table class="table table-bordered table-hover" id="userTable">
+                <table class="table table-hover table-sm table-compact" id="userTable">
                     <thead>
                         <tr>
-                            <th>
-                                <input type="checkbox" id="selectAll">
+                            <th style="width: 30px;" class="text-center">
+                                <input type="checkbox" id="selectAll" style="cursor: pointer;">
                             </th>
-                            <th>#</th>
-                            <th>Имя пользователя</th>
+                            <th style="width: 40px;">#</th>
+                            <th>Пользователь</th>
                             <th class="d-none d-md-table-cell">Статус</th>
-                            <th class="d-none d-md-table-cell">Трафик</th>
-                            <th class="d-none d-md-table-cell text-nowrap">Дата истечения</th>
-                            <th class="d-none d-md-table-cell text-nowrap">Осталось дней</th>
-                            <th class="d-none d-md-table-cell text-nowrap">За день</th>
-                            <th class="d-none d-md-table-cell">Активен</th>
-                            <th class="d-none d-md-table-cell">Примечание</th>
-                            <th class="d-none d-md-table-cell text-nowrap requires-iplimit-service" style="display: none;">Unlimited IP</th>
-                            <th class="d-none d-md-table-cell text-nowrap">Конфиги</th>
-                            <th class="d-none d-md-table-cell text-nowrap">Действия</th>
-                            <th class="d-md-none text-center">Детали</th>
+                            <th class="d-none d-md-table-cell text-center">Трафик</th>
+                            <th class="d-none d-md-table-cell text-nowrap">Истекает</th>
+                            <th class="d-none d-md-table-cell text-nowrap text-center">Срок</th>
+                            <th class="d-none d-md-table-cell text-nowrap text-center">Дней активности</th>
+                            <th class="d-none d-md-table-cell text-center">Активен</th>
+                            <th class="d-none d-md-table-cell">Заметка</th>
+                            <th class="d-none d-md-table-cell text-nowrap text-center requires-iplimit-service" style="display: none;">Limit IP</th>
+                            <th class="d-none d-md-table-cell text-nowrap text-center">QR-код</th>
+                            <th class="d-none d-md-table-cell text-nowrap text-right">Действия</th>
+                            <th class="d-md-none text-center">Инфо</th>
                         </tr>
                     </thead>
                     <tbody id="userTableBody">
@@ -143,35 +128,31 @@
                     </tbody>
                 </table>
             </div>
-            <div class="card-footer clearfix" id="paginationContainer">
-                <div class="row">
-                    <div class="col-sm-12 col-md-5 d-flex align-items-center">
-                        <div class="dataTables_info" role="status" aria-live="polite">
-                            Показано с {{ ((current_page - 1) * limit) + 1 }} по {{ [((current_page - 1) * limit) + limit, total_users] | min }} из {{ total_users }} пользователей
-                        </div>
+            
+            <div class="card-footer clearfix bg-white" id="paginationContainer">
+                {% if total_pages is defined %}
+                <div class="row align-items-center">
+                    <div class="col-sm-12 col-md-5 mb-2 mb-md-0 text-muted small">
+                        Показано с <b>{{ ((current_page - 1) * limit) + 1 }}</b> по <b>{{ [((current_page - 1) * limit) + limit, total_users] | min }}</b> из <b>{{ total_users }}</b>
                     </div>
                     <div class="col-sm-12 col-md-7">
-                        <div class="d-flex justify-content-end align-items-center">
-                            <div class="mr-3">
-                                <form id="limit-form" method="get" class="form-inline">
-                                    <label for="limit-select" class="mr-2">На странице:</label>
-                                    <select id="limit-select" class="form-control form-control-sm">
-                                        <option value="10">10</option>
-                                        <option value="25">25</option>
-                                        <option value="50" selected>50</option>
-                                        <option value="100">100</option>
-                                    </select>
-                                </form>
-                            </div>
+                        <div class="d-flex justify-content-md-end justify-content-center align-items-center">
+                            <form id="limit-form" method="get" class="form-inline mr-3">
+                                <label for="limit-select" class="mr-2 small text-muted">Показать:</label>
+                                <select id="limit-select" class="custom-select custom-select-sm form-control-sm" style="width: 70px;">
+                                    <option value="10">10</option>
+                                    <option value="25">25</option>
+                                    <option value="50" selected>50</option>
+                                    <option value="100">100</option>
+                                </select>
+                            </form>
                             {% if total_pages > 1 %}
                             <nav aria-label="Page navigation">
                                 <ul class="pagination pagination-sm m-0">
                                     <li class="page-item {% if current_page == 1 %}disabled{% endif %}">
-                                        <a class="page-link" href="{{ url_for('users_paginated', page=current_page - 1) }}" aria-label="Previous">
-                                            <span aria-hidden="true">&laquo;</span>
-                                        </a>
+                                        <a class="page-link" href="{{ url_for('users_paginated', page=current_page - 1) }}">&laquo;</a>
                                     </li>
-            
+                                    
                                     {% set page_start = [1, current_page - 2] | max %}
                                     {% set page_end = [total_pages, current_page + 2] | min %}
             
@@ -196,9 +177,7 @@
                                     {% endif %}
                                     
                                     <li class="page-item {% if current_page == total_pages %}disabled{% endif %}">
-                                        <a class="page-link" href="{{ url_for('users_paginated', page=current_page + 1) }}" aria-label="Next">
-                                            <span aria-hidden="true">&raquo;</span>
-                                        </a>
+                                        <a class="page-link" href="{{ url_for('users_paginated', page=current_page + 1) }}">&raquo;</a>
                                     </li>
                                 </ul>
                             </nav>
@@ -206,152 +185,118 @@
                         </div>
                     </div>
                 </div>
+                {% endif %}
             </div>
         </div>
     </div>
 </section>
 
-
-<div class="modal fade" id="addUserModal" tabindex="-1" role="dialog" aria-labelledby="addUserModalLabel" aria-hidden="true">
+{% include 'modals.html' ignore missing %} 
+<div class="modal fade" id="addUserModal" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="addUserModalLabel">Добавить пользователя</h5>
+                <h5 class="modal-title">Новый пользователь</h5>
                 <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                     <span aria-hidden="true">×</span>
                 </button>
             </div>
             <div class="modal-body">
-                <ul class="nav nav-tabs" id="addUserTab" role="tablist">
+                <ul class="nav nav-pills nav-fill mb-3" id="addUserTab" role="tablist">
                     <li class="nav-item">
-                        <a class="nav-link active" id="single-user-tab" data-toggle="tab" href="#single-user" role="tab" aria-controls="single-user" aria-selected="true">Один пользователь</a>
+                        <a class="nav-link active" id="single-user-tab" data-toggle="tab" href="#single-user" role="tab">Одиночный</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" id="bulk-users-tab" data-toggle="tab" href="#bulk-users" role="tab" aria-controls="bulk-users" aria-selected="false">Массовое добавление</a>
+                        <a class="nav-link" id="bulk-users-tab" data-toggle="tab" href="#bulk-users" role="tab">Массовое создание</a>
                     </li>
                 </ul>
                 <div class="tab-content" id="addUserTabContent">
-                    <div class="tab-pane fade show active" id="single-user" role="tabpanel" aria-labelledby="single-user-tab">
-                        <form id="addUserForm" class="mt-3">
+                    <div class="tab-pane fade show active" id="single-user" role="tabpanel">
+                        <form id="addUserForm">
                             <div class="form-group">
-                                <label for="addUsername">Имя пользователя</label>
-                                <div class="input-group">
-                                    <div class="input-group-prepend">
-                                        <span class="input-group-text"><i class="fas fa-user"></i></span>
-                                    </div>
-                                    <input type="text" class="form-control" id="addUsername" name="username" required>
-                                </div>
-                                <small class="form-text text-danger" id="addUsernameError"></small>
+                                <label>Имя пользователя <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="addUsername" name="username" placeholder="Только латиница, цифры, _" required>
+                                <small class="text-danger" id="addUsernameError"></small>
                             </div>
-                            <div class="form-group">
-                                <label for="addTrafficLimit">Лимит трафика (ГБ)</label>
-                                <div class="input-group">
-                                    <div class="input-group-prepend">
-                                        <span class="input-group-text"><i class="fas fa-database"></i></span>
-                                    </div>
-                                    <input type="number" class="form-control" id="addTrafficLimit" name="traffic_limit" required>
+                            <div class="form-row">
+                                <div class="form-group col-md-6">
+                                    <label>Лимит трафика (ГБ)</label>
+                                    <input type="number" class="form-control" id="addTrafficLimit" name="traffic_limit" value="0" required>
+                                    <small class="form-text text-muted">0 = Безлимит</small>
                                 </div>
-                            </div>
-                            <div class="form-group">
-                                <label for="addExpirationDays">Срок действия (дней)</label>
-                                <div class="input-group">
-                                    <div class="input-group-prepend">
-                                        <span class="input-group-text"><i class="fas fa-calendar-alt"></i></span>
-                                    </div>
+                                <div class="form-group col-md-6">
+                                    <label>Срок действия (дней)</label>
                                     <input type="number" class="form-control" id="addExpirationDays" name="expiration_days" required>
                                 </div>
                             </div>
                             <div class="form-group">
-                                <label for="addNote">Примечание (опционально)</label>
-                                <div class="input-group">
-                                    <div class="input-group-prepend">
-                                        <span class="input-group-text"><i class="fas fa-sticky-note"></i></span>
-                                    </div>
-                                    <input type="text" class="form-control" id="addNote" name="note">
-                                </div>
+                                <label>Примечание</label>
+                                <input type="text" class="form-control" id="addNote" name="note" placeholder="Например: Telegram ID">
                             </div>
-							<div class="form-group requires-iplimit-service" style="display: none;">
-									<label for="addMaxIps">Limit IP
-										<i class="fas fa-info-circle text-muted ml-1" 
-											data-toggle="tooltip" 
-											title="0 = использовать глобальный лимит.">
-										</i>
-									</label>
-							<div class="input-group">
-								<div class="input-group-prepend">
-									<span class="input-group-text"><i class="fas fa-network-wired"></i></span>
-								</div>
-							<input type="number" class="form-control" id="addMaxIps" name="max_ips" placeholder="0" value="0">
-							</div>
-							</div>
-                            <div class="form-check mb-3 requires-iplimit-service" style="display: none;">
-                                <input type="checkbox" class="form-check-input" id="addUnlimited" name="unlimited">
-                                <label class="form-check-label" for="addUnlimited">
-                                    <i class="fas fa-shield-alt text-primary mr-2"></i>Безлимитный IP
+							<div class="form-group requires-iplimit-service bg-light p-2 rounded" style="display: none;">
+								<label class="d-flex justify-content-between">
+                                    Лимит IP адресов
+                                    <small class="text-muted">0 = Использовать глобальную настройку</small>
                                 </label>
-                            </div>
-                            <button type="submit" class="btn btn-primary" id="addSubmitButton">Добавить</button>
+    							<div class="input-group">
+    								<div class="input-group-prepend">
+    									<span class="input-group-text"><i class="fas fa-network-wired"></i></span>
+    								</div>
+    							    <input type="number" class="form-control" id="addMaxIps" name="max_ips" placeholder="0" value="0">
+    							</div>
+                                <div class="custom-control custom-switch mt-2">
+                                    <input type="checkbox" class="custom-control-input" id="addUnlimited" name="unlimited">
+                                    <label class="custom-control-label text-primary" for="addUnlimited">Отключить проверку IP (Безлимит)</label>
+                                </div>
+							</div>
+                            <button type="submit" class="btn btn-primary btn-block" id="addSubmitButton">Создать пользователя</button>
                         </form>
                     </div>
-                    <div class="tab-pane fade" id="bulk-users" role="tabpanel" aria-labelledby="bulk-users-tab">
-                        <form id="addBulkUsersForm" class="mt-3">
+                    
+                    <div class="tab-pane fade" id="bulk-users" role="tabpanel">
+                        <form id="addBulkUsersForm">
                             <div class="form-group">
-                                <label for="addBulkPrefix">Префикс имени пользователя</label>
-                                <div class="input-group">
-                                    <div class="input-group-prepend">
-                                        <span class="input-group-text"><i class="fas fa-users"></i></span>
-                                    </div>
-                                    <input type="text" class="form-control" id="addBulkPrefix" name="prefix" required>
-                                </div>
-                                <small class="form-text text-danger" id="addBulkPrefixError"></small>
+                                <label>Префикс имени <span class="text-danger">*</span></label>
+                                <input type="text" class="form-control" id="addBulkPrefix" name="prefix" placeholder="user_" required>
+                                <small class="text-danger" id="addBulkPrefixError"></small>
                             </div>
                              <div class="form-row">
                                 <div class="form-group col-md-6">
-                                    <label for="addBulkCount">Количество пользователей</label>
-                                    <div class="input-group">
-                                        <div class="input-group-prepend">
-                                            <span class="input-group-text"><i class="fas fa-hashtag"></i></span>
-                                        </div>
-                                        <input type="number" class="form-control" id="addBulkCount" name="count" value="10" required>
-                                    </div>
+                                    <label>Количество</label>
+                                    <input type="number" class="form-control" id="addBulkCount" name="count" value="10" min="1" required>
                                 </div>
                                 <div class="form-group col-md-6">
-                                    <label for="addBulkStartNumber">Начальный номер</label>
-                                    <div class="input-group">
-                                        <div class="input-group-prepend">
-                                            <span class="input-group-text"><i class="fas fa-play-circle"></i></span>
-                                        </div>
-                                        <input type="number" class="form-control" id="addBulkStartNumber" name="start_number" value="1" required>
-                                    </div>
+                                    <label>Начать с номера</label>
+                                    <input type="number" class="form-control" id="addBulkStartNumber" name="start_number" value="1" min="1" required>
                                 </div>
                             </div>
                             <div class="form-row">
                                 <div class="form-group col-md-6">
-                                    <label for="addBulkTrafficLimit">Лимит трафика (ГБ)</label>
-                                    <div class="input-group">
-                                        <div class="input-group-prepend">
-                                            <span class="input-group-text"><i class="fas fa-database"></i></span>
-                                        </div>
-                                        <input type="number" class="form-control" id="addBulkTrafficLimit" name="traffic_gb" required>
-                                    </div>
+                                    <label>Трафик (ГБ)</label>
+                                    <input type="number" class="form-control" id="addBulkTrafficLimit" name="traffic_gb" required>
                                 </div>
                                 <div class="form-group col-md-6">
-                                    <label for="addBulkExpirationDays">Срок действия (дней)</label>
-                                    <div class="input-group">
-                                        <div class="input-group-prepend">
-                                            <span class="input-group-text"><i class="fas fa-calendar-alt"></i></span>
-                                        </div>
-                                        <input type="number" class="form-control" id="addBulkExpirationDays" name="expiration_days" required>
-                                    </div>
+                                    <label>Дней</label>
+                                    <input type="number" class="form-control" id="addBulkExpirationDays" name="expiration_days" required>
                                 </div>
                             </div>
-                            <div class="form-check mb-3 requires-iplimit-service" style="display: none;">
-                                <input type="checkbox" class="form-check-input" id="addBulkUnlimited" name="unlimited">
-                                <label class="form-check-label" for="addBulkUnlimited">
-                                    <i class="fas fa-shield-alt text-primary mr-2"></i>Безлимитный IP
+                            <div class="form-group requires-iplimit-service bg-light p-2 rounded" style="display: none;">
+                                <label class="d-flex justify-content-between">
+                                    Лимит IP
+                                    <small class="text-muted">0 = Глобальный</small>
                                 </label>
+                                <div class="input-group">
+                                    <div class="input-group-prepend">
+                                        <span class="input-group-text"><i class="fas fa-network-wired"></i></span>
+                                    </div>
+                                    <input type="number" class="form-control" id="addBulkMaxIps" name="max_ips" placeholder="0" value="0">
+                                </div>
+                                <div class="custom-control custom-switch mt-2">
+                                    <input type="checkbox" class="custom-control-input" id="addBulkUnlimited" name="unlimited">
+                                    <label class="custom-control-label text-primary" for="addBulkUnlimited">Отключить проверку IP (Безлимит)</label>
+                                </div>
                             </div>
-                            <button type="submit" class="btn btn-primary" id="addBulkSubmitButton">Добавить массово</button>
+                            <button type="submit" class="btn btn-primary btn-block" id="addBulkSubmitButton">Сгенерировать пользователей</button>
                         </form>
                     </div>
                 </div>
@@ -360,156 +305,138 @@
     </div>
 </div>
 
-<div class="modal fade" id="editUserModal" tabindex="-1" role="dialog" aria-labelledby="editUserModalLabel" aria-hidden="true">
+<div class="modal fade" id="editUserModal" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="editUserModalLabel">Редактировать пользователя</h5>
+                <h5 class="modal-title">Редактирование: <span id="editUserTitleUsername" class="text-primary font-weight-bold"></span></h5>
                 <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                     <span aria-hidden="true">×</span>
                 </button>
             </div>
             <div class="modal-body">
                 <form id="editUserForm">
-                    <div class="form-group">
-                        <label for="editUsername">Имя пользователя</label>
-                        <div class="input-group">
-                            <div class="input-group-prepend">
-                                <span class="input-group-text"><i class="fas fa-user"></i></span>
-                            </div>
-                            <input type="text" class="form-control" id="editUsername" readonly>
-                        </div>
+                    <div class="form-group" style="display:none">
+                         <input type="text" class="form-control" id="editUsername" readonly>
                     </div>
+                    
                     <div class="form-group">
-                        <label for="editPassword">Пароль
-                            <i class="fas fa-info-circle text-muted ml-1" 
-                               data-toggle="tooltip" 
-                               data-placement="top" 
-                               title="Изменение пароля отключит пользователя и сделает недействительными все существующие конфигурации и ссылки подписки. Новые ссылки необходимо отправить пользователю для восстановления доступа.">
-                            </i>
-                        </label>
+                        <label>Смена пароля</label>
                         <div class="input-group">
-                            <div class="input-group-prepend">
-                                <span class="input-group-text"><i class="fas fa-key"></i></span>
-                            </div>
-                            <input type="text" class="form-control" id="editPassword" name="new_password" placeholder="Оставьте пустым, чтобы не менять">
+                            <input type="text" class="form-control" id="editPassword" name="new_password" placeholder="Пусто = не менять">
                             <div class="input-group-append">
-                                <button class="btn btn-outline-secondary" type="button" id="generatePasswordBtn"><i class="fas fa-sync-alt"></i></button>
+                                <button class="btn btn-outline-secondary" type="button" id="generatePasswordBtn" title="Сгенерировать новый">
+                                    <i class="fas fa-sync-alt"></i>
+                                </button>
                             </div>
                         </div>
-                        <small class="form-text text-danger" id="editPasswordError"></small>
+                        <small class="form-text text-warning"><i class="fas fa-exclamation-triangle"></i> Изменение пароля сбросит текущее подключение пользователя.</small>
+                        <small class="text-danger" id="editPasswordError"></small>
                     </div>
-                    <div class="form-group">
-                        <label for="editTrafficLimit">Лимит трафика (ГБ)</label>
-                        <div class="input-group">
-                            <div class="input-group-prepend">
-                                <span class="input-group-text"><i class="fas fa-database"></i></span>
-                            </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group col-md-6">
+                            <label>Лимит трафика (ГБ)</label>
                             <input type="number" class="form-control" id="editTrafficLimit" name="new_traffic_limit">
                         </div>
-                    </div>
-					<div class="form-group requires-iplimit-service" style="display: none;">
-					     <label for="editMaxIps">Limit IP
-							<i class="fas fa-info-circle text-muted ml-1" 
-								data-toggle="tooltip" 
-								title="Укажите 0, чтобы использовать глобальный лимит из настроек.">
-							</i>
-						  </label>
-					<div class="input-group">
-						<div class="input-group-prepend">
-						<span class="input-group-text"><i class="fas fa-network-wired"></i></span>
-					</div>
-						<input type="number" class="form-control" id="editMaxIps" name="max_ips" placeholder="0 = Глобальный">
-					</div>
-					</div>
-                    <div class="form-group">
-                        <label for="editExpirationDays">Срок действия (дней)</label>
-                        <div class="input-group">
-                            <div class="input-group-prepend">
-                                <span class="input-group-text"><i class="fas fa-calendar-alt"></i></span>
-                            </div>
+                        <div class="form-group col-md-6">
+                            <label>Срок (дней)</label>
                             <input type="number" class="form-control" id="editExpirationDays" name="new_expiration_days">
                         </div>
                     </div>
+
+					<div class="form-group requires-iplimit-service bg-light p-2 rounded" style="display: none;">
+					     <label class="d-flex justify-content-between">
+                             Лимит IP 
+                             <small class="text-muted">0 = Глобальный</small>
+                         </label>
+    					<div class="input-group">
+    						<div class="input-group-prepend">
+    						  <span class="input-group-text"><i class="fas fa-network-wired"></i></span>
+    					    </div>
+    						<input type="number" class="form-control" id="editMaxIps" name="max_ips" placeholder="0">
+    					</div>
+                         <div class="custom-control custom-switch mt-2">
+                            <input type="checkbox" class="custom-control-input" id="editUnlimitedIp" name="unlimited_ip">
+                            <label class="custom-control-label text-primary" for="editUnlimitedIp">Безлимитный IP</label>
+                        </div>
+					</div>
+
                     <div class="form-group">
-                        <label for="editNote">Примечание</label>
-                         <div class="input-group">
-                            <div class="input-group-prepend">
-                                <span class="input-group-text"><i class="fas fa-sticky-note"></i></span>
-                            </div>
-                            <textarea class="form-control" id="editNote" name="note" rows="3"></textarea>
+                        <label>Примечание</label>
+                        <textarea class="form-control" id="editNote" name="note" rows="2"></textarea>
+                    </div>
+                    
+                    <div class="form-group border-top pt-3">
+                        <div class="custom-control custom-switch">
+                            <input type="checkbox" class="custom-control-input" id="editBlocked" name="blocked">
+                            <label class="custom-control-label text-danger font-weight-bold" for="editBlocked">
+                                <i class="fas fa-ban mr-1"></i> Заблокировать пользователя
+                            </label>
                         </div>
                     </div>
-                    <div class="form-check">
-                        <input type="checkbox" class="form-check-input" id="editBlocked" name="blocked">
-                        <label class="form-check-label" for="editBlocked">
-                            <i class="fas fa-ban text-danger mr-2"></i>Заблокирован
-                        </label>
-                    </div>
-                    <div class="form-check mb-3 requires-iplimit-service" style="display: none;">
-                        <input type="checkbox" class="form-check-input" id="editUnlimitedIp" name="unlimited_ip">
-                        <label class="form-check-label" for="editUnlimitedIp">
-                            <i class="fas fa-shield-alt text-primary mr-2"></i>Безлимитный IP
-                        </label>
-                    </div>
+                    
                     <input type="hidden" id="originalUsername" name="username">
-                    <button type="submit" class="btn btn-primary mt-3" id="editSubmitButton">Сохранить</button>
+                    <button type="submit" class="btn btn-primary btn-block" id="editSubmitButton">Сохранить изменения</button>
                 </form>
             </div>
         </div>
     </div>
 </div>
-<div class="modal fade" id="qrcodeModal" tabindex="-1" role="dialog" aria-labelledby="qrcodeModalLabel" aria-hidden="true">
-    <div class="modal-dialog" role="document">
+
+<div class="modal fade" id="qrcodeModal" tabindex="-1" role="dialog" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered" role="document">
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="qrcodeModalLabel">QR-коды</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+            <div class="modal-header border-0 pb-0">
+                 <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                     <span aria-hidden="true">×</span>
                 </button>
             </div>
-            <div class="modal-body text-center">
-                <div id="qrcodesContainer" class="mx-auto"></div>
+            <div class="modal-body text-center pt-0">
+                <h5 class="modal-title font-weight-bold mb-3">Подключение</h5>
+                <div id="qrcodesContainer" class="d-flex justify-content-center"></div>
+                <p class="text-muted small mt-2">Нажмите на QR-код, чтобы скопировать ссылку</p>
             </div>
         </div>
     </div>
 </div>
 
-<div class="modal fade" id="showLinksModal" tabindex="-1" role="dialog" aria-labelledby="showLinksModalLabel" aria-hidden="true">
+<div class="modal fade" id="showLinksModal" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog modal-lg" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="showLinksModalLabel">Экспорт ссылок</h5>
+                <h5 class="modal-title">Экспорт подписок</h5>
                 <button type="button" class="close" data-dismiss="modal" aria-label="Close">
                     <span aria-hidden="true">&times;</span>
                 </button>
             </div>
             <div class="modal-body">
-                <p>Выберите типы ссылок для извлечения:</p>
-                <div class="form-group">
-                    <div class="form-check form-check-inline" style="display: none;">
-                        <input class="form-check-input" type="checkbox" id="extractIPv4" value="ipv4">
-                        <label class="form-check-label" for="extractIPv4">IPv4</label>
+                <div class="mb-3">
+                    <label class="mr-2 font-weight-bold">Формат:</label>
+                    <div class="custom-control custom-checkbox custom-control-inline" style="display: none;">
+                        <input type="checkbox" class="custom-control-input" id="extractIPv4" value="ipv4">
+                        <label class="custom-control-label" for="extractIPv4">IPv4</label>
                     </div>
-                    <div class="form-check form-check-inline" style="display: none;">
-                        <input class="form-check-input" type="checkbox" id="extractIPv6" value="ipv6">
-                        <label class="form-check-label" for="extractIPv6">IPv6</label>
+                    <div class="custom-control custom-checkbox custom-control-inline" style="display: none;">
+                        <input type="checkbox" class="custom-control-input" id="extractIPv6" value="ipv6">
+                        <label class="custom-control-label" for="extractIPv6">IPv6</label>
                     </div>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="checkbox" id="extractNormalSub" value="normal_sub" checked>
-                        <label class="form-check-label" for="extractNormalSub">Подписка</label>
+                    <div class="custom-control custom-checkbox custom-control-inline">
+                        <input type="checkbox" class="custom-control-input" id="extractNormalSub" value="normal_sub" checked>
+                        <label class="custom-control-label" for="extractNormalSub">Ссылка на подписку</label>
                     </div>
-                    <div class="form-check form-check-inline">
-                        <input class="form-check-input" type="checkbox" id="extractNodes" value="nodes">
-                        <label class="form-check-label" for="extractNodes">Узлы (Nodes)</label>
+                    <div class="custom-control custom-checkbox custom-control-inline">
+                        <input type="checkbox" class="custom-control-input" id="extractNodes" value="nodes">
+                        <label class="custom-control-label" for="extractNodes">Отдельные узлы (VMess/VLESS)</label>
                     </div>
+                    <button type="button" class="btn btn-sm btn-outline-primary ml-2" id="extractLinksButton">Обновить список</button>
                 </div>
-                <button type="button" class="btn btn-primary mb-3" id="extractLinksButton">Извлечь ссылки</button>
-                <textarea id="linksTextarea" class="form-control" rows="10" readonly placeholder="Извлеченные ссылки появятся здесь..."></textarea>
+                
+                <textarea id="linksTextarea" class="form-control font-family-monospace" rows="10" readonly style="font-size: 0.85rem; background-color: #f8f9fa;" placeholder="Выберите формат и нажмите 'Обновить список'"></textarea>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-dismiss="modal">Закрыть</button>
-                <button type="button" class="btn btn-success" id="copyExtractedLinksButton">Копировать</button>
+                <button type="button" class="btn btn-success" id="copyExtractedLinksButton"><i class="fas fa-copy mr-1"></i> Копировать</button>
             </div>
         </div>
     </div>

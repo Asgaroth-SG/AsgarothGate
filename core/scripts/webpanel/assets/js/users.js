@@ -14,9 +14,45 @@ $(function () {
     const SEARCH_USERS_URL = contentSection.dataset.searchUrl;
 
     const usernameRegex = /^[a-zA-Z0-9_]+$/;
-    const passwordRegex = /^[a-zA-Z0-9]+$/;
+    const passwordRegex = /^[a-zA-Z0-9]*$/; 
+    
     let cachedUserData = [];
     let searchTimeout = null;
+
+    // --- Настройка компактных уведомлений (Toasts) ---
+    const Toast = Swal.mixin({
+        toast: true,
+        position: 'top-end',
+        showConfirmButton: false,
+        timer: 3000,
+        timerProgressBar: true,
+        didOpen: (toast) => {
+            toast.addEventListener('mouseenter', Swal.stopTimer)
+            toast.addEventListener('mouseleave', Swal.resumeTimer)
+        }
+    });
+
+    // --- Вспомогательные функции перевода ---
+
+    function translateError(errorMsg) {
+        if (!errorMsg) return "Произошла неизвестная ошибка.";
+        if (errorMsg.includes("User already exists")) return "Пользователь с таким именем уже существует.";
+        if (errorMsg.includes("Username can only contain")) return "Недопустимые символы в имени пользователя.";
+        if (errorMsg.includes("failed with exit code")) return "Ошибка выполнения системной команды.";
+        return errorMsg; 
+    }
+
+    function translateTable() {
+        $('#userTableBody td').each(function() {
+            let html = $(this).html();
+            if (html.includes('Unlimited')) {
+                html = html.replace(/Unlimited/g, '<span class="text-success">Безлимит</span>');
+                $(this).html(html);
+            }
+        });
+    }
+
+    // --- Основной функционал ---
 
     function setCookie(name, value, days) {
         let expires = "";
@@ -55,20 +91,44 @@ $(function () {
                     $('.requires-iplimit-service').show();
                 }
             })
-            .fail(() => console.error('Error fetching IP limit service status.'));
+            .fail(() => console.error('Ошибка получения статуса службы лимита IP.'));
+    }
+
+    function highlightSearchResults(query) {
+        if (!query) return;
+        const safeQuery = query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(${safeQuery})`, 'gi');
+
+        $('#userTableBody tr.user-main-row').each(function() {
+            const $nameCol = $(this).find('td:eq(2) strong');
+            if ($nameCol.length) {
+                const text = $nameCol.text();
+                if (regex.test(text)) {
+                    $nameCol.html(text.replace(regex, '<span class="search-highlight">$1</span>'));
+                }
+            }
+
+            const $noteCol = $(this).find('.note-cell small');
+            if ($noteCol.length) {
+                const text = $noteCol.text();
+                if (regex.test(text)) {
+                    $noteCol.html(text.replace(regex, '<span class="search-highlight">$1</span>'));
+                }
+            }
+        });
     }
 
     function validateUsername(inputElement, errorElement) {
         const username = $(inputElement).val();
         const isValid = usernameRegex.test(username);
-        $(errorElement).text(isValid ? "" : "Usernames can only contain letters, numbers, and underscores.");
+        $(errorElement).text(isValid ? "" : "Имя пользователя может содержать только латинские буквы, цифры и нижнее подчеркивание.");
         $(inputElement).closest('form').find('button[type="submit"]').prop('disabled', !isValid);
     }
     
     function validatePassword(inputElement, errorElement) {
         const password = $(inputElement).val();
         const isValid = password === '' || passwordRegex.test(password);
-        $(errorElement).text(isValid ? "" : "Password can only contain letters and numbers.");
+        $(errorElement).text(isValid ? "" : "Пароль содержит недопустимые символы (только латиница и цифры).");
         $('#editSubmitButton').prop('disabled', !isValid);
     }
     
@@ -88,7 +148,7 @@ $(function () {
         const $userTotalCount = $("#user-total-count");
 
         $paginationContainer.hide();
-        $userTableBody.css('opacity', 0.5).html('<tr><td colspan="14" class="text-center p-4"><i class="fas fa-spinner fa-spin"></i> Searching...</td></tr>');
+        $userTableBody.css('opacity', 0.5).html('<tr><td colspan="14" class="text-center p-4"><i class="fas fa-spinner fa-spin"></i> Поиск...</td></tr>');
 
         $.ajax({
             url: SEARCH_USERS_URL,
@@ -99,10 +159,13 @@ $(function () {
                 checkIpLimitServiceStatus();
                 const resultCount = $userTableBody.find('tr.user-main-row').length;
                 $userTotalCount.text(resultCount);
+                
+                translateTable();
+                highlightSearchResults(query);
             },
             error: function () {
-                Swal.fire("Error!", "An error occurred during search.", "error");
-                $userTableBody.html('<tr><td colspan="14" class="text-center p-4 text-danger">Search failed to load.</td></tr>');
+                Toast.fire({icon: 'error', title: "Произошла ошибка во время поиска."});
+                $userTableBody.html('<tr><td colspan="14" class="text-center p-4 text-danger">Не удалось загрузить результаты поиска.</td></tr>');
             },
             complete: function () {
                 $userTableBody.css('opacity', 1);
@@ -115,7 +178,7 @@ $(function () {
         const $paginationContainer = $("#paginationContainer");
         const $userTotalCount = $("#user-total-count");
 
-        $userTableBody.css('opacity', 0.5).html('<tr><td colspan="14" class="text-center p-4"><i class="fas fa-spinner fa-spin"></i> Loading users...</td></tr>');
+        $userTableBody.css('opacity', 0.5).html('<tr><td colspan="14" class="text-center p-4"><i class="fas fa-spinner fa-spin"></i> Загрузка пользователей...</td></tr>');
 
         $.ajax({
             url: USERS_BASE_URL,
@@ -130,10 +193,11 @@ $(function () {
                 $userTotalCount.text(newTotalCount);
 
                 checkIpLimitServiceStatus();
+                translateTable(); 
             },
             error: function () {
-                Swal.fire("Error!", "Could not restore the user list.", "error");
-                $userTableBody.html('<tr><td colspan="14" class="text-center p-4 text-danger">Failed to load users. Please refresh the page.</td></tr>');
+                Toast.fire({icon: 'error', title: "Не удалось восстановить список пользователей."});
+                $userTableBody.html('<tr><td colspan="14" class="text-center p-4 text-danger">Не удалось загрузить пользователей. Пожалуйста, обновите страницу.</td></tr>');
             },
             complete: function () {
                 $userTableBody.css('opacity', 1);
@@ -149,6 +213,18 @@ $(function () {
         validateUsername(this, `#${this.id}Error`);
     });
 
+    $('#addUnlimited').on('change', function() {
+        $('#addMaxIps').prop('disabled', this.checked);
+    });
+
+    $('#addBulkUnlimited').on('change', function() {
+        $('#addBulkMaxIps').prop('disabled', this.checked);
+    });
+
+    $('#editUnlimitedIp').on('change', function() {
+        $('#editMaxIps').prop('disabled', this.checked);
+    });
+
     $(".filter-button").on("click", function (e) {
         e.preventDefault();
         const filter = $(this).data("filter");
@@ -156,9 +232,10 @@ $(function () {
         $("#userTable tbody tr.user-main-row").each(function () {
             let showRow;
             switch (filter) {
-                case "on-hold":    showRow = $(this).find("td:eq(3) i").hasClass("text-warning"); break;
-                case "online":     showRow = $(this).find("td:eq(3) i").hasClass("text-success"); break;
-                case "enable":     showRow = $(this).find("td:eq(8) i").hasClass("text-success"); break;
+                case "on-hold":    
+                    showRow = $(this).find("td:eq(3) .badge-warning").length > 0; 
+                    break;
+                case "online":     showRow = $(this).find("td:eq(3) .badge-success").length > 0; break;
                 case "disable":    showRow = $(this).find("td:eq(8) i").hasClass("text-danger"); break;
                 default:           showRow = true;
             }
@@ -167,6 +244,9 @@ $(function () {
                 $(this).next('tr.user-details-row').hide();
             }
         });
+        
+        $(".filter-button").removeClass("active");
+        $(this).addClass("active");
     });
 
     $("#selectAll").on("change", function () {
@@ -176,21 +256,22 @@ $(function () {
     $("#deleteSelected").on("click", function () {
         const selectedUsers = $(".user-checkbox:checked").map((_, el) => $(el).val()).get();
         if (selectedUsers.length === 0) {
-            return Swal.fire("Warning!", "Please select at least one user to delete.", "warning");
+            return Swal.fire("Внимание!", "Пожалуйста, выберите хотя бы одного пользователя для удаления.", "warning");
         }
         Swal.fire({
-            title: "Are you sure?",
-            html: `This will delete: <b>${selectedUsers.join(", ")}</b>.<br>This action cannot be undone!`,
+            title: "Вы уверены?",
+            html: `Будут удалены: <b>${selectedUsers.join(", ")}</b>.<br>Это действие нельзя отменить!`,
             icon: "warning",
             showCancelButton: true,
             confirmButtonColor: "#d33",
-            confirmButtonText: "Yes, delete them!",
+            confirmButtonText: "Да, удалить их!",
+            cancelButtonText: "Отмена"
         }).then((result) => {
             if (!result.isConfirmed) return;
 
             Swal.fire({
-                title: 'Deleting...',
-                text: 'Please wait',
+                title: 'Удаление...',
+                text: 'Пожалуйста, подождите',
                 allowOutsideClick: false,
                 didOpen: () => Swal.showLoading()
             });
@@ -202,16 +283,24 @@ $(function () {
                     contentType: "application/json",
                     data: JSON.stringify({ usernames: selectedUsers })
                 })
-                .done(() => Swal.fire("Success!", "Selected users have been deleted.", "success").then(() => refreshUserList()))
-                .fail((err) => Swal.fire("Error!", err.responseJSON?.detail || "An error occurred while deleting users.", "error"));
+                .done(() => {
+                    Swal.close(); // Закрываем спиннер
+                    Toast.fire({icon: 'success', title: "Выбранные пользователи удалены."});
+                    refreshUserList();
+                })
+                .fail((err) => Swal.fire("Ошибка!", translateError(err.responseJSON?.detail), "error"));
             } else {
                 const singleUrl = REMOVE_USER_URL_TEMPLATE.replace('U', selectedUsers[0]);
                 $.ajax({
                     url: singleUrl,
                     method: "DELETE"
                 })
-                .done(() => Swal.fire("Success!", "The user has been deleted.", "success").then(() => refreshUserList()))
-                .fail((err) => Swal.fire("Error!", err.responseJSON?.detail || "An error occurred while deleting the user.", "error"));
+                .done(() => {
+                    Swal.close();
+                    Toast.fire({icon: 'success', title: `Пользователь ${selectedUsers[0]} удален.`});
+                    refreshUserList();
+                })
+                .fail((err) => Swal.fire("Ошибка!", translateError(err.responseJSON?.detail), "error"));
             }
         });
     });
@@ -228,14 +317,18 @@ $(function () {
 
         jsonData.unlimited = jsonData.unlimited === 'on';
 
-        // --- НОВОЕ: Обработка max_ips при создании ---
-        const maxIpsVal = $("#addMaxIps").val();
+        let maxIpsVal;
+        if (isBulk) {
+            maxIpsVal = $("#addBulkMaxIps").val();
+        } else {
+            maxIpsVal = $("#addMaxIps").val();
+        }
         jsonData.max_ips = maxIpsVal ? parseInt(maxIpsVal) : 0;
-        // ---------------------------------------------
 
+        // Показываем спиннер, так как создание (особенно массовое) может занять время
         Swal.fire({
-            title: 'Adding...',
-            text: 'Please wait',
+            title: 'Добавление...',
+            text: 'Пожалуйста, подождите',
             allowOutsideClick: false,
             didOpen: () => Swal.showLoading()
         });
@@ -248,9 +341,21 @@ $(function () {
         })
         .done(res => {
             $('#addUserModal').modal('hide');
-            Swal.fire("Success!", res.detail, "success").then(() => refreshUserList());
+            Swal.close(); // Закрываем спиннер
+            
+            let successMsg = "";
+            if (isBulk) {
+                const count = $("#addBulkCount").val();
+                successMsg = `Создано ${count} пользователей.`;
+            } else {
+                const username = $("#addUsername").val();
+                successMsg = `Пользователь ${username} создан.`;
+            }
+            // Используем Toast
+            Toast.fire({icon: 'success', title: successMsg});
+            refreshUserList();
         })
-        .fail(err => Swal.fire("Error!", err.responseJSON?.detail || "An error occurred.", "error"))
+        .fail(err => Swal.fire("Ошибка!", translateError(err.responseJSON?.detail), "error"))
         .always(() => button.prop('disabled', false));
     });
 
@@ -260,7 +365,7 @@ $(function () {
         const url = GET_USER_URL_TEMPLATE.replace('U', user);
 
         const trafficText = dataRow.find("td:eq(4)").text();
-        const expiryText = dataRow.find("td:eq(6)").text();
+        const expiryText = dataRow.find("td:eq(6)").text().trim();
         const note = dataRow.data('note');
         const statusText = dataRow.find("td:eq(3)").text().trim();
         
@@ -269,34 +374,41 @@ $(function () {
 
         $("#originalUsername").val(user);
         $("#editUsername").val(user);
-        $("#editTrafficLimit").val(parseFloat(trafficText.split('/')[1]) || 0);
+        
+        let trafficVal = parseFloat(trafficText.split('/')[1]);
+        if (isNaN(trafficVal)) trafficVal = 0;
+        $("#editTrafficLimit").val(trafficVal);
 
-        if (statusText.includes("On-hold")) {
-            $("#editExpirationDays").val('').attr("placeholder", "Paused");
+        if (statusText.includes("On-hold") || statusText.includes("В ожидании") || statusText.includes("Пауза")) {
+            $("#editExpirationDays").val('').attr("placeholder", "В ожидании");
         } else {
-            $("#editExpirationDays").val(parseInt(expiryText) || 0).attr("placeholder", "");
+            let days = parseInt(expiryText);
+            if (isNaN(days)) days = 0; 
+            $("#editExpirationDays").val(days).attr("placeholder", "");
         }
         
         $("#editNote").val(note || '');
         $("#editBlocked").prop("checked", !dataRow.find("td:eq(8) i").hasClass("text-success"));
-        $("#editUnlimitedIp").prop("checked", dataRow.find(".unlimited-ip-cell i").hasClass("text-primary"));
+        
+        const isUnlimited = dataRow.find(".requires-iplimit-service .badge-primary").length > 0;
+        $("#editUnlimitedIp").prop("checked", isUnlimited);
+        $('#editMaxIps').prop('disabled', isUnlimited);
     
         const passwordInput = $("#editPassword");
-        passwordInput.val("Loading...").prop("disabled", true);
+        passwordInput.val("").attr("placeholder", "Загрузка..."); 
     
         $.getJSON(url)
             .done(userData => {
-                passwordInput.val(userData.password || '');
-                
+                passwordInput.val(userData.password || '').attr("placeholder", "Пусто = не менять");
                 $("#editMaxIps").val(userData.max_ips || 0);
                 
+                if (userData.max_download_bytes) {
+                     $("#editTrafficLimit").val((userData.max_download_bytes / (1024*1024*1024)).toFixed(2));
+                }
                 validatePassword('#editPassword', '#editPasswordError');
             })
             .fail(() => {
-                passwordInput.val("").attr("placeholder", "Failed to load password");
-            })
-            .always(() => {
-                passwordInput.prop("disabled", false);
+                passwordInput.val("").attr("placeholder", "Не удалось загрузить данные");
             });
     });
     
@@ -314,13 +426,13 @@ $(function () {
         const jsonData = Object.fromEntries(formData.entries());
         jsonData.blocked = jsonData.blocked === 'on';
         jsonData.unlimited_ip = jsonData.unlimited_ip === 'on';
-
+        
         const maxIpsVal = $("#editMaxIps").val();
         jsonData.max_ips = maxIpsVal ? parseInt(maxIpsVal) : 0;
 
         Swal.fire({
-            title: 'Updating...',
-            text: 'Please wait',
+            title: 'Обновление...',
+            text: 'Пожалуйста, подождите',
             allowOutsideClick: false,
             didOpen: () => Swal.showLoading()
         });
@@ -333,9 +445,12 @@ $(function () {
         })
         .done(res => {
             $('#editUserModal').modal('hide');
-            Swal.fire("Success!", res.detail, "success").then(() => refreshUserList());
+            Swal.close();
+            // Используем Toast
+            Toast.fire({icon: 'success', title: `Данные пользователя ${originalUsername} обновлены.`});
+            refreshUserList();
         })
-        .fail(err => Swal.fire("Error!", err.responseJSON?.detail, "error"))
+        .fail(err => Swal.fire("Ошибка!", translateError(err.responseJSON?.detail), "error"))
         .always(() => button.prop('disabled', false));
     });
 
@@ -343,22 +458,27 @@ $(function () {
         const button = $(this);
         const username = button.data("user");
         const isDelete = button.hasClass("delete-user");
-        const action = isDelete ? "delete" : "reset";
+        
+        const actionRus = isDelete ? "удалить" : "сбросить";
+        const actionProcessRus = isDelete ? "Удаление..." : "Сброс...";
+        const actionButtonRus = isDelete ? "Да, удалить!" : "Да, сбросить!";
+        
         const urlTemplate = isDelete ? REMOVE_USER_URL_TEMPLATE : RESET_USER_URL_TEMPLATE;
 
         Swal.fire({
-            title: `Are you sure you want to ${action}?`,
-            html: `This will ${action} user <b>${username}</b>.`,
+            title: `Вы уверены, что хотите ${actionRus}?`,
+            html: `Это действие ${actionRus} пользователя <b>${username}</b>.`,
             icon: "warning",
             showCancelButton: true,
             confirmButtonColor: "#d33",
-            confirmButtonText: `Yes, ${action} it!`,
+            confirmButtonText: actionButtonRus,
+            cancelButtonText: "Отмена"
         }).then((result) => {
             if (!result.isConfirmed) return;
 
             Swal.fire({
-                title: `${action.charAt(0).toUpperCase() + action.slice(1)}ing...`,
-                text: 'Please wait',
+                title: actionProcessRus,
+                text: 'Пожалуйста, подождите',
                 allowOutsideClick: false,
                 didOpen: () => Swal.showLoading()
             });
@@ -367,8 +487,16 @@ $(function () {
                 url: urlTemplate.replace("U", encodeURIComponent(username)),
                 method: isDelete ? "DELETE" : "GET",
             })
-            .done(res => Swal.fire("Success!", res.detail, "success").then(() => refreshUserList()))
-            .fail(() => Swal.fire("Error!", `Failed to ${action} user.`, "error"));
+            .done(res => {
+                Swal.close();
+                const msg = isDelete 
+                    ? `Пользователь ${username} удален.` 
+                    : `Пользователь ${username} сброшен.`;
+                // Используем Toast
+                Toast.fire({icon: 'success', title: msg});
+                refreshUserList();
+            })
+            .fail(() => Swal.fire("Ошибка!", `Не удалось ${actionRus} пользователя.`, "error"));
         });
     });
 
@@ -376,29 +504,40 @@ $(function () {
         const username = $(event.relatedTarget).data("username");
         const qrcodesContainer = $("#qrcodesContainer").empty();
         const url = USER_URI_URL_TEMPLATE.replace("U", encodeURIComponent(username));
+        
+        qrcodesContainer.html('<div class="text-center"><i class="fas fa-spinner fa-spin fa-2x"></i></div>');
+
         $.getJSON(url, response => {
+            qrcodesContainer.empty();
             [
-               // { type: "IPv4", link: response.ipv4 },
-               // { type: "IPv6", link: response.ipv6 }, 
-                { type: "Подписка", link: response.normal_sub }
+                { type: "Копировать ссылку подписки", link: response.normal_sub }
             ].forEach(config => {
                 if (!config.link) return;
-                const qrId = `qrcode-${config.type}`;
+                const qrId = `qrcode-${config.type.replace(/\s+/g, '')}`;
                 const card = $(`<div class="card d-inline-block m-2"><div class="card-body"><div id="${qrId}" class="mx-auto" style="cursor: pointer;"></div><div class="mt-2 text-center small text-body font-weight-bold">${config.type}</div></div></div>`);
                 qrcodesContainer.append(card);
                 new QRCodeStyling({ width: 200, height: 200, data: config.link, margin: 2 }).append(document.getElementById(qrId));
-                card.on("click", () => navigator.clipboard.writeText(config.link).then(() => Swal.fire({ icon: "success", title: `${config.type} link copied!`, showConfirmButton: false, timer: 1200 })));
+                card.on("click", () => navigator.clipboard.writeText(config.link).then(() => {
+                    // Используем Toast
+                    Toast.fire({icon: 'success', title: `Ссылка скопирована!`});
+                }));
             });
-        }).fail(() => Swal.fire("Error!", "Failed to fetch user configuration.", "error"));
+            if (qrcodesContainer.is(':empty')) {
+                qrcodesContainer.html('<p class="text-danger">Ссылки не найдены.</p>');
+            }
+        }).fail(() => {
+            qrcodesContainer.html('<p class="text-danger">Ошибка загрузки.</p>');
+            Toast.fire({icon: 'error', title: "Не удалось получить конфигурацию."});
+        });
     });
     
     $("#showSelectedLinks").on("click", function () {
         const selectedUsers = $(".user-checkbox:checked").map((_, el) => $(el).val()).get();
         if (selectedUsers.length === 0) {
-            return Swal.fire("Warning!", "Please select at least one user.", "warning");
+            return Swal.fire("Внимание!", "Пожалуйста, выберите хотя бы одного пользователя.", "warning");
         }
 
-        Swal.fire({ title: 'Fetching links...', text: 'Please wait.', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
+        Swal.fire({ title: 'Получение ссылок...', text: 'Пожалуйста, подождите.', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
         
         $.ajax({
             url: BULK_URI_URL,
@@ -410,12 +549,6 @@ $(function () {
             cachedUserData = results;
             
             const fetchedCount = results.length;
-            const failedCount = selectedUsers.length - fetchedCount;
-            
-            if (failedCount > 0) {
-               Swal.fire('Warning', `Could not fetch info for ${failedCount} user(s), but others were successful.`, 'warning');
-            }
-            
             if (fetchedCount > 0) {
                 const hasIPv4 = cachedUserData.some(user => user.ipv4);
                 const hasIPv6 = cachedUserData.some(user => user.ipv6);
@@ -430,9 +563,9 @@ $(function () {
                 $("#linksTextarea").val('');
                 $("#showLinksModal").modal("show");
             } else {
-               Swal.fire('Error', `Could not fetch info for any of the selected users.`, 'error');
+               Toast.fire({icon: 'error', title: "Не удалось получить информацию."});
             }
-        }).fail(() => Swal.fire('Error!', 'An error occurred while fetching the links.', 'error'));
+        }).fail(() => Swal.fire('Ошибка!', 'Произошла ошибка при получении ссылок.', 'error'));
     });
 
     $("#extractLinksButton").on("click", function () {
@@ -445,21 +578,11 @@ $(function () {
         };
 
         cachedUserData.forEach(user => {
-            if (linkTypes.ipv4 && user.ipv4) {
-                allLinks.push(user.ipv4);
-            }
-            if (linkTypes.ipv6 && user.ipv6) {
-                allLinks.push(user.ipv6);
-            }
-            if (linkTypes.normal_sub && user.normal_sub) {
-                allLinks.push(user.normal_sub);
-            }
+            if (linkTypes.ipv4 && user.ipv4) allLinks.push(user.ipv4);
+            if (linkTypes.ipv6 && user.ipv6) allLinks.push(user.ipv6);
+            if (linkTypes.normal_sub && user.normal_sub) allLinks.push(user.normal_sub);
             if (linkTypes.nodes && user.nodes && user.nodes.length > 0) {
-                user.nodes.forEach(node => {
-                    if (node.uri) {
-                        allLinks.push(node.uri);
-                    }
-                });
+                user.nodes.forEach(node => { if (node.uri) allLinks.push(node.uri); });
             }
         });
 
@@ -469,10 +592,10 @@ $(function () {
     $("#copyExtractedLinksButton").on("click", () => {
         const links = $("#linksTextarea").val();
         if (!links) {
-            return Swal.fire({ icon: "info", title: "Nothing to copy!", text: "Please extract some links first.", showConfirmButton: false, timer: 1500 });
+            return Toast.fire({ icon: "info", title: "Нечего копировать!" });
         }
         navigator.clipboard.writeText(links)
-            .then(() => Swal.fire({ icon: "success", title: "Links copied!", showConfirmButton: false, timer: 1200 }));
+            .then(() => Toast.fire({ icon: "success", title: "Ссылки скопированы!" }));
     });
 
     $('#userTable').on('click', '.toggle-details-btn', function() {
@@ -493,12 +616,23 @@ $(function () {
         $('#addUserForm, #addBulkUsersForm').trigger('reset');
         $('#addUsernameError, #addBulkPrefixError').text('');
         
-        Object.assign(document.getElementById('addMaxIps'), {value: 0});
+        const singleIpInput = document.getElementById('addMaxIps');
+        if (singleIpInput) {
+            singleIpInput.value = 0;
+            singleIpInput.disabled = false;
+        }
+
+        const bulkIpInput = document.getElementById('addBulkMaxIps');
+        if (bulkIpInput) {
+            bulkIpInput.value = 0;
+            bulkIpInput.disabled = false;
+        }
         
         Object.assign(document.getElementById('addTrafficLimit'), {value: 30});
         Object.assign(document.getElementById('addExpirationDays'), {value: 30});
         Object.assign(document.getElementById('addBulkTrafficLimit'), {value: 30});
         Object.assign(document.getElementById('addBulkExpirationDays'), {value: 30});
+        
         $('#addSubmitButton, #addBulkSubmitButton').prop('disabled', true);
         $('#addUserModal a[data-toggle="tab"]').first().tab('show');
     });
@@ -534,5 +668,6 @@ $(function () {
     
     initializeLimitSelector();
     checkIpLimitServiceStatus();
+    translateTable(); 
     $('[data-toggle="tooltip"]').tooltip();
 });
