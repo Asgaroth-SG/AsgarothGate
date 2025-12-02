@@ -71,4 +71,4 @@ app.router.add_post("/auth", authenticate)
 app.on_startup.append(load_users)
 
 if __name__ == "__main__":
-    web.run_app(app, host="127.0.0.1", port=28262)
+    web.run_app(app, host="0.0.0.0", port=28262)

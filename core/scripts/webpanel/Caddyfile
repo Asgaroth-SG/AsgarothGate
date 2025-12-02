@@ -29,6 +29,7 @@ cloud.asgaroth.ru:443 {
     }
     
     handle @otherPaths {
-        abort
+        root * /var/www/cloud.asgaroth.ru/
+        file_server
     }
 }

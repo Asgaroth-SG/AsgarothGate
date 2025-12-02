@@ -7,7 +7,7 @@ from pathlib import Path
 from datetime import datetime
 
 # --- Configuration ---
-DB_NAME = "blitz_panel"
+DB_NAME = "asgaroth_panel"
 BACKUP_ROOT_DIR = Path("/opt/hysbackup")
 TIMESTAMP = datetime.now().strftime('%Y%m%d_%H%M%S')
 BACKUP_FILENAME = BACKUP_ROOT_DIR / f"hysteria_backup_{TIMESTAMP}.zip"
