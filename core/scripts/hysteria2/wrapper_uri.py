@@ -33,6 +33,12 @@ def load_env_file(env_file: str) -> Dict[str, str]:
                     env_vars[key] = value.strip()
     return env_vars
 
+
+def get_main_node_label() -> str:
+    """Название главной ноды из .configs.env (MAIN_NODE_LABEL)."""
+    env_vars = load_env_file(CONFIG_ENV)
+    return env_vars.get('MAIN_NODE_LABEL', '🇺🇸 США')
+
 def generate_uri(username: str, auth_password: str, ip: str, port: str, 
                  uri_params: Dict[str, str], ip_version: int, fragment_tag: str) -> str:
     ip_part = f"[{ip}]" if ip_version == 6 and ':' in ip else ip
@@ -76,6 +82,8 @@ def process_users(target_usernames: List[str]) -> List[Dict[str, Any]]:
     # ip6 = hy2_env.get('IP6') # IPv6 отключен
     ns_domain, ns_port, ns_subpath = ns_env.get('HYSTERIA_DOMAIN'), ns_env.get('HYSTERIA_PORT'), ns_env.get('SUBPATH')
 
+    main_label = get_main_node_label()
+
     results = []
     for username in target_usernames:
         user_data = db.get_user(username)
@@ -87,7 +95,7 @@ def process_users(target_usernames: List[str]) -> List[Dict[str, Any]]:
         user_output = {"username": username, "ipv4": None, "ipv6": None, "nodes": [], "normal_sub": None}
 
         if ip4 and ip4 != "None":
-            user_output["ipv4"] = generate_uri(username, auth_password, ip4, default_port, base_uri_params, 4, "🇺🇸 США")
+            user_output["ipv4"] = generate_uri(username, auth_password, ip4, default_port, base_uri_params, 4, main_label)
         
        # if ip6 and ip6 != "None":
        #    user_output["ipv6"] = generate_uri(username, auth_password, ip6, default_port, base_uri_params, 6, "🇺🇸 США")

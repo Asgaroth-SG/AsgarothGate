@@ -45,6 +45,12 @@ def load_hysteria2_ips() -> Tuple[str, str, str]:
     sni = env_vars.get('SNI', '')
     return ip4, ip6, sni
 
+
+def get_main_node_label() -> str:
+    """Название главной ноды из .configs.env (MAIN_NODE_LABEL)."""
+    env_vars = load_hysteria2_env()
+    return env_vars.get('MAIN_NODE_LABEL', '🇺🇸 США')
+
 def get_singbox_domain_and_port() -> Tuple[str, str]:
     env_vars = load_env_file(SINGBOX_ENV)
     domain = env_vars.get('HYSTERIA_DOMAIN', '')
@@ -159,9 +165,10 @@ def show_uri(args: argparse.Namespace) -> None:
 
     if args.all or args.ip_version == 4:
         if ip4 and ip4 != "None":
+            main_label = get_main_node_label()
             uri = generate_uri(args.username, auth_password, ip4, local_port, 
-                                 local_obfs_password, local_sha256, local_sni, 4, local_insecure, "🇺🇸 США")
-            display_uri_and_qr(uri, "США", args, terminal_width)
+                                 local_obfs_password, local_sha256, local_sni, 4, local_insecure, main_label)
+            display_uri_and_qr(uri, main_label, args, terminal_width)
             
    # if args.all or args.ip_version == 6:
    #     if ip6 and ip6 != "None":
