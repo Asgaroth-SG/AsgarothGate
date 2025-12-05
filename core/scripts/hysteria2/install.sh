@@ -10,9 +10,38 @@ install_hysteria() {
     local port=$1
 
     echo "Установка Hysteria..."
+
+    echo
+    echo " Настройка названия ноды Hysteria"
+    read -rp "Отображаемое название ноды (например: 🇩🇪 Германия) [по умолчанию Default]: " node_label
+    if [ -z "$node_label" ]; then
+        node_label="Default"
+    fi
+
+    local config_env="${CONFIG_ENV:-/etc/hysteria/.configs.env}"
+
+    mkdir -p /etc/hysteria
+
+    if [ -f "$config_env" ]; then
+        grep -v '^MAIN_NODE_LABEL=' "$config_env" > "${config_env}.tmp" || true
+        mv "${config_env}.tmp" "$config_env"
+    else
+        touch "$config_env"
+    fi
+    echo "MAIN_NODE_LABEL=$node_label" >> "$config_env"
+
+    echo "$node_label" > /etc/hysteria/.main_node_label
+
+    echo "Название ноды установлено: $node_label"
+    echo "Сохранено в: $config_env и /etc/hysteria/.main_node_label"
+    echo
+
     bash <(curl -fsSL https://get.hy2.sh/) >/dev/null 2>&1
     
-    mkdir -p /etc/hysteria && cd /etc/hysteria/
+    cd /etc/hysteria/ || {
+        echo -e "${red}Не удалось перейти в /etc/hysteria${NC}"
+        exit 1
+    }
 
     echo "Генерация ключа CA и сертификата..."
     openssl ecparam -genkey -name prime256v1 -out ca.key >/dev/null 2>&1
@@ -91,7 +120,7 @@ install_hysteria() {
     if systemctl is-active --quiet hysteria-auth.service; then
         echo -e "${cyan}Сервер аутентификации Hysteria${NC} успешно запущен."
     else
-        echo -e "${red}Ошибка:${NC} hysteria-auth.service не активна."
+        echo -е "${red}Ошибка:${NC} hysteria-auth.service не активна."
         exit 1
     fi
 

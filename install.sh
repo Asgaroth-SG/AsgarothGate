@@ -86,6 +86,7 @@ check_os_version() {
     fi
 }
 
+
 install_mongodb() {
     log_info "Установка MongoDB..."
     
@@ -128,6 +129,7 @@ install_mongodb() {
         exit 1
     fi
 }
+
 
 install_packages() {
     local REQUIRED_PACKAGES=("jq" "curl" "pwgen" "python3" "python3-pip" "python3-venv" "bc" "zip" "unzip" "lsof" "gnupg" "lsb-release")
@@ -257,26 +259,6 @@ add_alias() {
     fi
 }
 
-setup_main_node_label() {
-    log_info "Настройка отображаемого названия главной ноды..."
-    echo
-    read -p "Отображаемое название главной ноды (например, '🇩🇪 Германия') [по умолчанию 🇺🇸 США]: " main_node_label
-    if [ -z "$main_node_label" ]; then
-        main_node_label="🇺🇸 США"
-    fi
-
-    mkdir -p /etc/hysteria
-
-    # если .configs.env уже есть – убираем старую строку MAIN_NODE_LABEL
-    if [ -f /etc/hysteria/.configs.env ]; then
-        grep -v '^MAIN_NODE_LABEL=' /etc/hysteria/.configs.env > /etc/hysteria/.configs.env.tmp || true
-        mv /etc/hysteria/.configs.env.tmp /etc/hysteria/.configs.env
-    fi
-
-    echo "MAIN_NODE_LABEL=$main_node_label" >> /etc/hysteria/.configs.env
-    log_success "Главная нода будет отображаться как: $main_node_label"
-}
-
 run_menu() {
     log_info "Подготовка к запуску меню..."
     
@@ -297,7 +279,6 @@ main() {
     download_and_extract_release
     setup_python_env
     add_alias
-    setup_main_node_label
     
     source ~/.bashrc &> /dev/null || true
     
