@@ -226,6 +226,7 @@
                                                         <th>Порт</th>
                                                         <th>SNI</th>
                                                         <th>OBFS</th>
+                                                        <th>Уровень</th>
                                                         <th>Небезопасно</th>
                                                         <th>Pin SHA256</th>
                                                         <th>Действие</th>
@@ -260,11 +261,19 @@
                                                     <div class="invalid-feedback">Пожалуйста, введите корректный порт (1-65535).</div>
                                                 </div>
                                                 <div class="form-group col-md-3">
+                                                    <label for="node_tier">Уровень (Tier)</label>
+                                                    <select class="form-control" id="node_tier">
+                                                        <option value="standard" selected>Standard</option>
+                                                        <option value="premium">Premium</option>
+                                                    </select>
+                                                    <small class="form-text text-muted">Premium видят только Premium юзеры.</small>
+                                                </div>
+                                                <div class="form-group col-md-3">
                                                     <label for="node_obfs">OBFS</label>
                                                     <input type="text" class="form-control" id="node_obfs" placeholder="obfs-пароль">
                                                     <div class="invalid-feedback">OBFS не может быть пустым, если указан.</div>
                                                 </div>
-                                                <div class="form-group col-md-6">
+                                                <div class="form-group col-md-3">
                                                     <label for="node_sni">SNI</label>
                                                     <input type="text" class="form-control" id="node_sni" placeholder="например, yourdomain.com">
                                                     <div class="invalid-feedback">Пожалуйста, введите корректное доменное имя (не IP).</div>

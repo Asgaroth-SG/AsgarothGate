@@ -239,6 +239,8 @@ $(document).ready(function () {
                 fieldValid = (input.val().trim() === '') ? true : isValidSha256Pin(input.val());
             } else if (id === 'node_obfs') {
                 fieldValid = true;
+            } else if (id === 'node_tier') { // Селекты обычно валидны, но можно проверить
+                 fieldValid = true;
             } else {
                 if (input.attr('placeholder') && (input.attr('placeholder').includes('Enter') || input.attr('placeholder').includes('Введите')) && !input.attr('id').startsWith('ipv')) {
                      fieldValid = input.val().trim() !== "";
@@ -311,7 +313,7 @@ $(document).ready(function () {
                                 <td>${escapeHtml(node.obfs || 'Н/Д')}</td>
                                 <td>${
                                     ((node.tier || 'standard').toLowerCase() === 'premium')
-                                        ? '<span class="badge badge-warning">Premium</span>'
+                                        ? '<span class="badge badge-warning" style="background-color: #f39c12; color: #fff;">Premium</span>'
                                         : '<span class="badge badge-secondary">Standard</span>'
                                 }</td>
                                 <td>${escapeHtml(node.insecure ? 'Да' : 'Нет')}</td>
@@ -340,9 +342,9 @@ $(document).ready(function () {
         const obfs = $("#node_obfs").val().trim();
         const pinSHA256 = $("#node_pin").val().trim();
         const insecure = $("#node_insecure").is(':checked');
-        const tier = ($("#node_tier").val() || 'standard').toLowerCase(); // новый параметр тарифа (standard/premium)
+        const tier = ($("#node_tier").val() || 'standard').toLowerCase(); // --- Считываем Tier ---
         
-        const data = { name: name, ip: ip, insecure: insecure, tier: tier };
+        const data = { name: name, ip: ip, insecure: insecure, tier: tier }; // --- Добавляем в data ---
         if (port) data.port = parseInt(port);
         if (sni) data.sni = sni;
         if (obfs) data.obfs = obfs;

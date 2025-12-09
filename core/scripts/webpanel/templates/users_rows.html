@@ -1,6 +1,6 @@
 {% if not users %}
 <tr>
-    <td colspan="15" class="text-center p-4">
+    <td colspan="14" class="text-center p-4">
         Пользователи не найдены.
     </td>
 </tr>
@@ -26,6 +26,13 @@
                 <span class="badge badge-danger">Конфликт</span>
             {% else %}
                 <span class="badge badge-danger">{{ user.status }}</span>
+            {% endif %}
+
+            {# --- Отображение тарифа --- #}
+            {% if user.plan == 'premium' %}
+                <span class="badge badge-warning ml-1" style="background-color: #f39c12; color: #fff;" title="Premium Plan">Premium</span>
+            {% else %}
+                <span class="badge badge-light border ml-1 text-muted" style="font-size: 0.7rem;" title="Standard Plan">Std</span>
             {% endif %}
         </td>
         
@@ -70,17 +77,6 @@
             <i class="fas fa-times text-danger"></i>
             {% endif %}
         </td>
-
-        <!-- Новая колонка: тариф пользователя -->
-        <td class="d-none d-md-table-cell text-center">
-            {% set plan = (user.plan or 'standard')|lower %}
-            {% if plan == 'premium' %}
-                <span class="badge badge-warning">Premium</span>
-            {% else %}
-                <span class="badge badge-secondary">Standard</span>
-            {% endif %}
-        </td>
-
         <td class="d-none d-md-table-cell note-cell">
             {% if user.note %}
                 <small class="text-muted" title="{{ user.note }}">{{ user.note | truncate(15, True) }}</small>
@@ -144,20 +140,16 @@
                     {% endif %}
                     </span>
                 </p>
-                <p><strong>Трафик:</strong> <span>{{ user.traffic_used }}</span></p>
-
-                <!-- Новый блок: тариф в деталях -->
                 <p><strong>Тариф:</strong>
                     <span>
-                        {% set plan = (user.plan or 'standard')|lower %}
-                        {% if plan == 'premium' %}
-                            Premium
-                        {% else %}
-                            Standard
-                        {% endif %}
+                    {% if user.plan == 'premium' %}
+                        <span class="badge badge-warning" style="background-color: #f39c12; color: #fff;">Premium</span>
+                    {% else %}
+                        <span class="badge badge-light border text-muted">Standard</span>
+                    {% endif %}
                     </span>
                 </p>
-
+                <p><strong>Трафик:</strong> <span>{{ user.traffic_used }}</span></p>
                 <p><strong>Истекает:</strong> 
                     <span>
                     {% if user.expiry_date == "On-hold" %}

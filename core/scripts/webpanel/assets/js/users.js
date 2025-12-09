@@ -325,6 +325,13 @@ $(function () {
         const jsonData = Object.fromEntries(formData.entries());
 
         jsonData.unlimited = jsonData.unlimited === 'on';
+        
+        // --- Чтение и добавление плана (Tier) ---
+        if (isBulk) {
+            jsonData.plan = $("#addBulkPlan").val();
+        } else {
+            jsonData.plan = $("#addPlan").val();
+        }
 
         let maxIpsVal;
         if (isBulk) {
@@ -413,7 +420,7 @@ $(function () {
                      $("#editTrafficLimit").val((userData.max_download_bytes / (1024*1024*1024)).toFixed(2));
                 }
 
-                // подставляем тариф пользователя в селект
+                // --- Загрузка и установка плана (Tier) ---
                 const plan = (userData.plan || 'standard').toLowerCase();
                 $("#editPlan").val(plan);
 
@@ -439,6 +446,9 @@ $(function () {
         jsonData.blocked = jsonData.blocked === 'on';
         jsonData.unlimited_ip = jsonData.unlimited_ip === 'on';
         
+        // --- Добавление плана при редактировании ---
+        jsonData.plan = $("#editPlan").val();
+
         const maxIpsVal = $("#editMaxIps").val();
         jsonData.max_ips = maxIpsVal ? parseInt(maxIpsVal) : 0;
 
@@ -642,6 +652,10 @@ $(function () {
         Object.assign(document.getElementById('addBulkTrafficLimit'), {value: 30});
         Object.assign(document.getElementById('addBulkExpirationDays'), {value: 30});
         
+        // --- Сброс селектов выбора плана ---
+        $('#addPlan').val('standard');
+        $('#addBulkPlan').val('standard');
+
         $('#addSubmitButton, #addBulkSubmitButton').prop('disabled', true);
         $('#addUserModal a[data-toggle="tab"]').first().tab('show');
     });
