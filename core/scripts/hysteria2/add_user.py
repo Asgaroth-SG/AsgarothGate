@@ -9,7 +9,8 @@ import argparse
 from datetime import datetime
 from db.database import db
 
-def add_user(username, traffic_gb, expiration_days, password=None, unlimited_user=False, note=None, creation_date=None, max_ips=0):
+def add_user(username, traffic_gb, expiration_days, password=None, unlimited_user=False,
+             note=None, creation_date=None, max_ips=0, plan="standard"):
     if db is None:
         print("Error: Database connection failed. Please ensure MongoDB is running and configured.")
         return 1
@@ -39,6 +40,11 @@ def add_user(username, traffic_gb, expiration_days, password=None, unlimited_use
         print("Error: Numeric fields must be valid numbers.")
         return 1
 
+    plan = (plan or "standard").lower()
+    if plan not in ("standard", "premium"):
+        print("Error: plan must be 'standard' or 'premium'.")
+        return 1
+
     try:
         if db.get_user(username_lower):
             print("User already exists.")
@@ -52,7 +58,8 @@ def add_user(username, traffic_gb, expiration_days, password=None, unlimited_use
             "blocked": False,
             "unlimited_user": unlimited_user,
             "status": "On-hold",
-            "max_ips": max_ips 
+            "max_ips": max_ips,
+            "plan": plan,
         }
         
         if note:
@@ -90,7 +97,13 @@ if __name__ == "__main__":
     parser.add_argument("--unlimited", action='store_true')
     parser.add_argument("-n", "--note", default=None)
     parser.add_argument("-c", "--creation-date", default=None)
-    parser.add_argument("--max-ips", default=0, type=int) # Новый аргумент
+    parser.add_argument("--max-ips", default=0, type=int)
+    parser.add_argument(
+        "--plan",
+        choices=["standard", "premium"],
+        default="standard",
+        help="User plan/tier (standard or premium). Default: standard",
+    )
 
     args = parser.parse_args()
 
@@ -102,6 +115,7 @@ if __name__ == "__main__":
         args.unlimited, 
         args.note, 
         args.creation_date,
-        args.max_ips
+        args.max_ips,
+        args.plan,
     )
     sys.exit(exit_code)

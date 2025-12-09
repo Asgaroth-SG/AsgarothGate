@@ -309,6 +309,11 @@ $(document).ready(function () {
                                 <td>${escapeHtml(node.port || 'Н/Д')}</td>
                                 <td>${escapeHtml(node.sni || 'Н/Д')}</td>
                                 <td>${escapeHtml(node.obfs || 'Н/Д')}</td>
+                                <td>${
+                                    ((node.tier || 'standard').toLowerCase() === 'premium')
+                                        ? '<span class="badge badge-warning">Premium</span>'
+                                        : '<span class="badge badge-secondary">Standard</span>'
+                                }</td>
                                 <td>${escapeHtml(node.insecure ? 'Да' : 'Нет')}</td>
                                 <td>${escapeHtml(node.pinSHA256 || 'Н/Д')}</td>
                                 <td>
@@ -335,8 +340,9 @@ $(document).ready(function () {
         const obfs = $("#node_obfs").val().trim();
         const pinSHA256 = $("#node_pin").val().trim();
         const insecure = $("#node_insecure").is(':checked');
+        const tier = ($("#node_tier").val() || 'standard').toLowerCase(); // новый параметр тарифа (standard/premium)
         
-        const data = { name: name, ip: ip, insecure: insecure };
+        const data = { name: name, ip: ip, insecure: insecure, tier: tier };
         if (port) data.port = parseInt(port);
         if (sni) data.sni = sni;
         if (obfs) data.obfs = obfs;

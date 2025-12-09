@@ -26,6 +26,7 @@ def is_valid_ip_or_domain(value: str) -> bool:
         )
         return re.match(domain_regex, value) is not None
 
+
 def is_valid_sni(value: str) -> bool:
     if not value or not value.strip():
         return False
@@ -42,6 +43,7 @@ def is_valid_sni(value: str) -> bool:
         )
         return re.match(domain_regex, value) is not None
 
+
 def is_valid_sha256_pin(value: str) -> bool:
     if not value or not value.strip():
         return False
@@ -49,8 +51,10 @@ def is_valid_sha256_pin(value: str) -> bool:
     pin_regex = re.compile(r'^([0-9A-F]{2}:){31}[0-9A-F]{2}$')
     return re.match(pin_regex, value) is not None
 
+
 def is_valid_port(port: int) -> bool:
     return 1 <= port <= 65535
+
 
 def read_nodes():
     if not NODES_JSON_PATH.exists():
@@ -64,6 +68,7 @@ def read_nodes():
     except (json.JSONDecodeError, IOError, OSError) as e:
         sys.exit(f"Error reading or parsing {NODES_JSON_PATH}: {e}")
 
+
 def write_nodes(nodes):
     try:
         NODES_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -72,7 +77,17 @@ def write_nodes(nodes):
     except (IOError, OSError) as e:
         sys.exit(f"Error writing to {NODES_JSON_PATH}: {e}")
 
-def add_node(name: str, ip: str, sni: str | None = None, pinSHA256: str | None = None, port: int | None = None, obfs: str | None = None, insecure: bool = False):
+
+def add_node(
+    name: str,
+    ip: str,
+    sni: str | None = None,
+    pinSHA256: str | None = None,
+    port: int | None = None,
+    obfs: str | None = None,
+    insecure: bool = False,
+    tier: str = "standard",
+):
     if not is_valid_ip_or_domain(ip):
         print(f"Error: '{ip}' is not a valid IP address or domain name.", file=sys.stderr)
         sys.exit(1)
@@ -89,6 +104,11 @@ def add_node(name: str, ip: str, sni: str | None = None, pinSHA256: str | None =
         print(f"Error: Port '{port}' must be between 1 and 65535.", file=sys.stderr)
         sys.exit(1)
 
+    tier = (tier or "standard").lower()
+    if tier not in ("standard", "premium"):
+        print("Error: tier must be 'standard' or 'premium'.", file=sys.stderr)
+        sys.exit(1)
+
     nodes = read_nodes()
     if any(node['name'] == name for node in nodes):
         print(f"Error: A node with the name '{name}' already exists.", file=sys.stderr)
@@ -97,7 +117,11 @@ def add_node(name: str, ip: str, sni: str | None = None, pinSHA256: str | None =
         print(f"Error: A node with the IP/domain '{ip}' already exists.", file=sys.stderr)
         sys.exit(1)
     
-    new_node = {"name": name, "ip": ip}
+    new_node = {
+        "name": name,
+        "ip": ip,
+        "tier": tier,
+    }
     if sni:
         new_node["sni"] = sni.strip()
     if pinSHA256:
@@ -111,7 +135,8 @@ def add_node(name: str, ip: str, sni: str | None = None, pinSHA256: str | None =
 
     nodes.append(new_node)
     write_nodes(nodes)
-    print(f"Successfully added node '{name}'.")
+    print(f"Successfully added node '{name}' with tier '{tier}'.")
+
 
 def delete_node(name: str):
     nodes = read_nodes()
@@ -125,23 +150,26 @@ def delete_node(name: str):
     write_nodes(nodes)
     print(f"Successfully deleted node '{name}'.")
 
+
 def list_nodes():
     nodes = read_nodes()
     if not nodes:
         print("No nodes configured.")
         return
         
-    print(f"{'Name':<15} {'IP / Domain':<25} {'Port':<8} {'SNI':<20} {'Insecure':<10} {'OBFS':<20} {'Pin SHA256'}")
-    print(f"{'-'*15} {'-'*25} {'-'*8} {'-'*20} {'-'*10} {'-'*20} {'-'*30}")
+    print(f"{'Name':<15} {'Tier':<10} {'IP / Domain':<25} {'Port':<8} {'SNI':<20} {'Insecure':<10} {'OBFS':<20} {'Pin SHA256'}")
+    print(f"{'-'*15} {'-'*10} {'-'*25} {'-'*8} {'-'*20} {'-'*10} {'-'*20} {'-'*30}")
     for node in sorted(nodes, key=lambda x: x['name']):
         name = node['name']
+        tier = node.get('tier', 'standard')
         ip = node['ip']
         port = node.get('port', 'N/A')
         sni = node.get('sni', 'N/A')
         insecure = str(node.get('insecure', 'False'))
         obfs = node.get('obfs', 'N/A')
         pin = node.get('pinSHA256', 'N/A')
-        print(f"{name:<15} {ip:<25} {str(port):<8} {sni:<20} {insecure:<10} {obfs:<20} {pin}")
+        print(f"{name:<15} {tier:<10} {ip:<25} {str(port):<8} {sni:<20} {insecure:<10} {obfs:<20} {pin}")
+
 
 def generate_cert():
     try:
@@ -194,6 +222,7 @@ def generate_cert():
     except Exception as e:
         sys.exit(f"An unexpected error occurred: {e}")
 
+
 def main():
     parser = argparse.ArgumentParser(description="Manage external node configurations.")
     subparsers = parser.add_subparsers(dest='command', required=True)
@@ -206,6 +235,13 @@ def main():
     add_parser.add_argument('--pinSHA256', type=str, help='Optional: The public key SHA256 pin.')
     add_parser.add_argument('--obfs', type=str, help='Optional: The obfuscation key.')
     add_parser.add_argument('--insecure', action='store_true', help='Optional: Skip certificate verification.')
+    add_parser.add_argument(
+        '--tier',
+        type=str,
+        choices=['standard', 'premium'],
+        default='standard',
+        help="Node tier/access level (standard or premium). Default: standard.",
+    )
 
     delete_parser = subparsers.add_parser('delete', help='Delete a node by name.')
     delete_parser.add_argument('--name', type=str, required=True, help='The name of the node to delete.')
@@ -217,13 +253,23 @@ def main():
     args = parser.parse_args()
 
     if args.command == 'add':
-        add_node(args.name, args.ip, args.sni, args.pinSHA256, args.port, args.obfs, args.insecure)
+        add_node(
+            args.name,
+            args.ip,
+            args.sni,
+            args.pinSHA256,
+            args.port,
+            args.obfs,
+            args.insecure,
+            args.tier,
+        )
     elif args.command == 'delete':
         delete_node(args.name)
     elif args.command == 'list':
         list_nodes()
     elif args.command == 'generate-cert':
         generate_cert()
+
 
 if __name__ == "__main__":
     main()

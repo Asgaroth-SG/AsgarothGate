@@ -73,7 +73,7 @@
                             <button type="button" class="btn btn-sm btn-outline-success filter-button mr-1" data-filter="online" title="Онлайн">
                                 <i class="fas fa-wifi"></i>
                             </button>
-                             <button type="button" class="btn btn-sm btn-outline-warning filter-button mr-1" data-filter="on-hold" title="Приостановленные">
+                            <button type="button" class="btn btn-sm btn-outline-warning filter-button mr-1" data-filter="on-hold" title="Приостановленные">
                                 <i class="fas fa-pause"></i>
                             </button>
                             <button type="button" class="btn btn-sm btn-outline-danger filter-button" data-filter="disable" title="Заблокированные">
@@ -115,6 +115,8 @@
                             <th class="d-none d-md-table-cell text-nowrap text-center">Срок</th>
                             <th class="d-none d-md-table-cell text-nowrap text-center">Дней активности</th>
                             <th class="d-none d-md-table-cell text-center">Активен</th>
+                            <!-- Новая колонка: тариф пользователя -->
+                            <th class="d-none d-md-table-cell text-center">Тариф</th>
                             <th class="d-none d-md-table-cell">Заметка</th>
                             <th class="d-none d-md-table-cell text-nowrap text-center requires-iplimit-service" style="display: none;">Limit IP</th>
                             <th class="d-none d-md-table-cell text-nowrap text-center">QR-код</th>
@@ -192,6 +194,8 @@
 </section>
 
 {% include 'modals.html' ignore missing %} 
+
+<!-- Модалка: добавление пользователя -->
 <div class="modal fade" id="addUserModal" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog" role="document">
         <div class="modal-content">
@@ -211,6 +215,7 @@
                     </li>
                 </ul>
                 <div class="tab-content" id="addUserTabContent">
+                    <!-- Одиночный пользователь -->
                     <div class="tab-pane fade show active" id="single-user" role="tabpanel">
                         <form id="addUserForm">
                             <div class="form-group">
@@ -229,6 +234,16 @@
                                     <input type="number" class="form-control" id="addExpirationDays" name="expiration_days" required>
                                 </div>
                             </div>
+
+                            <!-- Новый блок: тариф для одиночного создания -->
+                            <div class="form-group">
+                                <label>Тариф</label>
+                                <select class="form-control" id="addPlan" name="plan">
+                                    <option value="standard" selected>Standard</option>
+                                    <option value="premium">Premium</option>
+                                </select>
+                            </div>
+
                             <div class="form-group">
                                 <label>Примечание</label>
                                 <input type="text" class="form-control" id="addNote" name="note" placeholder="Например: Telegram ID">
@@ -253,6 +268,7 @@
                         </form>
                     </div>
                     
+                    <!-- Массовое создание -->
                     <div class="tab-pane fade" id="bulk-users" role="tabpanel">
                         <form id="addBulkUsersForm">
                             <div class="form-group">
@@ -260,7 +276,7 @@
                                 <input type="text" class="form-control" id="addBulkPrefix" name="prefix" placeholder="user_" required>
                                 <small class="text-danger" id="addBulkPrefixError"></small>
                             </div>
-                             <div class="form-row">
+                            <div class="form-row">
                                 <div class="form-group col-md-6">
                                     <label>Количество</label>
                                     <input type="number" class="form-control" id="addBulkCount" name="count" value="10" min="1" required>
@@ -280,6 +296,16 @@
                                     <input type="number" class="form-control" id="addBulkExpirationDays" name="expiration_days" required>
                                 </div>
                             </div>
+
+                            <!-- Новый блок: тариф для массового создания -->
+                            <div class="form-group">
+                                <label>Тариф</label>
+                                <select class="form-control" id="addBulkPlan" name="plan">
+                                    <option value="standard" selected>Standard</option>
+                                    <option value="premium">Premium</option>
+                                </select>
+                            </div>
+
                             <div class="form-group requires-iplimit-service bg-light p-2 rounded" style="display: none;">
                                 <label class="d-flex justify-content-between">
                                     Лимит IP
@@ -305,6 +331,7 @@
     </div>
 </div>
 
+<!-- Модалка: редактирование пользователя -->
 <div class="modal fade" id="editUserModal" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog" role="document">
         <div class="modal-content">
@@ -343,6 +370,15 @@
                             <label>Срок (дней)</label>
                             <input type="number" class="form-control" id="editExpirationDays" name="new_expiration_days">
                         </div>
+                    </div>
+
+                    <!-- Новый блок: тариф при редактировании -->
+                    <div class="form-group">
+                        <label>Тариф</label>
+                        <select class="form-control" id="editPlan" name="plan">
+                            <option value="standard">Standard</option>
+                            <option value="premium">Premium</option>
+                        </select>
                     </div>
 
 					<div class="form-group requires-iplimit-service bg-light p-2 rounded" style="display: none;">
@@ -384,6 +420,7 @@
     </div>
 </div>
 
+<!-- Модалка: QR-коды -->
 <div class="modal fade" id="qrcodeModal" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog modal-dialog-centered" role="document">
         <div class="modal-content">
@@ -401,6 +438,7 @@
     </div>
 </div>
 
+<!-- Модалка: экспорт ссылок -->
 <div class="modal fade" id="showLinksModal" tabindex="-1" role="dialog" aria-hidden="true">
     <div class="modal-dialog modal-lg" role="document">
         <div class="modal-content">

@@ -45,12 +45,6 @@ def load_hysteria2_ips() -> Tuple[str, str, str]:
     sni = env_vars.get('SNI', '')
     return ip4, ip6, sni
 
-
-def get_main_node_label() -> str:
-    """Название главной ноды из .configs.env (MAIN_NODE_LABEL)."""
-    env_vars = load_hysteria2_env()
-    return env_vars.get('MAIN_NODE_LABEL', '🇺🇸 США')
-
 def get_singbox_domain_and_port() -> Tuple[str, str]:
     env_vars = load_env_file(SINGBOX_ENV)
     domain = env_vars.get('HYSTERIA_DOMAIN', '')
@@ -74,12 +68,12 @@ def is_service_active(service_name: str) -> bool:
     except Exception:
         return False
 
-def generate_uri(username: str, auth_password: str, ip: str, port: str, 
-                 obfs_password: str, sha256: str, sni: str, ip_version: int, 
+def generate_uri(username: str, auth_password: str, ip: str, port: str,
+                 obfs_password: str, sha256: str, sni: str, ip_version: int,
                  insecure: bool, fragment_tag: str) -> str:
     ip_part = f"[{ip}]" if ip_version == 6 and ':' in ip else ip
     uri_base = f"hy2://{username}:{auth_password}@{ip_part}:{port}"
-    
+
     params = []
     if obfs_password:
         params.append(f"obfs=salamander&obfs-password={obfs_password}")
@@ -87,9 +81,9 @@ def generate_uri(username: str, auth_password: str, ip: str, port: str,
         params.append(f"pinSHA256={sha256}")
     if sni:
         params.append(f"sni={sni}")
-    
+
     params.append(f"insecure={'1' if insecure else '0'}")
-    
+
     query_string = "&".join(params)
     return f"{uri_base}?{query_string}#{fragment_tag}"
 
@@ -122,14 +116,35 @@ def get_terminal_width() -> int:
 def display_uri_and_qr(uri: str, label: str, args: argparse.Namespace, terminal_width: int):
     if not uri:
         return
-        
+
     print(f"\n{label}:\n{uri}\n")
-    
+
     if args.qrcode:
         print(f"{label} QR Code:\n")
         qr_code = generate_qr_code(uri)
         for line in qr_code:
             print(center_text(line, terminal_width))
+
+def user_can_use_node(user_doc: Dict[str, Any], node: Dict[str, Any]) -> bool:
+    """
+    Определяет, доступна ли нода пользователю по plan/tier.
+
+    Логика:
+    - если у ноды нет tier -> считаем 'standard'
+    - standard-ноды доступны всем
+    - premium-ноды доступны только пользователям с plan='premium'
+    - неизвестный tier считаем недоступным
+    """
+    user_plan = user_doc.get("plan", "standard")
+    node_tier = node.get("tier", "standard")
+
+    if node_tier == "standard":
+        return True
+
+    if node_tier == "premium":
+        return user_plan == "premium"
+
+    return False
 
 def show_uri(args: argparse.Namespace) -> None:
     if db is None:
@@ -139,7 +154,7 @@ def show_uri(args: argparse.Namespace) -> None:
     if not is_service_active("hysteria-server.service"):
         print("\033[0;31mError:\033[0m Hysteria2 is not active.")
         return
-    
+
     try:
         with open(CONFIG_FILE, 'r') as f:
             config = json.load(f)
@@ -151,39 +166,52 @@ def show_uri(args: argparse.Namespace) -> None:
     if not user_doc:
         print(f"\033[0;31mError:\033[0m User '{args.username}' not found in the database.")
         return
-    
+
     auth_password = user_doc["password"]
 
     local_port = config["listen"].split(":")[-1]
     local_sha256 = config.get("tls", {}).get("pinSHA256", "")
     local_obfs_password = config.get("obfs", {}).get("salamander", {}).get("password", "")
     local_insecure = config.get("tls", {}).get("insecure", True)
-    
+
     ip4, ip6, local_sni = load_hysteria2_ips()
     nodes = load_nodes()
     terminal_width = get_terminal_width()
 
     if args.all or args.ip_version == 4:
         if ip4 and ip4 != "None":
-            main_label = get_main_node_label()
-            uri = generate_uri(args.username, auth_password, ip4, local_port, 
-                                 local_obfs_password, local_sha256, local_sni, 4, local_insecure, main_label)
-            display_uri_and_qr(uri, main_label, args, terminal_width)
-            
-   # if args.all or args.ip_version == 6:
-   #     if ip6 and ip6 != "None":
-   #         uri = generate_uri(args.username, auth_password, ip6, local_port, 
-   #                              local_obfs_password, local_sha256, local_sni, 6, local_insecure, "🇺🇸 США v6")
-   #         display_uri_and_qr(uri, "IPv6", args, terminal_width)
+            uri = generate_uri(
+                args.username,
+                auth_password,
+                ip4,
+                local_port,
+                local_obfs_password,
+                local_sha256,
+                local_sni,
+                4,
+                local_insecure,
+                "🇺🇸 США"
+            )
+            display_uri_and_qr(uri, "США", args, terminal_width)
+
+    # if args.all or args.ip_version == 6:
+    #     if ip6 and ip6 != "None":
+    #         uri = generate_uri(args.username, auth_password, ip6, local_port,
+    #                            local_obfs_password, local_sha256, local_sni,
+    #                            6, local_insecure, "🇺🇸 США v6")
+    #         display_uri_and_qr(uri, "IPv6", args, terminal_width)
 
     for node in nodes:
+        if not user_can_use_node(user_doc, node):
+            continue
+
         node_name = node.get("name")
         node_ip = node.get("ip")
         if not node_name or not node_ip:
             continue
-            
+
         ip_v = 4 if '.' in node_ip else 6
-        
+
         if args.all or args.ip_version == ip_v:
             node_port = node.get("port", local_port)
             node_sni = node.get("sni", local_sni)
@@ -209,7 +237,7 @@ def show_uri(args: argparse.Namespace) -> None:
         domain, port = get_singbox_domain_and_port()
         if domain and port:
             print(f"\nSingbox Sublink:\nhttps://{domain}:{port}/sub/singbox/{args.username}/{args.ip_version}#{args.username}\n")
-    
+
     if args.normalsub and is_service_active("hysteria-normal-sub.service"):
         domain, port, subpath = get_normalsub_domain_and_port()
         if domain and port:
@@ -219,18 +247,18 @@ def main():
     parser = argparse.ArgumentParser(description="Hysteria2 URI Generator")
     parser.add_argument("-u", "--username", help="Username to generate URI for")
     parser.add_argument("-qr", "--qrcode", action="store_true", help="Generate QR code")
-    parser.add_argument("-ip", "--ip-version", type=int, default=4, choices=[4, 6], 
+    parser.add_argument("-ip", "--ip-version", type=int, default=4, choices=[4, 6],
                         help="IP version (4 or 6)")
     parser.add_argument("-a", "--all", action="store_true", help="Show all available IPs")
     parser.add_argument("-s", "--singbox", action="store_true", help="Generate SingBox sublink")
     parser.add_argument("-n", "--normalsub", action="store_true", help="Generate Normal-SUB sublink")
-    
+
     args = parser.parse_args()
-    
+
     if not args.username:
         parser.print_help()
         sys.exit(1)
-    
+
     show_uri(args)
 
 if __name__ == "__main__":

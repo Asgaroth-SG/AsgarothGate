@@ -148,7 +148,9 @@ $(function () {
         const $userTotalCount = $("#user-total-count");
 
         $paginationContainer.hide();
-        $userTableBody.css('opacity', 0.5).html('<tr><td colspan="14" class="text-center p-4"><i class="fas fa-spinner fa-spin"></i> Поиск...</td></tr>');
+        $userTableBody
+            .css('opacity', 0.5)
+            .html('<tr><td colspan="15" class="text-center p-4"><i class="fas fa-spinner fa-spin"></i> Поиск...</td></tr>');
 
         $.ajax({
             url: SEARCH_USERS_URL,
@@ -165,7 +167,7 @@ $(function () {
             },
             error: function () {
                 Toast.fire({icon: 'error', title: "Произошла ошибка во время поиска."});
-                $userTableBody.html('<tr><td colspan="14" class="text-center p-4 text-danger">Не удалось загрузить результаты поиска.</td></tr>');
+                $userTableBody.html('<tr><td colspan="15" class="text-center p-4 text-danger">Не удалось загрузить результаты поиска.</td></tr>');
             },
             complete: function () {
                 $userTableBody.css('opacity', 1);
@@ -178,7 +180,9 @@ $(function () {
         const $paginationContainer = $("#paginationContainer");
         const $userTotalCount = $("#user-total-count");
 
-        $userTableBody.css('opacity', 0.5).html('<tr><td colspan="14" class="text-center p-4"><i class="fas fa-spinner fa-spin"></i> Загрузка пользователей...</td></tr>');
+        $userTableBody
+            .css('opacity', 0.5)
+            .html('<tr><td colspan="15" class="text-center p-4"><i class="fas fa-spinner fa-spin"></i> Загрузка пользователей...</td></tr>');
 
         $.ajax({
             url: USERS_BASE_URL,
@@ -197,7 +201,7 @@ $(function () {
             },
             error: function () {
                 Toast.fire({icon: 'error', title: "Не удалось восстановить список пользователей."});
-                $userTableBody.html('<tr><td colspan="14" class="text-center p-4 text-danger">Не удалось загрузить пользователей. Пожалуйста, обновите страницу.</td></tr>');
+                $userTableBody.html('<tr><td colspan="15" class="text-center p-4 text-danger">Не удалось загрузить пользователей. Пожалуйста, обновите страницу.</td></tr>');
             },
             complete: function () {
                 $userTableBody.css('opacity', 1);
@@ -235,9 +239,14 @@ $(function () {
                 case "on-hold":    
                     showRow = $(this).find("td:eq(3) .badge-warning").length > 0; 
                     break;
-                case "online":     showRow = $(this).find("td:eq(3) .badge-success").length > 0; break;
-                case "disable":    showRow = $(this).find("td:eq(8) i").hasClass("text-danger"); break;
-                default:           showRow = true;
+                case "online":
+                    showRow = $(this).find("td:eq(3) .badge-success").length > 0;
+                    break;
+                case "disable":
+                    showRow = $(this).find("td:eq(8) i").hasClass("text-danger");
+                    break;
+                default:
+                    showRow = true;
             }
             $(this).toggle(showRow).find(".user-checkbox").prop("checked", false);
             if (!showRow) {
@@ -284,7 +293,7 @@ $(function () {
                     data: JSON.stringify({ usernames: selectedUsers })
                 })
                 .done(() => {
-                    Swal.close(); // Закрываем спиннер
+                    Swal.close();
                     Toast.fire({icon: 'success', title: "Выбранные пользователи удалены."});
                     refreshUserList();
                 })
@@ -325,7 +334,6 @@ $(function () {
         }
         jsonData.max_ips = maxIpsVal ? parseInt(maxIpsVal) : 0;
 
-        // Показываем спиннер, так как создание (особенно массовое) может занять время
         Swal.fire({
             title: 'Добавление...',
             text: 'Пожалуйста, подождите',
@@ -341,7 +349,7 @@ $(function () {
         })
         .done(res => {
             $('#addUserModal').modal('hide');
-            Swal.close(); // Закрываем спиннер
+            Swal.close();
             
             let successMsg = "";
             if (isBulk) {
@@ -351,7 +359,6 @@ $(function () {
                 const username = $("#addUsername").val();
                 successMsg = `Пользователь ${username} создан.`;
             }
-            // Используем Toast
             Toast.fire({icon: 'success', title: successMsg});
             refreshUserList();
         })
@@ -405,6 +412,11 @@ $(function () {
                 if (userData.max_download_bytes) {
                      $("#editTrafficLimit").val((userData.max_download_bytes / (1024*1024*1024)).toFixed(2));
                 }
+
+                // подставляем тариф пользователя в селект
+                const plan = (userData.plan || 'standard').toLowerCase();
+                $("#editPlan").val(plan);
+
                 validatePassword('#editPassword', '#editPasswordError');
             })
             .fail(() => {
@@ -446,7 +458,6 @@ $(function () {
         .done(res => {
             $('#editUserModal').modal('hide');
             Swal.close();
-            // Используем Toast
             Toast.fire({icon: 'success', title: `Данные пользователя ${originalUsername} обновлены.`});
             refreshUserList();
         })
@@ -456,7 +467,7 @@ $(function () {
 
     $("#userTable").on("click", ".reset-user, .delete-user", function () {
         const button = $(this);
-        const username = button.data("user");
+               const username = button.data("user");
         const isDelete = button.hasClass("delete-user");
         
         const actionRus = isDelete ? "удалить" : "сбросить";
@@ -492,7 +503,6 @@ $(function () {
                 const msg = isDelete 
                     ? `Пользователь ${username} удален.` 
                     : `Пользователь ${username} сброшен.`;
-                // Используем Toast
                 Toast.fire({icon: 'success', title: msg});
                 refreshUserList();
             })
@@ -518,7 +528,6 @@ $(function () {
                 qrcodesContainer.append(card);
                 new QRCodeStyling({ width: 200, height: 200, data: config.link, margin: 2 }).append(document.getElementById(qrId));
                 card.on("click", () => navigator.clipboard.writeText(config.link).then(() => {
-                    // Используем Toast
                     Toast.fire({icon: 'success', title: `Ссылка скопирована!`});
                 }));
             });

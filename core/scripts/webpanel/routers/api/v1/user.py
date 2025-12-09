@@ -20,11 +20,6 @@ router = APIRouter()
 async def list_users_api():
     """
     Get a list of all users.
-
-    Returns:
-        List of user dictionaries.
-    Raises:
-        HTTPException: if no users are found, or if an error occurs.
     """
     try:
         if res := cli_api.list_users():
@@ -36,19 +31,33 @@ async def list_users_api():
 
 @router.post('/', response_model=DetailResponse, status_code=201)
 async def add_user_api(body: AddUserInputBody):
+    """
+    Add a single user.
+    """
     try:
         cli_api.get_user(body.username)
         raise HTTPException(status_code=409,
                             detail=f"User '{body.username}' already exists.")
     except cli_api.CommandExecutionError:
+        # Ок, пользователя нет
         pass
     except json.JSONDecodeError as e:
         raise HTTPException(status_code=500,
                             detail=f"{str(e)}")
 
     try:
-        # Добавляем поддержку max_ips при создании
-        cli_api.add_user(body.username, body.traffic_limit, body.expiration_days, body.password, body.creation_date, body.unlimited, body.note, max_ips=body.max_ips)
+        # Добавляем поддержку max_ips и plan при создании
+        cli_api.add_user(
+            body.username,
+            body.traffic_limit,
+            body.expiration_days,
+            body.password,
+            body.creation_date,
+            body.unlimited,
+            body.note,
+            max_ips=body.max_ips,
+            plan=(body.plan.lower() if body.plan else None),
+        )
         return DetailResponse(detail=f'User {body.username} has been added.')
     except cli_api.CommandExecutionError as e:
         if "User already exists" in str(e):
@@ -78,7 +87,9 @@ async def add_bulk_users_api(body: AddBulkUsersInputBody):
             count=body.count,
             prefix=body.prefix,
             start_number=body.start_number,
-            unlimited=body.unlimited
+            unlimited=body.unlimited,
+            max_ips=body.max_ips,
+            plan=(body.plan.lower() if body.plan else None),
         )
         return DetailResponse(detail=f"Successfully started adding {body.count} users with prefix '{body.prefix}'.")
     except cli_api.CommandExecutionError as e:
@@ -87,6 +98,7 @@ async def add_bulk_users_api(body: AddBulkUsersInputBody):
     except Exception as e:
         raise HTTPException(status_code=500,
                             detail=f"An unexpected error occurred while adding bulk users: {str(e)}")
+
 
 @router.post('/uri/bulk', response_model=List[UserUriResponse])
 async def show_multiple_user_uris_api(request: UsernamesRequest):
@@ -129,15 +141,6 @@ async def bulk_remove_users_api(body: UsernamesRequest):
 async def get_user_api(username: str):
     """
     Get the details of a user.
-
-    Args:
-        username: The username of the user to get.
-
-    Returns:
-        A user dictionary.
-
-    Raises:
-        HTTPException: if the user is not found, or if an error occurs.
     """
     try:
         user_data = cli_api.get_user(username)
@@ -158,22 +161,11 @@ async def get_user_api(username: str):
 async def edit_user_api(username: str, body: EditUserInputBody):
     """
     Edit a user's details.
-
-    Args:
-        username: The username of the user to edit.
-        body: An instance of EditUserInputBody containing the new user details.
-
-    Returns:
-        A DetailResponse with a message indicating the user has been edited.
-
-    Raises:
-        HTTPException: if an error occurs while editing the user.
     """
     try:
         cli_api.kick_users_by_name([username])
         cli_api.traffic_status(display_output=False)
         
-        # Передаем новый параметр max_ips в функцию редактирования
         cli_api.edit_user(
             username=username,
             new_username=body.new_username,
@@ -185,7 +177,8 @@ async def edit_user_api(username: str, body: EditUserInputBody):
             blocked=body.blocked,
             unlimited_ip=body.unlimited_ip,
             note=body.note,
-            max_ips=body.max_ips  # <--- Добавлено
+            max_ips=body.max_ips,
+            plan=(body.plan.lower() if body.plan else None),
         )
         return DetailResponse(detail=f'User {username} has been edited.')
     except Exception as e:
@@ -196,15 +189,6 @@ async def edit_user_api(username: str, body: EditUserInputBody):
 async def remove_user_api(username: str):
     """
     Remove a user.
-
-    Args:
-        username: The username of the user to remove.
-
-    Returns:
-        A DetailResponse with a message indicating the user has been removed.
-
-    Raises:
-        HTTPException: 404 if the user is not found, 400 if another error occurs.
     """
     try:
         user = cli_api.get_user(username)
@@ -225,15 +209,6 @@ async def remove_user_api(username: str):
 async def reset_user_api(username: str):
     """
     Resets a user.
-
-    Args:
-        username: The username of the user to reset.
-
-    Returns:
-        A DetailResponse with a message indicating the user has been reset.
-
-    Raises:
-        HTTPException: if an error occurs while resetting the user.
     """
     try:
         user = cli_api.get_user(username)
@@ -247,19 +222,11 @@ async def reset_user_api(username: str):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f'Error: {str(e)}')
 
+
 @router.get('/{username}/uri', response_model=UserUriResponse)
 async def show_user_uri_api(username: str):
     """
     Get the URI information for a user in JSON format.
-
-    Args:
-        username: The username of the user.
-
-    Returns:
-        UserUriResponse: An object containing URI information for the user.
-
-    Raises:
-        HTTPException: 404 if the user is not found, 400 if another error occurs.
     """
     try:
         uri_data_list = cli_api.show_user_uri_json([username])

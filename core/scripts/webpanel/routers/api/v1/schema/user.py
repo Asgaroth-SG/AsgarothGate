@@ -17,6 +17,10 @@ class UserInfoResponse(BaseModel):
     upload_bytes: Optional[int] = None
     download_bytes: Optional[int] = None
     online_count: int = 0
+    plan: Optional[str] = Field(
+        "standard",
+        description="User plan/tier (standard or premium)",
+    )
 
 
 class UserListResponse(RootModel):
@@ -36,11 +40,24 @@ class AddUserInputBody(BaseModel):
     unlimited: bool = False
     note: Optional[str] = None
     max_ips: Optional[int] = Field(0, description="Personal IP limit (0 = global default)")
+    plan: Optional[str] = Field(
+        "standard",
+        description="User plan/tier (standard or premium). Default: standard",
+    )
 
     @field_validator('username')
     def validate_username(cls, v):
         if not re.match(r"^[a-zA-Z0-9_]+$", v):
             raise ValueError('Username can only contain letters, numbers, and underscores.')
+        return v
+
+    @field_validator('plan')
+    def validate_plan(cls, v):
+        if v is None:
+            return "standard"
+        v = v.lower()
+        if v not in ("standard", "premium"):
+            raise ValueError("plan must be 'standard' or 'premium'.")
         return v
 
 
@@ -51,11 +68,25 @@ class AddBulkUsersInputBody(BaseModel):
     prefix: str
     start_number: int = 1
     unlimited: bool = False
+    max_ips: Optional[int] = Field(0, description="Personal IP limit for all users (0 = global default)")
+    plan: Optional[str] = Field(
+        "standard",
+        description="User plan/tier for all created users (standard or premium). Default: standard",
+    )
 
     @field_validator('prefix')
     def validate_prefix(cls, v):
         if not re.match(r"^[a-zA-Z0-9_]*$", v):
             raise ValueError('Prefix can only contain letters, numbers, and underscores.')
+        return v
+
+    @field_validator('plan')
+    def validate_plan(cls, v):
+        if v is None:
+            return "standard"
+        v = v.lower()
+        if v not in ("standard", "premium"):
+            raise ValueError("plan must be 'standard' or 'premium'.")
         return v
 
 
@@ -70,11 +101,24 @@ class EditUserInputBody(BaseModel):
     unlimited_ip: Optional[bool] = Field(None, description="Unlimited IP status.")
     max_ips: Optional[int] = Field(None, description="Personal IP limit.")
     note: Optional[str] = Field(None, description="A note for the user.")
+    plan: Optional[str] = Field(
+        None,
+        description="User plan/tier (standard or premium).",
+    )
 
     @field_validator('new_username')
     def validate_new_username(cls, v):
         if v and not re.match(r"^[a-zA-Z0-9_]+$", v):
             raise ValueError('Username can only contain letters, numbers, and underscores.')
+        return v
+
+    @field_validator('plan')
+    def validate_plan(cls, v):
+        if v is None:
+            return v
+        v = v.lower()
+        if v not in ("standard", "premium"):
+            raise ValueError("plan must be 'standard' or 'premium'.")
         return v
 
 

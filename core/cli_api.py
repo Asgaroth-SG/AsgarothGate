@@ -269,7 +269,10 @@ def get_user(username: str) -> dict[str, Any] | None:
         return json.loads(res)
 
 
-def add_user(username: str, traffic_limit: int, expiration_days: int, password: str | None, creation_date: str | None, unlimited: bool, note: str | None, max_ips: int = 0):
+def add_user(username: str, traffic_limit: int, expiration_days: int,
+             password: str | None, creation_date: str | None,
+             unlimited: bool, note: str | None, max_ips: int = 0,
+             plan: str | None = None):
     '''
     Adds a new user using named arguments for reliability.
     '''
@@ -292,15 +295,20 @@ def add_user(username: str, traffic_limit: int, expiration_days: int, password: 
     
     if creation_date:
         command.extend(['--creation-date', creation_date])
+
+    if plan:
+        command.extend(['--plan', plan])
         
     run_cmd(command)
 
-def bulk_user_add(traffic_gb: float, expiration_days: int, count: int, prefix: str, start_number: int, unlimited: bool, max_ips: int = 0):
+def bulk_user_add(traffic_gb: float, expiration_days: int, count: int,
+                  prefix: str, start_number: int, unlimited: bool,
+                  max_ips: int = 0, plan: str | None = None):
     """
     Executes the bulk user creation script with specified parameters.
     """
     command = [
-        'python3', 
+        'python3',
         Command.BULK_USER.value,
         '--traffic-gb', str(traffic_gb),
         '--expiration-days', str(expiration_days),
@@ -312,10 +320,18 @@ def bulk_user_add(traffic_gb: float, expiration_days: int, count: int, prefix: s
 
     if unlimited:
         command.append('--unlimited')
+
+    if plan:
+        command.extend(['--plan', plan])
         
     run_cmd(command)
 
-def edit_user(username: str, new_username: str | None, new_password: str | None, new_traffic_limit: int | None, new_expiration_days: int | None, renew_password: bool, renew_creation_date: bool, blocked: bool | None, unlimited_ip: bool | None, note: str | None, max_ips: int | None):
+def edit_user(username: str, new_username: str | None, new_password: str | None,
+              new_traffic_limit: int | None, new_expiration_days: int | None,
+              renew_password: bool, renew_creation_date: bool,
+              blocked: bool | None, unlimited_ip: bool | None,
+              note: str | None, max_ips: int | None,
+              plan: str | None = None):
     '''
     Edits an existing user's details by calling the new edit_user.py script with named flags.
     '''
@@ -361,6 +377,9 @@ def edit_user(username: str, new_username: str | None, new_password: str | None,
     
     if max_ips is not None:
         command_args.extend(['--max-ips', str(max_ips)])
+
+    if plan is not None:
+        command_args.extend(['--plan', plan])
 
     run_cmd(command_args)
 
@@ -484,7 +503,10 @@ def edit_ip_address(ipv4: str, ipv6: str):
     if ipv6:
         run_cmd(['python3', Command.IP_ADD.value, 'edit', '-6', ipv6])
 
-def add_node(name: str, ip: str, sni: Optional[str] = None, pinSHA256: Optional[str] = None, port: Optional[int] = None, obfs: Optional[str] = None, insecure: Optional[bool] = None):
+def add_node(name: str, ip: str, sni: Optional[str] = None,
+             pinSHA256: Optional[str] = None, port: Optional[int] = None,
+             obfs: Optional[str] = None, insecure: Optional[bool] = None,
+             tier: Optional[str] = None):
     """
     Adds a new external node.
     """
@@ -499,6 +521,8 @@ def add_node(name: str, ip: str, sni: Optional[str] = None, pinSHA256: Optional[
         command.extend(['--obfs', obfs])
     if insecure:
         command.append('--insecure')
+    if tier:
+        command.extend(['--tier', tier])
     return run_cmd(command)
 
 def delete_node(name: str):

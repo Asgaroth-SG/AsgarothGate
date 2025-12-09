@@ -1,6 +1,6 @@
 {% if not users %}
 <tr>
-    <td colspan="14" class="text-center p-4">
+    <td colspan="15" class="text-center p-4">
         Пользователи не найдены.
     </td>
 </tr>
@@ -70,6 +70,17 @@
             <i class="fas fa-times text-danger"></i>
             {% endif %}
         </td>
+
+        <!-- Новая колонка: тариф пользователя -->
+        <td class="d-none d-md-table-cell text-center">
+            {% set plan = (user.plan or 'standard')|lower %}
+            {% if plan == 'premium' %}
+                <span class="badge badge-warning">Premium</span>
+            {% else %}
+                <span class="badge badge-secondary">Standard</span>
+            {% endif %}
+        </td>
+
         <td class="d-none d-md-table-cell note-cell">
             {% if user.note %}
                 <small class="text-muted" title="{{ user.note }}">{{ user.note | truncate(15, True) }}</small>
@@ -134,6 +145,19 @@
                     </span>
                 </p>
                 <p><strong>Трафик:</strong> <span>{{ user.traffic_used }}</span></p>
+
+                <!-- Новый блок: тариф в деталях -->
+                <p><strong>Тариф:</strong>
+                    <span>
+                        {% set plan = (user.plan or 'standard')|lower %}
+                        {% if plan == 'premium' %}
+                            Premium
+                        {% else %}
+                            Standard
+                        {% endif %}
+                    </span>
+                </p>
+
                 <p><strong>Истекает:</strong> 
                     <span>
                     {% if user.expiry_date == "On-hold" %}

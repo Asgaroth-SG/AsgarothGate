@@ -133,12 +133,31 @@ def get_user(username: str):
 @click.option('--unlimited', is_flag=True, default=False, help='Exempt user from IP limit checks.')
 @click.option('--note', '-n', required=False, help='An optional note for the user', type=str)
 @click.option('--max-ips', '-mi', required=False, default=0, help='Max IP limit (0 = global)', type=int)
-def add_user(username: str, traffic_limit: int, expiration_days: int, password: str, creation_date: str, unlimited: bool, note: str, max_ips: int):
+@click.option(
+    '--plan',
+    required=False,
+    type=click.Choice(['standard', 'premium'], case_sensitive=False),
+    default='standard',
+    help='User plan/tier (standard or premium).',
+)
+def add_user(username: str, traffic_limit: int, expiration_days: int, password: str, creation_date: str,
+             unlimited: bool, note: str, max_ips: int, plan: str):
     try:
-        cli_api.add_user(username, traffic_limit, expiration_days, password, creation_date, unlimited, note, max_ips)
+        cli_api.add_user(
+            username,
+            traffic_limit,
+            expiration_days,
+            password,
+            creation_date,
+            unlimited,
+            note,
+            max_ips,
+            plan.lower() if plan else None,
+        )
         click.echo(f"Пользователь '{username}' успешно добавлен.")
     except Exception as e:
         click.echo(f'{e}', err=True)
+
 
 @cli.command('bulk-user-add')
 @click.option('--traffic-gb', '-t', required=True, help='Traffic limit for each user in GB.', type=float)
@@ -147,11 +166,28 @@ def add_user(username: str, traffic_limit: int, expiration_days: int, password: 
 @click.option('--prefix', '-p', required=True, help='Prefix for usernames.', type=str)
 @click.option('--start-number', '-s', default=1, help='Starting number for username suffix.', type=int)
 @click.option('--unlimited', is_flag=True, default=False, help='Flag to mark users as unlimited (exempt from IP limits).')
-@click.option('--max-ips', '-mi', required=False, default=0, help='Max IP limit (0 = global)', type=int) 
-def bulk_user_add(traffic_gb: float, expiration_days: int, count: int, prefix: str, start_number: int, unlimited: bool, max_ips: int):
+@click.option('--max-ips', '-mi', required=False, default=0, help='Max IP limit (0 = global)', type=int)
+@click.option(
+    '--plan',
+    required=False,
+    type=click.Choice(['standard', 'premium'], case_sensitive=False),
+    default='standard',
+    help='User plan/tier for all created users (standard or premium).',
+)
+def bulk_user_add(traffic_gb: float, expiration_days: int, count: int, prefix: str, start_number: int,
+                  unlimited: bool, max_ips: int, plan: str):
     """Adds multiple users in bulk."""
     try:
-        cli_api.bulk_user_add(traffic_gb, expiration_days, count, prefix, start_number, unlimited, max_ips)
+        cli_api.bulk_user_add(
+            traffic_gb,
+            expiration_days,
+            count,
+            prefix,
+            start_number,
+            unlimited,
+            max_ips,
+            plan.lower() if plan else None,
+        )
         click.echo(f"Успешно инициировано создание {count} пользователей с префиксом '{prefix}'.")
     except Exception as e:
         click.echo(f'Ошибка при массовом добавлении пользователей: {e}', err=True)
@@ -167,26 +203,35 @@ def bulk_user_add(traffic_gb: float, expiration_days: int, count: int, prefix: s
 @click.option('--blocked/--unblocked', 'blocked', '-b', default=None, help='Block or unblock the user.')
 @click.option('--unlimited-ip/--limited-ip', 'unlimited_ip', default=None, help='Set user to be exempt from or subject to IP limits.')
 @click.option('--note', '-n', required=False, help='New note for the user.', type=str)
-def edit_user(username: str, new_username: str, new_password: str, new_traffic_limit: int, new_expiration_days: int, renew_password: bool, renew_creation_date: bool, blocked: bool | None, unlimited_ip: bool | None, note: str | None):
+@click.option(
+    '--plan',
+    required=False,
+    type=click.Choice(['standard', 'premium'], case_sensitive=False),
+    help='Set user plan/tier (standard or premium).',
+)
+def edit_user(username: str, new_username: str, new_password: str, new_traffic_limit: int, new_expiration_days: int,
+              renew_password: bool, renew_creation_date: bool, blocked: bool | None, unlimited_ip: bool | None,
+              note: str | None, plan: str | None):
     try:
         cli_api.kick_users_by_name(username)
         cli_api.traffic_status(display_output=False)
         cli_api.edit_user(
-            username=username, 
-            new_username=new_username, 
+            username=username,
+            new_username=new_username,
             new_password=new_password,
-            new_traffic_limit=new_traffic_limit, 
+            new_traffic_limit=new_traffic_limit,
             new_expiration_days=new_expiration_days,
             renew_password=renew_password,
-            renew_creation_date=renew_creation_date, 
-            blocked=blocked, 
-            unlimited_ip=unlimited_ip, 
-            note=note
+            renew_creation_date=renew_creation_date,
+            blocked=blocked,
+            unlimited_ip=unlimited_ip,
+            note=note,
+            max_ips=None,
+            plan=plan.lower() if plan else None,
         )
         click.echo(f"Пользователь '{username}' успешно обновлен.")
     except Exception as e:
         click.echo(f'{e}', err=True)
-
 
 @cli.command('reset-user')
 @click.option('--username', '-u', required=True, help='Username for the user to Reset', type=str)
@@ -351,10 +396,26 @@ def node():
 @click.option('--pinSHA256', required=False, type=str, help='Optional: Public key SHA256 pin.')
 @click.option('--obfs', required=False, type=str, help='Optional: Obfuscation key.')
 @click.option('--insecure', is_flag=True, default=False, help='Optional: Skip certificate verification.')
-def add_node(name, ip, port, sni, pinsha256, obfs, insecure):
+@click.option(
+    '--tier',
+    required=False,
+    type=click.Choice(['standard', 'premium'], case_sensitive=False),
+    default='standard',
+    help='Node tier/access level (standard or premium).',
+)
+def add_node(name, ip, port, sni, pinsha256, obfs, insecure, tier):
     """Add a new external node."""
     try:
-        output = cli_api.add_node(name, ip, sni, pinSHA256=pinsha256, port=port, obfs=obfs, insecure=insecure)
+        output = cli_api.add_node(
+            name,
+            ip,
+            sni,
+            pinSHA256=pinsha256,
+            port=port,
+            obfs=obfs,
+            insecure=insecure,
+            tier=tier.lower() if tier else None,
+        )
         click.echo(output.strip())
     except Exception as e:
         click.echo(f'{e}', err=True)
