@@ -4,23 +4,25 @@ import re
 from typing import Optional, List
 from datetime import datetime
 
+
 def validate_ip_or_domain(v: str) -> str | None:
     if v is None or v.strip() in ['', 'None']:
         return None
-        
+
     v_stripped = v.strip()
-    
+
     try:
         ip_address(v_stripped)
         return v_stripped
     except ValueError:
         domain_regex = re.compile(
-            r'^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$', 
+            r'^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$',
             re.IGNORECASE
         )
         if domain_regex.match(v_stripped):
             return v_stripped
         raise ValueError(f"'{v_stripped}' is not a valid IP address or domain name.")
+
 
 class StatusResponse(BaseModel):
     ipv4: str | None = None
@@ -30,8 +32,10 @@ class StatusResponse(BaseModel):
     def check_local_server_ip(cls, v: str | None):
         return validate_ip_or_domain(v)
 
+
 class EditInputBody(StatusResponse):
     pass
+
 
 class Node(BaseModel):
     name: str
@@ -41,6 +45,8 @@ class Node(BaseModel):
     pinSHA256: Optional[str] = None
     obfs: Optional[str] = None
     insecure: Optional[bool] = False
+    # Тип ноды, который уходит на фронт и читается из nodes.json
+    type: str | None = "standard"
 
     @field_validator('ip', mode='before')
     def check_node_ip(cls, v: str | None):
@@ -53,7 +59,7 @@ class Node(BaseModel):
         if v is not None and not (1 <= v <= 65535):
             raise ValueError('Port must be between 1 and 65535.')
         return v
-    
+
     @field_validator('sni', mode='before')
     def check_sni(cls, v: str | None):
         if v is None or not v.strip():
@@ -63,17 +69,18 @@ class Node(BaseModel):
             ip_address(v)
             raise ValueError("SNI must be a domain name, not an IP address.")
         except ValueError:
-            pass 
+            # это нормально — значит, это не IP
+            pass
         if "://" in v:
             raise ValueError("SNI cannot contain '://'")
         domain_regex = re.compile(
-            r'^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$', 
+            r'^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9][a-z0-9-]{0,61}[a-z0-9]$',
             re.IGNORECASE
         )
         if not domain_regex.match(v):
             raise ValueError("Invalid domain name format for SNI.")
         return v
-    
+
     @field_validator('pinSHA256', mode='before')
     def check_pin(cls, v: str | None):
         if v is None or not v.strip():
@@ -84,13 +91,36 @@ class Node(BaseModel):
             raise ValueError("Invalid SHA256 pin format.")
         return v_stripped
 
+    @field_validator('type', mode='before')
+    def normalize_type(cls, v: str | None):
+        if v is None or str(v).strip() == '':
+            return "standard"
+        t = str(v).strip().lower()
+        if t not in ("standard", "premium"):
+            raise ValueError("Node type must be 'standard' or 'premium'.")
+        return t
+
+
 class AddNodeBody(Node):
-    pass
+    # Отдельное поле для запроса от фронта: settings.js шлёт node_type
+    node_type: Optional[str] = "standard"
+
+    @field_validator('node_type', mode='before')
+    def normalize_node_type(cls, v: str | None):
+        if v is None or str(v).strip() == '':
+            return "standard"
+        t = str(v).strip().lower()
+        if t not in ("standard", "premium"):
+            raise ValueError("Node type must be 'standard' or 'premium'.")
+        return t
+
 
 class DeleteNodeBody(BaseModel):
     name: str
 
+
 NodeListResponse = list[Node]
+
 
 class NodeUserTraffic(BaseModel):
     username: str
@@ -109,6 +139,7 @@ class NodeUserTraffic(BaseModel):
             return v
         except ValueError:
             raise ValueError("account_creation_date must be in YYYY-MM-DD format.")
+
 
 class NodesTrafficPayload(BaseModel):
     users: List[NodeUserTraffic]

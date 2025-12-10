@@ -5,12 +5,12 @@ import os
 from scripts.db.database import db
 
 from ..schema.config.ip import (
-    EditInputBody, 
+    EditInputBody,
     StatusResponse,
     AddNodeBody,
     DeleteNodeBody,
     NodeListResponse,
-    NodesTrafficPayload
+    NodesTrafficPayload,
 )
 import cli_api
 
@@ -26,7 +26,6 @@ async def get_ip_api():
         StatusResponse: A response model containing the current IP address details.
     """
     try:
-
         ipv4, ipv6 = cli_api.get_ip_address()
         return StatusResponse(ipv4=ipv4, ipv6=ipv6)
     except Exception as e:
@@ -57,8 +56,6 @@ async def edit_ip_api(body: EditInputBody):
         body: An instance of EditInputBody containing the new IPv4 and/or IPv6 addresses.
     """
     try:
-        # if not body.ipv4 and not body.ipv6:
-        #     raise HTTPException(status_code=400, detail='Error: You must specify either ipv4 or ipv6')
         cli_api.edit_ip_address(str(body.ipv4), str(body.ipv6))
         return DetailResponse(detail='IP address edited successfully.')
     except Exception as e:
@@ -71,16 +68,37 @@ async def get_all_nodes():
     Retrieves the list of all configured external nodes.
 
     Returns:
-        A list of node objects, each containing a name and an IP.
+        A list of node objects, each containing a name, IP and optional parameters.
+        Node type (standard/premium) is returned in the `type` field.
     """
     if not os.path.exists(cli_api.NODES_JSON_PATH):
         return []
+
     try:
-        with open(cli_api.NODES_JSON_PATH, 'r') as f:
+        with open(cli_api.NODES_JSON_PATH, 'r', encoding='utf-8') as f:
             content = f.read()
             if not content:
                 return []
-            return json.loads(content)
+
+            nodes = json.loads(content)
+
+            # Нормализуем тип ноды: всегда отдаём поле "type"
+            normalized_nodes = []
+            for node in nodes:
+                # поддерживаем как старые записи без type, так и возможное node_type
+                raw_type = (node.get('type') or node.get('node_type') or 'standard')
+                node_type = str(raw_type).strip().lower()
+
+                if node_type not in ('standard', 'premium'):
+                    node_type = 'standard'
+
+                node['type'] = node_type
+                # на всякий случай можно убрать node_type, чтобы не путать фронт
+                # но это не обязательно, если схема его игнорирует
+                normalized_nodes.append(node)
+
+            return normalized_nodes
+
     except (json.JSONDecodeError, IOError) as e:
         raise HTTPException(status_code=500, detail=f"Failed to read or parse nodes file: {e}")
 
@@ -94,14 +112,20 @@ async def add_node(body: AddNodeBody):
         body: Request body containing the full details of the node.
     """
     try:
+        # Нормализуем тип ноды: standard/premium
+        node_type = (body.node_type or "standard").strip().lower()
+        if node_type not in ("standard", "premium"):
+            node_type = "standard"
+
         cli_api.add_node(
-            name=body.name, 
-            ip=body.ip, 
-            port=body.port, 
-            sni=body.sni, 
-            pinSHA256=body.pinSHA256, 
+            name=body.name,
+            ip=body.ip,
+            port=body.port,
+            sni=body.sni,
+            pinSHA256=body.pinSHA256,
             obfs=body.obfs,
-            insecure=body.insecure
+            insecure=body.insecure,
+            node_type=node_type,  # ← ВАЖНО: пробрасываем тип до CLI/скрипта node.py
         )
         return DetailResponse(detail=f"Node '{body.name}' added successfully.")
     except Exception as e:
@@ -131,7 +155,7 @@ async def receive_node_traffic(body: NodesTrafficPayload):
     """
     if db is None:
         raise HTTPException(status_code=500, detail="Database connection is not available.")
-    
+
     updated_count = 0
     for user_traffic in body.users:
         try:
@@ -148,13 +172,13 @@ async def receive_node_traffic(body: NodesTrafficPayload):
                 'status': user_traffic.status,
                 'online_count': user_traffic.online_count,
             }
-            
+
             if not db_user.get('account_creation_date') and user_traffic.account_creation_date:
                 update_data['account_creation_date'] = user_traffic.account_creation_date
 
             db.update_user(user_traffic.username, update_data)
             updated_count += 1
-            
+
         except Exception as e:
             print(f"Error updating traffic for user {user_traffic.username}: {e}")
 
