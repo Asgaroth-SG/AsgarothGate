@@ -86,7 +86,7 @@ def add_node(
     port: int | None = None,
     obfs: str | None = None,
     insecure: bool = False,
-    node_type: str = "standard",  # тип ноды: standard / premium
+    node_type: str = "standard",
 ):
     if not is_valid_ip_or_domain(ip):
         print(f"Error: '{ip}' is not a valid IP address or domain name.", file=sys.stderr)
@@ -103,7 +103,8 @@ def add_node(
     if port and not is_valid_port(port):
         print(f"Error: Port '{port}' must be between 1 and 65535.", file=sys.stderr)
         sys.exit(1)
-        
+
+    # нормализуем тип ноды
     node_type = (node_type or "standard").strip().lower()
     if node_type not in ("standard", "premium"):
         print(f"Error: Node type '{node_type}' is invalid. Use 'standard' or 'premium'.", file=sys.stderr)
@@ -121,6 +122,8 @@ def add_node(
         "name": name,
         "ip": ip,
         "type": node_type,
+    }
+
     if sni:
         new_node["sni"] = sni.strip()
     if pinSHA256:
@@ -135,8 +138,6 @@ def add_node(
     nodes.append(new_node)
     write_nodes(nodes)
     print(f"Successfully added node '{name}'.")
-
-
 
 def delete_node(name: str):
     nodes = read_nodes()
