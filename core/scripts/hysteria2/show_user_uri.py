@@ -13,6 +13,7 @@ from typing import Tuple, Optional, Dict, List, Any
 from db.database import db
 from paths import *
 
+
 def load_env_file(env_file: str) -> Dict[str, str]:
     env_vars = {}
     if os.path.exists(env_file):
@@ -23,6 +24,7 @@ def load_env_file(env_file: str) -> Dict[str, str]:
                     key, value = line.split('=', 1)
                     env_vars[key] = value
     return env_vars
+
 
 def load_nodes() -> List[Dict[str, Any]]:
     if NODES_JSON_PATH.exists():
@@ -35,8 +37,10 @@ def load_nodes() -> List[Dict[str, Any]]:
             pass
     return []
 
+
 def load_hysteria2_env() -> Dict[str, str]:
     return load_env_file(CONFIG_ENV)
+
 
 def load_hysteria2_ips() -> Tuple[str, str, str]:
     env_vars = load_hysteria2_env()
@@ -51,11 +55,13 @@ def get_main_node_label() -> str:
     env_vars = load_hysteria2_env()
     return env_vars.get('MAIN_NODE_LABEL', '🇺🇸 США')
 
+
 def get_singbox_domain_and_port() -> Tuple[str, str]:
     env_vars = load_env_file(SINGBOX_ENV)
     domain = env_vars.get('HYSTERIA_DOMAIN', '')
     port = env_vars.get('HYSTERIA_PORT', '')
     return domain, port
+
 
 def get_normalsub_domain_and_port() -> Tuple[str, str, str]:
     env_vars = load_env_file(NORMALSUB_ENV)
@@ -63,6 +69,7 @@ def get_normalsub_domain_and_port() -> Tuple[str, str, str]:
     port = env_vars.get('HYSTERIA_PORT', '')
     subpath = env_vars.get('SUBPATH', '')
     return domain, port, subpath
+
 
 def is_service_active(service_name: str) -> bool:
     try:
@@ -74,9 +81,19 @@ def is_service_active(service_name: str) -> bool:
     except Exception:
         return False
 
-def generate_uri(username: str, auth_password: str, ip: str, port: str, 
-                 obfs_password: str, sha256: str, sni: str, ip_version: int, 
-                 insecure: bool, fragment_tag: str) -> str:
+
+def generate_uri(
+    username: str,
+    auth_password: str,
+    ip: str,
+    port: str,
+    obfs_password: str,
+    sha256: str,
+    sni: str,
+    ip_version: int,
+    insecure: bool,
+    fragment_tag: str
+) -> str:
     ip_part = f"[{ip}]" if ip_version == 6 and ':' in ip else ip
     uri_base = f"hy2://{username}:{auth_password}@{ip_part}:{port}"
     
@@ -92,6 +109,7 @@ def generate_uri(username: str, auth_password: str, ip: str, port: str,
     
     query_string = "&".join(params)
     return f"{uri_base}?{query_string}#{fragment_tag}"
+
 
 def generate_qr_code(uri: str) -> List[str]:
     try:
@@ -110,14 +128,17 @@ def generate_qr_code(uri: str) -> List[str]:
     except Exception as e:
         return [f"Error generating QR code: {str(e)}"]
 
+
 def center_text(text: str, width: int) -> str:
     return text.center(width)
+
 
 def get_terminal_width() -> int:
     try:
         return os.get_terminal_size().columns
     except (AttributeError, OSError):
         return 80
+
 
 def display_uri_and_qr(uri: str, label: str, args: argparse.Namespace, terminal_width: int):
     if not uri:
@@ -130,6 +151,7 @@ def display_uri_and_qr(uri: str, label: str, args: argparse.Namespace, terminal_
         qr_code = generate_qr_code(uri)
         for line in qr_code:
             print(center_text(line, terminal_width))
+
 
 def show_uri(args: argparse.Namespace) -> None:
     if db is None:
@@ -154,6 +176,10 @@ def show_uri(args: argparse.Namespace) -> None:
     
     auth_password = user_doc["password"]
 
+    # 👉 Определяем тариф пользователя: standard / premium
+    user_plan = str(user_doc.get("plan", "standard")).strip().lower()
+    is_premium_user = (user_plan == "premium")
+
     local_port = config["listen"].split(":")[-1]
     local_sha256 = config.get("tls", {}).get("pinSHA256", "")
     local_obfs_password = config.get("obfs", {}).get("salamander", {}).get("password", "")
@@ -163,23 +189,56 @@ def show_uri(args: argparse.Namespace) -> None:
     nodes = load_nodes()
     terminal_width = get_terminal_width()
 
+    # Основная (локальная) нода — всегда доступна пользователю любого тарифа
     if args.all or args.ip_version == 4:
         if ip4 and ip4 != "None":
             main_label = get_main_node_label()
-            uri = generate_uri(args.username, auth_password, ip4, local_port, 
-                                 local_obfs_password, local_sha256, local_sni, 4, local_insecure, main_label)
+            uri = generate_uri(
+                args.username,
+                auth_password,
+                ip4,
+                local_port,
+                local_obfs_password,
+                local_sha256,
+                local_sni,
+                4,
+                local_insecure,
+                main_label
+            )
             display_uri_and_qr(uri, main_label, args, terminal_width)
             
-   # if args.all or args.ip_version == 6:
-   #     if ip6 and ip6 != "None":
-   #         uri = generate_uri(args.username, auth_password, ip6, local_port, 
-   #                              local_obfs_password, local_sha256, local_sni, 6, local_insecure, "🇺🇸 США v6")
-   #         display_uri_and_qr(uri, "IPv6", args, terminal_width)
+    # IPv6 закомментирована, как и в оригинале
+    # if args.all or args.ip_version == 6:
+    #     if ip6 and ip6 != "None":
+    #         uri = generate_uri(
+    #             args.username,
+    #             auth_password,
+    #             ip6,
+    #             local_port,
+    #             local_obfs_password,
+    #             local_sha256,
+    #             local_sni,
+    #             6,
+    #             local_insecure,
+    #             "🇺🇸 США v6"
+    #         )
+    #         display_uri_and_qr(uri, "IPv6", args, terminal_width)
 
+    # Внешние ноды из nodes.json
     for node in nodes:
         node_name = node.get("name")
         node_ip = node.get("ip")
         if not node_name or not node_ip:
+            continue
+
+        # 👉 Читаем тип ноды (standard / premium)
+        raw_type = node.get("type", "standard")
+        node_type = str(raw_type).strip().lower()
+        if node_type not in ("standard", "premium"):
+            node_type = "standard"
+
+        # 👉 Если пользователь НЕ премиум — не показываем premium-ноды
+        if (not is_premium_user) and node_type == "premium":
             continue
             
         ip_v = 4 if '.' in node_ip else 6
@@ -215,15 +274,37 @@ def show_uri(args: argparse.Namespace) -> None:
         if domain and port:
             print(f"\nПодписка:\nhttps://{domain}:{port}/{subpath}/sub/normal/{auth_password}#Hysteria2\n")
 
+
 def main():
     parser = argparse.ArgumentParser(description="Hysteria2 URI Generator")
     parser.add_argument("-u", "--username", help="Username to generate URI for")
     parser.add_argument("-qr", "--qrcode", action="store_true", help="Generate QR code")
-    parser.add_argument("-ip", "--ip-version", type=int, default=4, choices=[4, 6], 
-                        help="IP version (4 or 6)")
-    parser.add_argument("-a", "--all", action="store_true", help="Show all available IPs")
-    parser.add_argument("-s", "--singbox", action="store_true", help="Generate SingBox sublink")
-    parser.add_argument("-n", "--normalsub", action="store_true", help="Generate Normal-SUB sublink")
+    parser.add_argument(
+        "-ip",
+        "--ip-version",
+        type=int,
+        default=4,
+        choices=[4, 6],
+        help="IP version (4 or 6)"
+    )
+    parser.add_argument(
+        "-a",
+        "--all",
+        action="store_true",
+        help="Show all available IPs"
+    )
+    parser.add_argument(
+        "-s",
+        "--singbox",
+        action="store_true",
+        help="Generate SingBox sublink"
+    )
+    parser.add_argument(
+        "-n",
+        "--normalsub",
+        action="store_true",
+        help="Generate Normal-SUB sublink"
+    )
     
     args = parser.parse_args()
     
@@ -232,6 +313,7 @@ def main():
         sys.exit(1)
     
     show_uri(args)
+
 
 if __name__ == "__main__":
     main()
