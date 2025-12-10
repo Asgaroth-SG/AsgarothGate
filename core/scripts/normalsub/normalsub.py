@@ -78,6 +78,8 @@ class UserInfo:
     account_creation_date: str
     expiration_days: int
     blocked: bool = False
+    # Тариф пользователя: standard / premium
+    plan: str = "standard"
 
     @property
     def total_usage(self) -> int:
@@ -211,7 +213,7 @@ class HysteriaCLI:
         user_doc = db.get_user(username)
         if not user_doc:
             return None
-        
+
         return UserInfo(
             username=user_doc.get('_id'),
             password=user_doc.get('password'),
@@ -220,7 +222,8 @@ class HysteriaCLI:
             max_download_bytes=user_doc.get('max_download_bytes', 0),
             account_creation_date=user_doc.get('account_creation_date', ''),
             expiration_days=user_doc.get('expiration_days', 0),
-            blocked=user_doc.get('blocked', False)
+            blocked=user_doc.get('blocked', False),
+            plan=user_doc.get('plan', 'standard'),
         )
 
     def get_all_uris(self, username: str) -> List[str]:
@@ -233,7 +236,7 @@ class HysteriaCLI:
         output = self._run_command(['show-user-uri', '-u', username, '-a'])
         if not output:
             return []
-        
+
         matches = re.findall(r"^(.*?):\s*(hy2://.*)$", output, re.MULTILINE)
         return [{'label': label.strip(), 'uri': uri} for label, uri in matches]
 
@@ -295,7 +298,7 @@ class SingboxConfigGenerator:
             auth_password = parsed_url.password
             auth_user = unquote(parsed_url.username or '')
             obfs_password = parse_qs(parsed_url.query).get('obfs-password', [''])[0]
-            
+
             if auth_password:
                 if auth_user:
                     final_password = f"{auth_user}:{auth_password}"
@@ -303,14 +306,14 @@ class SingboxConfigGenerator:
                     final_password = auth_password
             else:
                 final_password = auth_user
-                
+
         except Exception as e:
             print(f"Error during Singbox config generation from URI: {e}, URI: {uri}")
             return None
 
         return {
             "type": "hysteria2",
-            "tag": unquote(parsed_url.fragment), 
+            "tag": unquote(parsed_url.fragment),
             "server": server,
             "server_port": server_port,
             "obfs": {
@@ -328,7 +331,7 @@ class SingboxConfigGenerator:
     def combine_configs(self, all_uris: List[str], username: str, fragment: str) -> Optional[Dict[str, Any]]:
         if not all_uris:
             return None
-        
+
         combined_config = self.get_template()
         combined_config['outbounds'] = [out for out in combined_config['outbounds'] if out.get('type') != 'hysteria2']
 
@@ -374,29 +377,79 @@ class SubscriptionManager:
             print(f"Warning: Could not read or parse extra configs from {self.config.extra_config_path}: {e}")
             return []
 
+    def _load_nodes_types(self) -> Dict[str, str]:
+        """
+        Считывает nodes.json и строит карту:
+        {
+            "🇺🇸 США": "standard",
+            "📶 LTE": "premium",
+            ...
+        }
+        """
+        nodes_map: Dict[str, str] = {}
+        try:
+            if not os.path.exists(self.config.nodes_json_path):
+                return nodes_map
+            with open(self.config.nodes_json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                for node in data:
+                    name = str(node.get("name", "")).strip()
+                    if not name:
+                        continue
+                    node_type = str(node.get("type", "standard")).strip().lower()
+                    if node_type not in ("standard", "premium"):
+                        node_type = "standard"
+                    nodes_map[name] = node_type
+        except Exception as e:
+            print(f"Warning: failed to load nodes from {self.config.nodes_json_path}: {e}")
+        return nodes_map
+
     def get_normal_subscription(self, username: str, user_agent: str) -> str:
         user_info = self.hysteria_cli.get_user_info(username)
         if user_info is None:
             return "User not found"
-            
-        all_uris = self.hysteria_cli.get_all_uris(username)
 
-        processed_uris = []
-        for uri in all_uris:
-            # === FILTER IPV6 FROM SUBSCRIPTION FEED ===
-            # Пропускаем, если в ссылке есть квадратные скобки (признак IPv6) или метки v6/IPv6
+        user_plan = getattr(user_info, "plan", "standard").lower()
+        is_premium_user = (user_plan == "premium")
+
+        nodes_types = self._load_nodes_types()
+        labeled_uris = self.hysteria_cli.get_all_labeled_uris(username)
+
+        processed_uris: List[str] = []
+
+        for item in labeled_uris:
+            label = item.get("label", "")
+            uri = item.get("uri", "")
+
+            if not uri:
+                continue
+
+            # фильтруем IPv6 по URI (как раньше)
             if "[" in uri or "v6" in uri or "IPv6" in uri:
                 continue
-            # ==========================================
 
+            # Если это удалённая нода, смотрим её тип
+            if label.startswith("Node:"):
+                node_name = label[len("Node:"):].strip()
+                node_type = nodes_types.get(node_name, "standard")
+                # обычному пользователю не даём premium-ноды
+                if (not is_premium_user) and node_type == "premium":
+                    continue
+
+            # спец-обработка pinSHA256 для v2rayNG
             if "v2ray" in user_agent and "ng" in user_agent:
                 match = re.search(r'pinSHA256=sha256/([^&]+)', uri)
                 if match:
                     decoded = base64.b64decode(match.group(1))
                     formatted = ":".join("{:02X}".format(byte) for byte in decoded)
-                    uri = uri.replace(f'pinSHA256=sha256/{match.group(1)}', f'pinSHA256={formatted}')
+                    uri = uri.replace(
+                        f'pinSHA256=sha256/{match.group(1)}',
+                        f'pinSHA256={formatted}'
+                    )
+
             processed_uris.append(uri)
-        
+
         extra_uris = self._get_extra_configs()
         all_processed_uris = processed_uris + extra_uris
 
@@ -409,7 +462,7 @@ class SubscriptionManager:
             f"total={user_info.max_download_bytes}; "
             f"expire={user_info.expiration_timestamp}\n"
         )
-        profile_lines = f"//profile-title: Asgaroth Gate\n//profile-update-interval: 1\n"
+        profile_lines = "//profile-title: Asgaroth Gate\n//profile-update-interval: 1\n"
         return profile_lines + subscription_info + "\n".join(all_processed_uris)
 
 
@@ -452,7 +505,7 @@ class HysteriaServer:
         external_port = int(os.getenv('HYSTERIA_PORT', '443'))
         aiohttp_listen_address = os.getenv('AIOHTTP_LISTEN_ADDRESS', '127.0.0.1')
         aiohttp_listen_port = int(os.getenv('AIOHTTP_LISTEN_PORT', '33261'))
-        
+
         subpath = os.getenv('SUBPATH', '').strip().strip("/")
         if not subpath or not self.is_valid_subpath(subpath):
             raise ValueError(
@@ -468,17 +521,22 @@ class HysteriaServer:
         template_dir = os.path.join(os.path.dirname(__file__), 'template')
 
         sni = self._load_sni_from_env(sni_file)
-        return AppConfig(domain=domain, external_port=external_port,
-                         aiohttp_listen_address=aiohttp_listen_address,
-                         aiohttp_listen_port=aiohttp_listen_port,
-                         sni_file=sni_file,
-                         singbox_template_path=singbox_template_path,
-                         hysteria_cli_path=hysteria_cli_path,
-                         nodes_json_path=nodes_json_path,
-                         extra_config_path=extra_config_path,
-                         rate_limit=rate_limit, rate_limit_window=rate_limit_window,
-                         sni=sni, template_dir=template_dir,
-                         subpath=subpath)
+        return AppConfig(
+            domain=domain,
+            external_port=external_port,
+            aiohttp_listen_address=aiohttp_listen_address,
+            aiohttp_listen_port=aiohttp_listen_port,
+            sni_file=sni_file,
+            singbox_template_path=singbox_template_path,
+            hysteria_cli_path=hysteria_cli_path,
+            nodes_json_path=nodes_json_path,
+            extra_config_path=extra_config_path,
+            rate_limit=rate_limit,
+            rate_limit_window=rate_limit_window,
+            sni=sni,
+            template_dir=template_dir,
+            subpath=subpath
+        )
 
     def _load_sni_from_env(self, sni_file: str) -> str:
         try:
@@ -502,7 +560,7 @@ class HysteriaServer:
     async def _rate_limit_middleware(self, request: web.Request, handler):
         client_ip_hdr = request.headers.get('X-Forwarded-For', request.headers.get('X-Real-IP'))
         client_ip = client_ip_hdr.split(',')[0].strip() if client_ip_hdr else request.remote
-        
+
         if client_ip and not self.rate_limiter.check_limit(client_ip):
             return web.Response(status=429, text="Rate limit exceeded.")
         return await handler(request)
@@ -527,8 +585,8 @@ class HysteriaServer:
         try:
             password_token_raw = request.match_info.get('password_token', '')
             if not password_token_raw:
-                 return web.Response(status=400, text="Error: Missing 'password_token' parameter.")
-            
+                return web.Response(status=400, text="Error: Missing 'password_token' parameter.")
+
             password_token = Utils.sanitize_input(password_token_raw, r'^[a-zA-Z0-9]+$')
 
             username = self.hysteria_cli.get_username_by_password(password_token)
@@ -567,7 +625,7 @@ class HysteriaServer:
         if not user_agent.startswith('hiddifynext') and ('singbox' in user_agent or 'sing' in user_agent):
             combined_config = self.singbox_generator.combine_configs([fake_uri], "blocked", fragment)
             return web.Response(text=json.dumps(combined_config, indent=4, sort_keys=True), content_type='application/json')
-        
+
         return web.Response(text=fake_uri, content_type='text/plain')
 
     def _get_blocked_template_context(self, fake_uri: str, user_info: UserInfo) -> TemplateContext:
@@ -615,29 +673,62 @@ class HysteriaServer:
 
         if not Utils.is_valid_url(base_url):
             print(f"Warning: Constructed base URL '{base_url}' might be invalid. Check domain and port config.")
-        
+
         sub_link = f"{base_url}/{self.config.subpath}/sub/normal/{user_info.password}"
         sub_link_encoded = quote(sub_link, safe='')
         sublink_qrcode = Utils.generate_qrcode_base64(sub_link)
-        
+
         singbox_qrcode = Utils.generate_qrcode_base64(f"sing-box://import-remote-profile?url={sub_link}")
         hiddify_qrcode = Utils.generate_qrcode_base64(f"hiddify://import/{sub_link}")
         streisand_qrcode = Utils.generate_qrcode_base64(f"streisand://import/sub?url={sub_link}")
         nekobox_qrcode = Utils.generate_qrcode_base64(f"nekobox://import?url={sub_link}")
-        
-        local_uris = []
-        node_uris = []
+
+        local_uris: List[NodeURI] = []
+        node_uris: List[NodeURI] = []
+
+        # фильтрация premium-ноды и в HTML-представлении
+        user_plan = getattr(user_info, "plan", "standard").lower()
+        is_premium_user = (user_plan == "premium")
+
+        nodes_types: Dict[str, str] = {}
+        try:
+            if os.path.exists(self.config.nodes_json_path):
+                with open(self.config.nodes_json_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, list):
+                    for node in data:
+                        name = str(node.get("name", "")).strip()
+                        if not name:
+                            continue
+                        node_type = str(node.get("type", "standard")).strip().lower()
+                        if node_type not in ("standard", "premium"):
+                            node_type = "standard"
+                        nodes_types[name] = node_type
+        except Exception as e:
+            print(f"Warning: failed to load nodes from {self.config.nodes_json_path} for HTML view: {e}")
 
         for item in labeled_uris:
-            if "IPv6" in item['label'] or "v6" in item['label']:
+            label = item.get('label', '')
+            uri = item.get('uri', '')
+
+            # не показываем IPv6-строки (по label, как было)
+            if "IPv6" in label or "v6" in label:
                 continue
 
+            if label.startswith("Node:"):
+                node_name = label[len("Node:"):].strip()
+                node_type = nodes_types.get(node_name, "standard")
+                if (not is_premium_user) and node_type == "premium":
+                    # обычный пользователь не видит premium-ноды
+                    continue
+
             node_uri = NodeURI(
-                label=item['label'], 
-                uri=item['uri'], 
-                qrcode=Utils.generate_qrcode_base64(item['uri'])
+                label=label,
+                uri=uri,
+                qrcode=Utils.generate_qrcode_base64(uri)
             )
-            if item['label'].startswith('Node:'):
+
+            if label.startswith('Node:'):
                 node_uris.append(node_uri)
             else:
                 local_uris.append(node_uri)
@@ -665,7 +756,7 @@ class HysteriaServer:
     async def handle_404_subpath(self, request: web.Request) -> web.Response:
         print(f"404 Not Found (within subpath, unhandled by specific routes): {request.path}")
         return web.Response(status=404, text="Not Found within Subpath")
-    
+
     async def handle_style(self, request: web.Request) -> web.Response:
         return web.FileResponse(os.path.join(self.config.template_dir, 'style.css'))
 
@@ -680,6 +771,7 @@ class HysteriaServer:
             host=self.config.aiohttp_listen_address,
             port=self.config.aiohttp_listen_port
         )
+
 
 if __name__ == '__main__':
     server = HysteriaServer()
