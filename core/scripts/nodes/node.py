@@ -163,7 +163,7 @@ def list_nodes():
     for node in sorted(nodes, key=lambda x: x['name']):
         name = node['name']
         ip = node['ip']
-        node_type = node.get('type', 'standard')
+        node_type = node.get('type', node.get('node_type', 'standard'))
         port = node.get('port', 'N/A')
         sni = node.get('sni', 'N/A')
         insecure = str(node.get('insecure', 'False'))
