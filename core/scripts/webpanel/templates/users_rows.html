@@ -1,0 +1,199 @@
+{% if not users %}
+<tr>
+    <td colspan="14" class="text-center p-4">
+        Пользователи не найдены.
+    </td>
+</tr>
+{% else %}
+    {% for user in users|sort(attribute='username', case_sensitive=false) %}
+    <tr class="user-main-row" data-note="{{ user.note or '' }}">
+        <td>
+            <input type="checkbox" class="user-checkbox" value="{{ user.username }}">
+        </td>
+        <td>{{ loop.index + (offset if offset is defined else 0) }}</td>
+        <td data-username="{{ user.username }}"><strong>{{ user.username }}</strong></td>
+        <td class="d-none d-md-table-cell">
+            {% if user.status == "Online" %}
+                <span class="badge badge-success">Онлайн</span>
+                {% if user.online_count and user.online_count > 0 %}
+                    <span class="badge badge-light text-dark" style="font-size: 0.75rem;">{{ user.online_count }}</span>
+                {% endif %}
+            {% elif user.status == "Offline" %}
+                <span class="badge badge-secondary">Офлайн</span>
+            {% elif user.status == "On-hold" %}
+                <span class="badge badge-warning" data-toggle="tooltip" title="Ожидание первого подключения">В ожидании</span>
+            {% elif user.status == "Conflict" %}
+                <span class="badge badge-danger">Конфликт</span>
+            {% else %}
+                <span class="badge badge-danger">{{ user.status }}</span>
+            {% endif %}
+        </td>
+        
+        <td class="d-none d-md-table-cell text-muted text-center" style="font-size: 0.9rem;">
+            {{ user.traffic_used }}
+        </td>
+        
+        <td class="d-none d-md-table-cell">
+            {% if user.expiry_date == "On-hold" %}
+                <span class="text-muted small">В ожидании</span>
+            {% elif user.expiry_date == "Unlimited" %}
+                <span class="text-success">Безлимит</span>
+            {% elif user.expiry_date == "Error" %}
+                <span class="text-danger">Ошибка</span>
+            {% else %}
+                {{ user.expiry_date[8:10] }}.{{ user.expiry_date[5:7] }}.{{ user.expiry_date[:4] }}
+            {% endif %}
+        </td>
+        
+        <td class="d-none d-md-table-cell text-center">
+            {% if user.expiry_days == "Unlimited" %}
+                <span class="text-success">∞</span>
+            {% elif user.expiry_days == "On-hold" %}
+                <span class="text-muted">-</span>
+            {% else %}
+                {{ user.expiry_days }}
+            {% endif %}
+        </td>
+        <td class="d-none d-md-table-cell text-center">
+            {% if user.day_usage == "On-hold" %}
+                 <span class="text-muted">-</span>
+            {% elif user.day_usage == "Error" %}
+                 <span class="text-danger">Err</span>
+            {% else %}
+                 {{ user.day_usage }}
+            {% endif %}
+        </td>
+        <td class="d-none d-md-table-cell text-center">
+            {% if user.enable %}
+            <i class="fas fa-check text-success"></i>
+            {% else %}
+            <i class="fas fa-times text-danger"></i>
+            {% endif %}
+        </td>
+        <td class="d-none d-md-table-cell note-cell">
+            {% if user.note %}
+                <small class="text-muted" title="{{ user.note }}">{{ user.note | truncate(15, True) }}</small>
+            {% endif %}
+        </td>
+        
+        <td class="d-none d-md-table-cell text-center requires-iplimit-service" style="display: none;">
+            {% if user.unlimited_ip %}
+                <span class="badge badge-primary" title="Безлимитный IP">Безлимит</span>
+            {% elif user.max_ips and user.max_ips > 0 %}
+                <span class="badge badge-info" title="Персональный лимит">{{ user.max_ips }}</span>
+            {% else %}
+                <span class="badge badge-secondary" title="Глобальный лимит">Глобальный</span>
+            {% endif %}
+        </td>
+
+        <td class="d-none d-md-table-cell text-center">
+            <a href="#" class="btn btn-xs btn-outline-secondary config-link" data-toggle="modal" data-target="#qrcodeModal"
+                data-username="{{ user.username }}">
+                <i class="fas fa-qrcode"></i>
+            </a>
+        </td>
+        <td class="d-none d-md-table-cell text-right">
+            <button type="button" class="btn btn-xs btn-info edit-user"
+                data-user="{{ user.username }}" data-toggle="modal"
+                data-target="#editUserModal" title="Редактировать">
+                <i class="fas fa-pen"></i>
+            </button>
+            <button type="button" class="btn btn-xs btn-warning reset-user"
+                data-user="{{ user.username }}" title="Сбросить">
+                <i class="fas fa-undo"></i>
+            </button>
+            <button type="button" class="btn btn-xs btn-danger delete-user"
+                data-user="{{ user.username }}" title="Удалить">
+                <i class="fas fa-trash"></i>
+            </button>
+        </td>
+        <td class="d-md-none text-center">
+            <button type="button" class="btn btn-sm btn-secondary toggle-details-btn">
+                <i class="fas fa-plus"></i>
+            </button>
+        </td>
+    </tr>
+    
+    <tr class="user-details-row d-md-none" style="display: none;">
+        <td colspan="4">
+            <div class="user-details-content p-2">
+                <p><strong>Статус:</strong>
+                    <span>
+                    {% if user.status == "Online" %}
+                        <span class="badge badge-success">Онлайн</span>
+                        {% if user.online_count and user.online_count > 0 %}
+                            ({{ user.online_count }})
+                        {% endif %}
+                    {% elif user.status == "Offline" %}
+                        <span class="badge badge-secondary">Офлайн</span>
+                    {% elif user.status == "On-hold" %}
+                        <span class="badge badge-warning" data-toggle="tooltip" title="Ожидание первого подключения">В ожидании</span>
+                    {% else %}
+                        <span class="badge badge-danger">{{ user.status }}</span>
+                    {% endif %}
+                    </span>
+                </p>
+                <p><strong>Трафик:</strong> <span>{{ user.traffic_used }}</span></p>
+                <p><strong>Истекает:</strong> 
+                    <span>
+                    {% if user.expiry_date == "On-hold" %}
+                        В ожидании
+                    {% elif user.expiry_date == "Unlimited" %}
+                        Безлимит
+                    {% else %}
+                        {{ user.expiry_date[8:10] }}.{{ user.expiry_date[5:7] }}.{{ user.expiry_date[:4] }}
+                    {% endif %}
+                    </span>
+                </p>
+                <p><strong>Дней:</strong> 
+                    <span>
+                    {% if user.expiry_days == "On-hold" %}
+                        -
+                    {% elif user.expiry_days == "Unlimited" %}
+                        ∞
+                    {% else %}
+                        {{ user.expiry_days }}
+                    {% endif %}
+                    </span>
+                </p>
+                <p><strong>За день:</strong> <span>{{ user.day_usage }}</span></p>
+                <p><strong>Примечание:</strong> <span>{{ user.note or 'Нет' }}</span></p>
+                <p><strong>Активен:</strong>
+                    <span>
+                        {% if user.enable %}
+                        <i class="fas fa-check text-success"></i> Да
+                        {% else %}
+                        <i class="fas fa-times text-danger"></i> Нет
+                        {% endif %}
+                    </span>
+                </p>
+                <p class="requires-iplimit-service" style="display: none;"><strong>Limit IP:</strong>
+                    <span>
+                        {% if user.unlimited_ip %}
+                            <span class="badge badge-primary">Безлимит</span>
+                        {% elif user.max_ips and user.max_ips > 0 %}
+                            <span class="badge badge-info">{{ user.max_ips }} (Перс.)</span>
+                        {% else %}
+                            <span class="badge badge-secondary">Глобальный</span>
+                        {% endif %}
+                    </span>
+                </p>
+                <div class="mt-2 user-details-actions">
+                    <a href="#" class="btn btn-sm btn-outline-secondary" data-toggle="modal" data-target="#qrcodeModal" data-username="{{ user.username }}">
+                        <i class="fas fa-qrcode"></i> QR
+                    </a>
+                    <button type="button" class="btn btn-sm btn-info edit-user" data-user="{{ user.username }}" data-toggle="modal" data-target="#editUserModal">
+                        <i class="fas fa-pen"></i> Изм.
+                    </button>
+                    <button type="button" class="btn btn-sm btn-warning reset-user" data-user="{{ user.username }}">
+                        <i class="fas fa-undo"></i> Сброс
+                    </button>
+                    <button type="button" class="btn btn-sm btn-danger delete-user" data-user="{{ user.username }}">
+                        <i class="fas fa-trash"></i> Удалить
+                    </button>
+                </div>
+            </div>
+        </td>
+    </tr>
+    {% endfor %}
+{% endif %}

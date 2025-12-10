@@ -1,0 +1,97 @@
+{
+  "listen": ":443",
+  "tls": {
+    "cert": "/etc/hysteria/ca.crt",
+    "key": "/etc/hysteria/ca.key",
+    "insecure": true,
+    "pinSHA256": "96:E1:3B:BE:5B:3B:98:E3:BC:C4:65:9F:3A:B5:5C:35:AF:CA:DC:97:FE:89:3B:09:63:3C:69:F0:9F:49:86:D7"
+  },
+  "obfs": {
+    "type": "salamander",
+    "salamander": {
+      "password": "Fsq7kwPgFPPFgCCIJaXl8rk6AP9FaS07"
+    }
+  },
+  "auth": {
+    "type": "http",
+    "http": {
+      "url": "http://148.253.215.11:28262/auth"
+    }
+  },
+  "quic": {
+    "initStreamReceiveWindow": 8388608,
+    "maxStreamReceiveWindow": 8388608,
+    "initConnReceiveWindow": 20971520,
+    "maxConnReceiveWindow": 20971520,
+    "maxIdleTimeout": "20s",
+    "maxIncomingStreams": 1024,
+    "disablePathMTUDiscovery": false
+  },
+  "bandwidth": {
+    "up": "200 mbps",
+    "down": "200 mbps"
+  },
+  "ignoreClientBandwidth": false,
+  "disableUDP": false,
+  "speedTest": false,
+  "udpIdleTimeout": "20s",
+  "resolver": {
+    "type": "udp",
+    "udp": {
+      "addr": "8.8.8.8:53",
+      "timeout": "4s"
+    }
+  },
+  "outbounds": [
+    {
+      "name": "v4",
+      "type": "direct",
+      "direct": {
+        "mode": 4,
+        "bindDevice": "eth0"
+      }
+    },
+    {
+      "name": "warps",
+      "type": "direct",
+      "direct": {
+        "mode": 4,
+        "bindDevice": "wgcf"
+      }
+    }
+  ],
+  "acl": {
+    "inline": [
+      "reject(geoip:private)",
+      "reject(geoip:phishing)",
+      "reject(geoip:malware)",
+      "reject(geosite:category-ads-all)",
+      "reject(geosite:google@ads)",
+      "reject(geosite:malware)",
+      "reject(geosite:phishing)",
+      "reject(geosite:cryptominers)",
+      "reject(10.0.0.0/8)",
+      "reject(172.16.0.0/12)",
+      "reject(192.168.0.0/16)",
+      "reject(fc00::/7)",
+      "warps(all)"
+    ],
+    "geoip": "/etc/hysteria/geoip.dat",
+    "geosite": "/etc/hysteria/geosite.dat"
+  },
+  "trafficStats": {
+    "listen": "127.0.0.1:25413",
+    "secret": "b41a7304-4c69-441e-8d4b-9eafa6813324"
+  },
+  "masquerade": {
+    "type": "proxy",
+    "proxy": {
+      "url": "https://sun6-21.userapi.com",
+      "rewriteHost": true
+    },
+    "listenHTTP": ":80",
+    "listenHTTPS": ":443",
+    "forceHTTPS": true
+  }
+}
+
