@@ -544,7 +544,16 @@ def add_node(
     """
     Adds a new external node.
     """
-    command = ['python3', Command.NODE_MANAGER.value, 'add', '--name', name, '--ip', ip]
+    command = [
+        'python3',
+        Command.NODE_MANAGER.value,
+        'add',
+        '--name',
+        name,
+        '--ip',
+        ip,
+    ]
+
     if port:
         command.extend(['--port', str(port)])
     if sni:
@@ -555,11 +564,10 @@ def add_node(
         command.extend(['--obfs', obfs])
     if insecure:
         command.append('--insecure')
-    # тип ноды (standard/premium)
     if node_type:
         command.extend(['--type', node_type])
-    return run_cmd(command)
 
+    return run_cmd(command)
 
 def delete_node(name: str):
     """

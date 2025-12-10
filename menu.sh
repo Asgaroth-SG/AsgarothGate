@@ -396,7 +396,7 @@ edit_ips() {
 }
 
 hysteria_upgrade(){
-    bash <(curl https://raw.githubusercontent.com/Asgaroth-SG/AsgarothGate/blob/main/upgrade.sh)
+    bash <(curl https://raw.githubusercontent.com/Asgaroth-SG/AsgarothGate/main/upgrade.sh)
 }
 
 warp_configure_handler() {

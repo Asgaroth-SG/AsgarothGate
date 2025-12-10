@@ -103,9 +103,8 @@ def add_node(
     if port and not is_valid_port(port):
         print(f"Error: Port '{port}' must be between 1 and 65535.", file=sys.stderr)
         sys.exit(1)
-
-    # нормализуем тип ноды
-    node_type = (node_type or "standard").lower()
+        
+    node_type = (node_type or "standard").strip().lower()
     if node_type not in ("standard", "premium"):
         print(f"Error: Node type '{node_type}' is invalid. Use 'standard' or 'premium'.", file=sys.stderr)
         sys.exit(1)
@@ -117,12 +116,11 @@ def add_node(
     if any(node['ip'] == ip for node in nodes):
         print(f"Error: A node with the IP/domain '{ip}' already exists.", file=sys.stderr)
         sys.exit(1)
-    
+
     new_node = {
         "name": name,
         "ip": ip,
-        "type": node_type,  # сохраняем тип ноды
-    }
+        "type": node_type,
     if sni:
         new_node["sni"] = sni.strip()
     if pinSHA256:
@@ -137,6 +135,7 @@ def add_node(
     nodes.append(new_node)
     write_nodes(nodes)
     print(f"Successfully added node '{name}'.")
+
 
 
 def delete_node(name: str):
@@ -170,7 +169,6 @@ def list_nodes():
         obfs = node.get('obfs', 'N/A')
         pin = node.get('pinSHA256', 'N/A')
         print(f"{name:<15} {node_type:<10} {ip:<25} {str(port):<8} {sni:<20} {insecure:<10} {obfs:<20} {pin}")
-
 
 def generate_cert():
     try:
@@ -264,6 +262,7 @@ def main():
             args.insecure,
             args.node_type,
         )
+        
     elif args.command == 'delete':
         delete_node(args.name)
     elif args.command == 'list':
