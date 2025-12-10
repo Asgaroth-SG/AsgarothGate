@@ -347,7 +347,7 @@ $(document).ready(function () {
 			name: name,
 			ip: ip,
 			insecure: insecure,
-			type: type 
+			node_type: type 
 
 		};
 
