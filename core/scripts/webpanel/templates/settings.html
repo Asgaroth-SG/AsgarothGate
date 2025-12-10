@@ -222,6 +222,7 @@
                                                 <thead>
                                                     <tr>
                                                         <th>Название</th>
+                                                        <th>Тип</th>
                                                         <th>IP/Домен</th>
                                                         <th>Порт</th>
                                                         <th>SNI</th>
@@ -242,12 +243,20 @@
                                         <h5>Добавить новый узел</h5>
                                         <form id="add_node_form">
                                             <div class="form-row">
-                                                <div class="form-group col-md-6">
+                                                <div class="form-group col-md-4">
                                                     <label for="node_name">Имя узла</label>
                                                     <input type="text" class="form-control" id="node_name" placeholder="например, Node-US">
                                                     <div class="invalid-feedback">Пожалуйста, введите уникальное имя.</div>
                                                 </div>
-                                                <div class="form-group col-md-6">
+                                                <div class="form-group col-md-4">
+                                                    <label for="node_type">Тип узла</label>
+                                                    <select class="form-control" id="node_type">
+                                                        <option value="standard" selected>Standard</option>
+                                                        <option value="premium">Premium</option>
+                                                    </select>
+                                                    <div class="invalid-feedback">Пожалуйста, выберите тип узла.</div>
+                                                </div>
+                                                <div class="form-group col-md-4">
                                                     <label for="node_ip">IP Адрес / Домен</label>
                                                     <input type="text" class="form-control" id="node_ip" placeholder="например, node.example.com или 1.2.3.4">
                                                     <div class="invalid-feedback">Пожалуйста, введите корректный IP или домен.</div>
@@ -261,7 +270,7 @@
                                                 </div>
                                                 <div class="form-group col-md-3">
                                                     <label for="node_obfs">OBFS</label>
-                                                    <input type="text" class="form-control" id="node_obfs" placeholder="obfs-пароль">
+                                                    <input type="text" class="form-control" id="node_obfs" placeholder="обфс-пароль">
                                                     <div class="invalid-feedback">OBFS не может быть пустым, если указан.</div>
                                                 </div>
                                                 <div class="form-group col-md-6">

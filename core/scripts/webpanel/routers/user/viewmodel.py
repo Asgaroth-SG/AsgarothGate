@@ -15,6 +15,8 @@ class User(BaseModel):
     max_ips: int = 0
     online_count: int = 0
     note: Optional[str] = None
+    # Тариф пользователя: 'standard' или 'premium'
+    plan: str = "standard"
 
     @staticmethod
     def from_dict(username: str, user_data: dict):
@@ -32,10 +34,13 @@ class User(BaseModel):
         except (ValueError, TypeError):
             max_ips = 0
 
+        # Тариф/план пользователя, по умолчанию стандартный
+        plan = user_data.get('plan', 'standard')
+
         essential_keys = [
-            'password', 
-            'max_download_bytes', 
-            'expiration_days', 
+            'password',
+            'max_download_bytes',
+            'expiration_days',
             'blocked'
         ]
 
@@ -50,14 +55,15 @@ class User(BaseModel):
                 'day_usage': 'N/A',
                 'enable': False,
                 'unlimited_ip': False,
-                'max_ips': max_ips, # Используем обработанное значение
+                'max_ips': max_ips,  # Используем обработанное значение
                 'online_count': 0,
-                'note': user_data.get('note', None)
+                'note': user_data.get('note', None),
+                'plan': plan,
             }
 
         expiration_days = user_data.get('expiration_days', 0)
         creation_date_str = user_data.get("account_creation_date")
-        
+
         day_usage = "On-hold"
         display_expiry_days = "On-hold"
         display_expiry_date = "On-hold"
@@ -80,14 +86,14 @@ class User(BaseModel):
 
         used_bytes = user_data.get("download_bytes", 0) + user_data.get("upload_bytes", 0)
         quota_bytes = user_data.get('max_download_bytes', 0)
-        
+
         used_formatted = User.__format_traffic(used_bytes)
         quota_formatted = "Безлимит" if quota_bytes <= 0 else User.__format_traffic(quota_bytes)
-        
+
         percentage = 0
         if quota_bytes > 0:
             percentage = (used_bytes / quota_bytes) * 100
-        
+
         traffic_used_display = f"{used_formatted}/{quota_formatted} ({percentage:.1f}%)"
 
         return {
@@ -100,9 +106,10 @@ class User(BaseModel):
             'day_usage': day_usage,
             'enable': not user_data.get('blocked', False),
             'unlimited_ip': user_data.get('unlimited_user', False),
-            'max_ips': max_ips, # Используем обработанное значение
+            'max_ips': max_ips,  # Используем обработанное значение
             'online_count': user_data.get('online_count', 0),
-            'note': user_data.get('note', None)
+            'note': user_data.get('note', None),
+            'plan': plan,
         }
 
     @staticmethod

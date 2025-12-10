@@ -9,7 +9,17 @@ import argparse
 from datetime import datetime
 from db.database import db
 
-def add_user(username, traffic_gb, expiration_days, password=None, unlimited_user=False, note=None, creation_date=None, max_ips=0):
+def add_user(
+    username,
+    traffic_gb,
+    expiration_days,
+    password=None,
+    unlimited_user=False,
+    note=None,
+    creation_date=None,
+    max_ips=0,
+    plan="standard",  # новый параметр тарифа
+):
     if db is None:
         print("Error: Database connection failed. Please ensure MongoDB is running and configured.")
         return 1
@@ -52,7 +62,9 @@ def add_user(username, traffic_gb, expiration_days, password=None, unlimited_use
             "blocked": False,
             "unlimited_user": unlimited_user,
             "status": "On-hold",
-            "max_ips": max_ips 
+            "max_ips": max_ips,
+            # тариф пользователя
+            "plan": plan or "standard",
         }
         
         if note:
@@ -90,18 +102,26 @@ if __name__ == "__main__":
     parser.add_argument("--unlimited", action='store_true')
     parser.add_argument("-n", "--note", default=None)
     parser.add_argument("-c", "--creation-date", default=None)
-    parser.add_argument("--max-ips", default=0, type=int) # Новый аргумент
+    parser.add_argument("--max-ips", default=0, type=int)  # Новый аргумент
+    # Новый CLI-аргумент тарифа
+    parser.add_argument(
+        "--plan",
+        default="standard",
+        choices=["standard", "premium"],
+        help="User plan (standard or premium). Default: standard.",
+    )
 
     args = parser.parse_args()
 
     exit_code = add_user(
-        args.username, 
-        args.traffic_limit, 
-        args.expiration_days, 
-        args.password, 
-        args.unlimited, 
-        args.note, 
+        args.username,
+        args.traffic_limit,
+        args.expiration_days,
+        args.password,
+        args.unlimited,
+        args.note,
         args.creation_date,
-        args.max_ips
+        args.max_ips,
+        args.plan,
     )
     sys.exit(exit_code)

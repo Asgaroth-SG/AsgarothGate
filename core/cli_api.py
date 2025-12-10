@@ -269,7 +269,17 @@ def get_user(username: str) -> dict[str, Any] | None:
         return json.loads(res)
 
 
-def add_user(username: str, traffic_limit: int, expiration_days: int, password: str | None, creation_date: str | None, unlimited: bool, note: str | None, max_ips: int = 0):
+def add_user(
+    username: str,
+    traffic_limit: int,
+    expiration_days: int,
+    password: str | None,
+    creation_date: str | None,
+    unlimited: bool,
+    note: str | None,
+    max_ips: int = 0,
+    plan: str = "standard",
+):
     '''
     Adds a new user using named arguments for reliability.
     '''
@@ -278,7 +288,7 @@ def add_user(username: str, traffic_limit: int, expiration_days: int, password: 
         '--username', username,
         '--traffic-limit', str(traffic_limit),
         '--expiration-days', str(expiration_days),
-        '--max-ips', str(max_ips)
+        '--max-ips', str(max_ips),
     ]
 
     if password:
@@ -292,10 +302,24 @@ def add_user(username: str, traffic_limit: int, expiration_days: int, password: 
     
     if creation_date:
         command.extend(['--creation-date', creation_date])
+
+    # тариф пользователя (standard/premium)
+    if plan:
+        command.extend(['--plan', plan])
         
     run_cmd(command)
 
-def bulk_user_add(traffic_gb: float, expiration_days: int, count: int, prefix: str, start_number: int, unlimited: bool, max_ips: int = 0):
+
+def bulk_user_add(
+    traffic_gb: float,
+    expiration_days: int,
+    count: int,
+    prefix: str,
+    start_number: int,
+    unlimited: bool,
+    max_ips: int = 0,
+    plan: str = "standard",
+):
     """
     Executes the bulk user creation script with specified parameters.
     """
@@ -307,15 +331,33 @@ def bulk_user_add(traffic_gb: float, expiration_days: int, count: int, prefix: s
         '--count', str(count),
         '--prefix', prefix,
         '--start-number', str(start_number),
-        '--max-ips', str(max_ips)
+        '--max-ips', str(max_ips),
     ]
 
     if unlimited:
         command.append('--unlimited')
+
+    # общий тариф для всех создаваемых пользователей
+    if plan:
+        command.extend(['--plan', plan])
         
     run_cmd(command)
 
-def edit_user(username: str, new_username: str | None, new_password: str | None, new_traffic_limit: int | None, new_expiration_days: int | None, renew_password: bool, renew_creation_date: bool, blocked: bool | None, unlimited_ip: bool | None, note: str | None, max_ips: int | None):
+
+def edit_user(
+    username: str,
+    new_username: str | None,
+    new_password: str | None,
+    new_traffic_limit: int | None,
+    new_expiration_days: int | None,
+    renew_password: bool,
+    renew_creation_date: bool,
+    blocked: bool | None,
+    unlimited_ip: bool | None,
+    note: str | None,
+    max_ips: int | None,
+    new_plan: str | None = None,
+):
     '''
     Edits an existing user's details by calling the new edit_user.py script with named flags.
     '''
@@ -361,6 +403,10 @@ def edit_user(username: str, new_username: str | None, new_password: str | None,
     
     if max_ips is not None:
         command_args.extend(['--max-ips', str(max_ips)])
+
+    # смена тарифа пользователя при редактировании
+    if new_plan is not None:
+        command_args.extend(['--plan', new_plan])
 
     run_cmd(command_args)
 
@@ -484,7 +530,17 @@ def edit_ip_address(ipv4: str, ipv6: str):
     if ipv6:
         run_cmd(['python3', Command.IP_ADD.value, 'edit', '-6', ipv6])
 
-def add_node(name: str, ip: str, sni: Optional[str] = None, pinSHA256: Optional[str] = None, port: Optional[int] = None, obfs: Optional[str] = None, insecure: Optional[bool] = None):
+
+def add_node(
+    name: str,
+    ip: str,
+    sni: Optional[str] = None,
+    pinSHA256: Optional[str] = None,
+    port: Optional[int] = None,
+    obfs: Optional[str] = None,
+    insecure: Optional[bool] = None,
+    node_type: Optional[str] = None,
+):
     """
     Adds a new external node.
     """
@@ -499,7 +555,11 @@ def add_node(name: str, ip: str, sni: Optional[str] = None, pinSHA256: Optional[
         command.extend(['--obfs', obfs])
     if insecure:
         command.append('--insecure')
+    # тип ноды (standard/premium)
+    if node_type:
+        command.extend(['--type', node_type])
     return run_cmd(command)
+
 
 def delete_node(name: str):
     """
@@ -507,17 +567,20 @@ def delete_node(name: str):
     """
     return run_cmd(['python3', Command.NODE_MANAGER.value, 'delete', '--name', name])
 
+
 def list_nodes():
     """
     Lists all configured external nodes.
     """
     return run_cmd(['python3', Command.NODE_MANAGER.value, 'list'])
 
+
 def generate_node_cert():
     """
     Generates a self-signed certificate for nodes.
     """
     return run_cmd(['python3', Command.NODE_MANAGER.value, 'generate-cert'])
+
 
 def update_geo(country: str):
     '''
@@ -532,6 +595,7 @@ def update_geo(country: str):
         raise ScriptNotFoundError(f'Script not found: {script_path}')
     except Exception as e:
         raise HysteriaError(f'An unexpected error occurred: {e}')
+
 
 def add_extra_config(name: str, uri: str) -> str:
     """Adds an extra proxy configuration."""
@@ -615,9 +679,11 @@ def start_telegram_bot(token: str, adminid: str, backup_interval: Optional[int] 
     
     run_cmd(command)
 
+
 def stop_telegram_bot():
     '''Stops the Telegram bot.'''
     run_cmd(['python3', Command.INSTALL_TELEGRAMBOT.value, 'stop'])
+
 
 def get_telegram_bot_backup_interval() -> int | None:
     '''Retrievels the current BACKUP_INTERVAL_HOUR for the Telegram Bot service from its .env file.'''
@@ -638,6 +704,7 @@ def get_telegram_bot_backup_interval() -> int | None:
     except Exception as e:
         print(f"Error reading Telegram Bot .env file: {e}")
         return None
+
 
 def set_telegram_bot_backup_interval(backup_interval: int):
     '''Sets the backup interval for the Telegram bot.'''
@@ -664,6 +731,7 @@ def start_normalsub(domain: str, port: int):
         raise InvalidInputError('Error: Both --domain and --port are required for the start action.')
     run_cmd(['bash', Command.INSTALL_NORMALSUB.value, 'start', domain, str(port)])
 
+
 def edit_normalsub_subpath(new_subpath: str):
     '''Edits the subpath for NormalSub service.'''
     if not new_subpath:
@@ -672,6 +740,7 @@ def edit_normalsub_subpath(new_subpath: str):
         raise InvalidInputError('Error: New subpath must contain only alphanumeric characters (a-z, A-Z, 0-9).')
     
     run_cmd(['bash', Command.INSTALL_NORMALSUB.value, 'edit_subpath', new_subpath])
+
 
 def get_normalsub_subpath() -> str | None:
     '''Retrieves the current SUBPATH for the NormalSub service from its .env file.'''
@@ -684,6 +753,7 @@ def get_normalsub_subpath() -> str | None:
     except Exception as e:
         print(f"Error reading NormalSub .env file: {e}")
         return None
+
 
 def stop_normalsub():
     '''Stops NormalSub.'''
@@ -704,15 +774,18 @@ def stop_webpanel():
     '''Stops WebPanel.'''
     run_cmd(['bash', Command.SHELL_WEBPANEL.value, 'stop'])
 
+
 def setup_webpanel_decoy(domain: str, decoy_path: str):
     '''Sets up or updates the decoy site for the web panel.'''
     if not domain or not decoy_path:
         raise InvalidInputError('Error: Both domain and decoy_path are required.')
     run_cmd(['bash', Command.SHELL_WEBPANEL.value, 'decoy', domain, decoy_path])
 
+
 def stop_webpanel_decoy():
     '''Stops and removes the decoy site configuration for the web panel.'''
     run_cmd(['bash', Command.SHELL_WEBPANEL.value, 'stopdecoy'])
+
 
 def get_webpanel_decoy_status() -> dict[str, Any]:
     """Checks the status of the webpanel decoy site configuration."""
@@ -731,6 +804,7 @@ def get_webpanel_decoy_status() -> dict[str, Any]:
         print(f"Error checking decoy status: {e}")
         return {"active": False, "path": None}
 
+
 def get_webpanel_url() -> str | None:
     '''Gets the URL of WebPanel.'''
     return run_cmd(['bash', Command.SHELL_WEBPANEL.value, 'url'])
@@ -739,6 +813,7 @@ def get_webpanel_url() -> str | None:
 def get_webpanel_api_token() -> str | None:
     '''Gets the API token of WebPanel.'''
     return run_cmd(['bash', Command.SHELL_WEBPANEL.value, 'api-token'])
+
 
 def get_webpanel_env_config() -> dict[str, Any]:
     '''Retrieves the current configuration for the WebPanel service from its .env file.'''
@@ -765,6 +840,7 @@ def get_webpanel_env_config() -> dict[str, Any]:
         print(f"Error reading WebPanel .env file: {e}")
         return {}
 
+
 def reset_webpanel_credentials(new_username: str | None = None, new_password: str | None = None):
     '''Resets the WebPanel admin username and/or password.'''
     if not new_username and not new_password:
@@ -777,6 +853,7 @@ def reset_webpanel_credentials(new_username: str | None = None, new_password: st
         cmd_args.extend(['-p', new_password])
     
     run_cmd(cmd_args)
+
 
 def change_webpanel_expiration(expiration_minutes: int):
     '''Changes the session expiration time for the WebPanel.'''
@@ -808,10 +885,12 @@ def change_webpanel_domain_port(domain: str | None = None, port: int | None = No
     
     run_cmd(cmd_args)
 
+
 def get_services_status() -> dict[str, bool] | None:
     '''Gets the status of all project services.'''
     if res := run_cmd(['bash', Command.SERVICES_STATUS.value]):
         return json.loads(res)
+
 
 def show_version() -> str | None:
     """Displays the currently installed version of the panel."""
@@ -822,17 +901,21 @@ def check_version() -> str | None:
     """Checks if the current version is up-to-date and displays changelog if not."""
     return run_cmd(['python3', Command.VERSION.value, 'check-version'])
 
+
 def start_ip_limiter():
     '''Starts the IP limiter service.'''
     run_cmd(['bash', Command.LIMIT_SCRIPT.value, 'start'])
+
 
 def stop_ip_limiter():
     '''Stops the IP limiter service.'''
     run_cmd(['bash', Command.LIMIT_SCRIPT.value, 'stop'])
 
+
 def clean_ip_limiter():
     """Cleans the IP limiter database and unblocks all IPs."""
     run_cmd(['bash', Command.LIMIT_SCRIPT.value, 'clean'])
+
 
 def config_ip_limiter(block_duration: Optional[int] = None, max_ips: Optional[int] = None):
     '''Configures the IP limiter service.'''
@@ -853,6 +936,7 @@ def config_ip_limiter(block_duration: Optional[int] = None, max_ips: Optional[in
         cmd_args.append('')
 
     run_cmd(cmd_args)
+
 
 def get_ip_limiter_config() -> dict[str, int | None]:
     '''Retrieves the current IP Limiter configuration from .configs.env.'''

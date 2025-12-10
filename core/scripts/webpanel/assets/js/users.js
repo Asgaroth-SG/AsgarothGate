@@ -232,12 +232,20 @@ $(function () {
         $("#userTable tbody tr.user-main-row").each(function () {
             let showRow;
             switch (filter) {
-                case "on-hold":    
-                    showRow = $(this).find("td:eq(3) .badge-warning").length > 0; 
+                case "on-hold":
+                    // Статус теперь в колонке 4 (после добавления колонки "Тариф")
+                    showRow = $(this).find("td:eq(4) .badge-warning").length > 0;
                     break;
-                case "online":     showRow = $(this).find("td:eq(3) .badge-success").length > 0; break;
-                case "disable":    showRow = $(this).find("td:eq(8) i").hasClass("text-danger"); break;
-                default:           showRow = true;
+                case "online":
+                    // Онлайн также берём из колонки статуса (4)
+                    showRow = $(this).find("td:eq(4) .badge-success").length > 0;
+                    break;
+                case "disable":
+                    // Колонка "Активен" после добавления тарифа сместилась на индекс 9
+                    showRow = $(this).find("td:eq(9) i").hasClass("text-danger");
+                    break;
+                default:
+                    showRow = true;
             }
             $(this).toggle(showRow).find(".user-checkbox").prop("checked", false);
             if (!showRow) {
@@ -364,10 +372,25 @@ $(function () {
         const dataRow = $(event.relatedTarget).closest("tr.user-main-row");
         const url = GET_USER_URL_TEMPLATE.replace('U', user);
 
-        const trafficText = dataRow.find("td:eq(4)").text();
-        const expiryText = dataRow.find("td:eq(6)").text().trim();
+        // С учётом добавленной колонки "Тариф":
+        // 0: чекбокс
+        // 1: #
+        // 2: пользователь
+        // 3: тариф
+        // 4: статус
+        // 5: трафик
+        // 6: истекает (дата)
+        // 7: срок (дней)
+        // 8: дней активности
+        // 9: активен
+        const trafficText = dataRow.find("td:eq(5)").text();
+        const expiryText = dataRow.find("td:eq(7)").text().trim();
         const note = dataRow.data('note');
-        const statusText = dataRow.find("td:eq(3)").text().trim();
+        const statusText = dataRow.find("td:eq(4)").text().trim();
+
+        // План пользователя по бейджу в колонке "Тариф" (3)
+        const isPremium = dataRow.find("td:eq(3) .badge-premium").length > 0;
+        $("#editPlan").val(isPremium ? "premium" : "standard");
         
         $('#editPasswordError').text('');
         $('#editSubmitButton').prop('disabled', false);
@@ -388,7 +411,8 @@ $(function () {
         }
         
         $("#editNote").val(note || '');
-        $("#editBlocked").prop("checked", !dataRow.find("td:eq(8) i").hasClass("text-success"));
+        // Колонка "Активен" сместилась на 9
+        $("#editBlocked").prop("checked", !dataRow.find("td:eq(9) i").hasClass("text-success"));
         
         const isUnlimited = dataRow.find(".requires-iplimit-service .badge-primary").length > 0;
         $("#editUnlimitedIp").prop("checked", isUnlimited);

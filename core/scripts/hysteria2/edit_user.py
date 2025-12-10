@@ -8,7 +8,19 @@ import re
 from datetime import datetime
 from db.database import db
 
-def edit_user(username, new_username=None, new_password=None, traffic_gb=None, expiration_days=None, creation_date=None, blocked=None, unlimited_user=None, note=None, max_ips=None):
+def edit_user(
+    username,
+    new_username=None,
+    new_password=None,
+    traffic_gb=None,
+    expiration_days=None,
+    creation_date=None,
+    blocked=None,
+    unlimited_user=None,
+    note=None,
+    max_ips=None,
+    new_plan=None,  # новый параметр тарифа
+):
     if db is None:
         print("Error: Database connection failed.", file=sys.stderr)
         return 1
@@ -51,6 +63,10 @@ def edit_user(username, new_username=None, new_password=None, traffic_gb=None, e
     
     if max_ips is not None:
         updates['max_ips'] = int(max_ips)
+
+    # смена тарифа пользователя
+    if new_plan is not None:
+        updates['plan'] = new_plan
         
     try:
         if updates:
@@ -116,6 +132,13 @@ if __name__ == "__main__":
     parser.add_argument("--unlimited", dest="unlimited_user", type=str_to_bool, help="Set unlimited user status for IP limits (true/false).")
     parser.add_argument("--note", help="New note for the user.")
     parser.add_argument("--max-ips", dest="max_ips", type=int, help="Specific IP limit for this user (0 = use global default).")
+    # новый флаг смены тарифа
+    parser.add_argument(
+        "--plan",
+        dest="new_plan",
+        choices=["standard", "premium"],
+        help="New user plan (standard or premium).",
+    )
 
     args = parser.parse_args()
 
@@ -129,5 +152,6 @@ if __name__ == "__main__":
         blocked=args.blocked,
         unlimited_user=args.unlimited_user,
         note=args.note,
-        max_ips=args.max_ips
+        max_ips=args.max_ips,
+        new_plan=args.new_plan,
     ))

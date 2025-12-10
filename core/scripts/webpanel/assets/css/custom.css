@@ -577,3 +577,17 @@ body:not(.dark-mode) .nav-sidebar .nav-link:hover {
     box-shadow: -4px 4px 12px rgba(0, 0, 0, 0.03);
     color: var(--ios-light-blue) !important;
 }
+
+/* --- Tariff / Node type badges --- */
+
+.badge-standard {
+  background-color: var(--vibrant-dark) !important;
+  color: #fff !important;
+}
+
+.badge-premium {
+  background: linear-gradient(90deg, #FBBF24, #F97316);
+  color: #111827 !important;
+  font-weight: 600;
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.05);
+}

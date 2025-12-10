@@ -17,6 +17,11 @@ class UserInfoResponse(BaseModel):
     upload_bytes: Optional[int] = None
     download_bytes: Optional[int] = None
     online_count: int = 0
+    # Тариф пользователя: standard / premium
+    plan: Optional[str] = Field(
+        "standard",
+        description="User plan: standard or premium"
+    )
 
 
 class UserListResponse(RootModel):
@@ -36,6 +41,11 @@ class AddUserInputBody(BaseModel):
     unlimited: bool = False
     note: Optional[str] = None
     max_ips: Optional[int] = Field(0, description="Personal IP limit (0 = global default)")
+    # Тариф пользователя при создании
+    plan: Optional[str] = Field(
+        "standard",
+        description="User plan: standard or premium"
+    )
 
     @field_validator('username')
     def validate_username(cls, v):
@@ -51,6 +61,11 @@ class AddBulkUsersInputBody(BaseModel):
     prefix: str
     start_number: int = 1
     unlimited: bool = False
+    # Тариф для всех создаваемых пользователей
+    plan: Optional[str] = Field(
+        "standard",
+        description="User plan for all created users (standard or premium)"
+    )
 
     @field_validator('prefix')
     def validate_prefix(cls, v):
@@ -70,6 +85,11 @@ class EditUserInputBody(BaseModel):
     unlimited_ip: Optional[bool] = Field(None, description="Unlimited IP status.")
     max_ips: Optional[int] = Field(None, description="Personal IP limit.")
     note: Optional[str] = Field(None, description="A note for the user.")
+    # Новый тариф пользователя (если передан)
+    new_plan: Optional[str] = Field(
+        None,
+        description="New user plan: standard or premium"
+    )
 
     @field_validator('new_username')
     def validate_new_username(cls, v):

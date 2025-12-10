@@ -1,6 +1,6 @@
 {% if not users %}
 <tr>
-    <td colspan="14" class="text-center p-4">
+    <td colspan="15" class="text-center p-4">
         Пользователи не найдены.
     </td>
 </tr>
@@ -12,6 +12,14 @@
         </td>
         <td>{{ loop.index + (offset if offset is defined else 0) }}</td>
         <td data-username="{{ user.username }}"><strong>{{ user.username }}</strong></td>
+        <td class="d-none d-md-table-cell text-nowrap">
+            {% set plan = (user.plan or 'standard')|lower %}
+            {% if plan == 'premium' %}
+                <span class="badge badge-premium">Premium</span>
+            {% else %}
+                <span class="badge badge-standard">Standard</span>
+            {% endif %}
+        </td>
         <td class="d-none d-md-table-cell">
             {% if user.status == "Online" %}
                 <span class="badge badge-success">Онлайн</span>
@@ -56,23 +64,25 @@
         </td>
         <td class="d-none d-md-table-cell text-center">
             {% if user.day_usage == "On-hold" %}
-                 <span class="text-muted">-</span>
-            {% elif user.day_usage == "Error" %}
-                 <span class="text-danger">Err</span>
+                <span class="text-muted">-</span>
             {% else %}
-                 {{ user.day_usage }}
+                {{ user.day_usage }}
             {% endif %}
         </td>
+        
         <td class="d-none d-md-table-cell text-center">
             {% if user.enable %}
-            <i class="fas fa-check text-success"></i>
+                <i class="fas fa-check text-success"></i>
             {% else %}
-            <i class="fas fa-times text-danger"></i>
+                <i class="fas fa-times text-danger"></i>
             {% endif %}
         </td>
-        <td class="d-none d-md-table-cell note-cell">
+        
+        <td class="d-none d-md-table-cell">
             {% if user.note %}
-                <small class="text-muted" title="{{ user.note }}">{{ user.note | truncate(15, True) }}</small>
+                <span class="truncate" title="{{ user.note }}">{{ user.note }}</span>
+            {% else %}
+                <span class="text-muted">-</span>
             {% endif %}
         </td>
         
@@ -107,9 +117,9 @@
                 <i class="fas fa-trash"></i>
             </button>
         </td>
-        <td class="d-md-none text-center">
-            <button type="button" class="btn btn-sm btn-secondary toggle-details-btn">
-                <i class="fas fa-plus"></i>
+        <td class="d-table-cell d-md-none text-center align-middle">
+            <button type="button" class="btn btn-xs btn-outline-primary toggle-details">
+                <i class="fas fa-chevron-down"></i>
             </button>
         </td>
     </tr>
@@ -133,6 +143,16 @@
                     {% endif %}
                     </span>
                 </p>
+                <p><strong>Тариф:</strong>
+                    <span>
+                        {% set plan = (user.plan or 'standard')|lower %}
+                        {% if plan == 'premium' %}
+                            <span class="badge badge-premium">Premium</span>
+                        {% else %}
+                            <span class="badge badge-standard">Standard</span>
+                        {% endif %}
+                    </span>
+                </p>
                 <p><strong>Трафик:</strong> <span>{{ user.traffic_used }}</span></p>
                 <p><strong>Истекает:</strong> 
                     <span>
@@ -145,12 +165,12 @@
                     {% endif %}
                     </span>
                 </p>
-                <p><strong>Дней:</strong> 
+                <p><strong>Срок (дней):</strong> 
                     <span>
-                    {% if user.expiry_days == "On-hold" %}
-                        -
-                    {% elif user.expiry_days == "Unlimited" %}
+                    {% if user.expiry_days == "Unlimited" %}
                         ∞
+                    {% elif user.expiry_days == "On-hold" %}
+                        -
                     {% else %}
                         {{ user.expiry_days }}
                     {% endif %}
@@ -179,7 +199,7 @@
                     </span>
                 </p>
                 <div class="mt-2 user-details-actions">
-                    <a href="#" class="btn btn-sm btn-outline-secondary" data-toggle="modal" data-target="#qrcodeModal" data-username="{{ user.username }}">
+                    <a href="#" class="btn btn-sm btn-outline-secondary config-link" data-toggle="modal" data-target="#qrcodeModal" data-username="{{ user.username }}">
                         <i class="fas fa-qrcode"></i> QR
                     </a>
                     <button type="button" class="btn btn-sm btn-info edit-user" data-user="{{ user.username }}" data-toggle="modal" data-target="#editUserModal">

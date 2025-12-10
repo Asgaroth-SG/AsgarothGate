@@ -2,12 +2,12 @@ import json
 from typing import List
 from fastapi import APIRouter, HTTPException
 from .schema.user import (
-    UserListResponse, 
-    UserInfoResponse, 
-    AddUserInputBody, 
-    EditUserInputBody, 
-    UserUriResponse, 
-    AddBulkUsersInputBody, 
+    UserListResponse,
+    UserInfoResponse,
+    AddUserInputBody,
+    EditUserInputBody,
+    UserUriResponse,
+    AddBulkUsersInputBody,
     UsernamesRequest
 )
 from .schema.response import DetailResponse
@@ -36,34 +36,61 @@ async def list_users_api():
 
 @router.post('/', response_model=DetailResponse, status_code=201)
 async def add_user_api(body: AddUserInputBody):
+    """
+    Add a single user.
+    """
     try:
         cli_api.get_user(body.username)
-        raise HTTPException(status_code=409,
-                            detail=f"User '{body.username}' already exists.")
+        raise HTTPException(
+            status_code=409,
+            detail=f"User '{body.username}' already exists."
+        )
     except cli_api.CommandExecutionError:
+        # Ожидаемая ситуация — пользователь не найден
         pass
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500,
-                            detail=f"{str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"{str(e)}"
+        )
 
     try:
-        # Добавляем поддержку max_ips при создании
-        cli_api.add_user(body.username, body.traffic_limit, body.expiration_days, body.password, body.creation_date, body.unlimited, body.note, max_ips=body.max_ips)
+        # Добавляем поддержку max_ips и плана при создании
+        cli_api.add_user(
+            body.username,
+            body.traffic_limit,
+            body.expiration_days,
+            body.password,
+            body.creation_date,
+            body.unlimited,
+            body.note,
+            max_ips=body.max_ips,
+            # Тариф пользователя (standard/premium), по умолчанию standard
+            plan=getattr(body, "plan", "standard"),
+        )
         return DetailResponse(detail=f'User {body.username} has been added.')
     except cli_api.CommandExecutionError as e:
         if "User already exists" in str(e):
-            raise HTTPException(status_code=409,
-                                detail=f"User '{body.username}' already exists.")
-        raise HTTPException(status_code=400,
-                            detail=f'Failed to add user {body.username}: {str(e)}')
+            raise HTTPException(
+                status_code=409,
+                detail=f"User '{body.username}' already exists."
+            )
+        raise HTTPException(
+            status_code=400,
+            detail=f'Failed to add user {body.username}: {str(e)}'
+        )
     except cli_api.PasswordGenerationError as e:
-        raise HTTPException(status_code=500,
-                            detail=f"Failed to generate password for user '{body.username}': {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to generate password for user '{body.username}': {str(e)}"
+        )
     except cli_api.InvalidInputError as e:
-         raise HTTPException(status_code=422, detail=str(e))
+        raise HTTPException(status_code=422, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=500,
-                            detail=f"An unexpected error occurred while adding user '{body.username}': {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"An unexpected error occurred while adding user '{body.username}': {str(e)}"
+        )
 
 
 @router.post('/bulk/', response_model=DetailResponse, status_code=201)
@@ -78,15 +105,24 @@ async def add_bulk_users_api(body: AddBulkUsersInputBody):
             count=body.count,
             prefix=body.prefix,
             start_number=body.start_number,
-            unlimited=body.unlimited
+            unlimited=body.unlimited,
+            # Тариф для пакетного создания (один план на все аккаунты)
+            plan=getattr(body, "plan", "standard"),
         )
-        return DetailResponse(detail=f"Successfully started adding {body.count} users with prefix '{body.prefix}'.")
+        return DetailResponse(
+            detail=f"Successfully started adding {body.count} users with prefix '{body.prefix}'."
+        )
     except cli_api.CommandExecutionError as e:
-        raise HTTPException(status_code=400,
-                            detail=f'Failed to add bulk users: {str(e)}')
+        raise HTTPException(
+            status_code=400,
+            detail=f'Failed to add bulk users: {str(e)}'
+        )
     except Exception as e:
-        raise HTTPException(status_code=500,
-                            detail=f"An unexpected error occurred while adding bulk users: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"An unexpected error occurred while adding bulk users: {str(e)}"
+        )
+
 
 @router.post('/uri/bulk', response_model=List[UserUriResponse])
 async def show_multiple_user_uris_api(request: UsernamesRequest):
@@ -95,32 +131,47 @@ async def show_multiple_user_uris_api(request: UsernamesRequest):
     """
     if not request.usernames:
         return []
-        
+
     try:
         uri_data_list = cli_api.show_user_uri_json(request.usernames)
         if not uri_data_list:
-            raise HTTPException(status_code=404, detail='No URI data found for the provided users.')
-        
+            raise HTTPException(
+                status_code=404,
+                detail='No URI data found for the provided users.'
+            )
+
         valid_responses = [data for data in uri_data_list if not data.get('error')]
-        
+
         return valid_responses
     except cli_api.ScriptNotFoundError as e:
-        raise HTTPException(status_code=500, detail=f'Server script error: {str(e)}')
+        raise HTTPException(
+            status_code=500,
+            detail=f'Server script error: {str(e)}'
+        )
     except cli_api.CommandExecutionError as e:
-        raise HTTPException(status_code=400, detail=f'Error executing script: {str(e)}')
+        raise HTTPException(
+            status_code=400,
+            detail=f'Error executing script: {str(e)}'
+        )
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f'Unexpected error: {str(e)}')
+        raise HTTPException(
+            status_code=400,
+            detail=f'Unexpected error: {str(e)}'
+        )
 
 
 @router.post('/bulk-delete', response_model=DetailResponse)
 async def bulk_remove_users_api(body: UsernamesRequest):
+    """
+    Remove multiple users in bulk.
+    """
     if not body.usernames:
         raise HTTPException(status_code=400, detail="No usernames provided.")
     try:
         cli_api.kick_users_by_name(body.usernames)
         cli_api.traffic_status(display_output=False)
         cli_api.remove_users(body.usernames)
-        return DetailResponse(detail=f'Users have been removed.')
+        return DetailResponse(detail='Users have been removed.')
     except Exception as e:
         raise HTTPException(status_code=400, detail=f'Error: {str(e)}')
 
@@ -142,16 +193,26 @@ async def get_user_api(username: str):
     try:
         user_data = cli_api.get_user(username)
         if not user_data:
-            raise HTTPException(status_code=404, detail=f'User {username} not found.')
-        
+            raise HTTPException(
+                status_code=404,
+                detail=f'User {username} not found.'
+            )
+
+        # Нормализуем имя пользователя
         if '_id' in user_data:
             user_data['username'] = user_data.pop('_id')
-            
+
         return user_data
     except json.JSONDecodeError as e:
-        raise HTTPException(status_code=500, detail=f"Failed to parse user data from CLI: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to parse user data from CLI: {e}"
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f'An unexpected error occurred: {str(e)}')
+        raise HTTPException(
+            status_code=500,
+            detail=f'An unexpected error occurred: {str(e)}'
+        )
 
 
 @router.patch('/{username}', response_model=DetailResponse)
@@ -172,8 +233,8 @@ async def edit_user_api(username: str, body: EditUserInputBody):
     try:
         cli_api.kick_users_by_name([username])
         cli_api.traffic_status(display_output=False)
-        
-        # Передаем новый параметр max_ips в функцию редактирования
+
+        # Передаем max_ips и новый план пользователя в функцию редактирования
         cli_api.edit_user(
             username=username,
             new_username=body.new_username,
@@ -185,7 +246,9 @@ async def edit_user_api(username: str, body: EditUserInputBody):
             blocked=body.blocked,
             unlimited_ip=body.unlimited_ip,
             note=body.note,
-            max_ips=body.max_ips  # <--- Добавлено
+            max_ips=body.max_ips,
+            # Новый тариф; если None — план не меняем
+            new_plan=getattr(body, "new_plan", None),
         )
         return DetailResponse(detail=f'User {username} has been edited.')
     except Exception as e:
@@ -209,8 +272,11 @@ async def remove_user_api(username: str):
     try:
         user = cli_api.get_user(username)
         if not user:
-            raise HTTPException(status_code=404, detail=f'User {username} not found.')
-        
+            raise HTTPException(
+                status_code=404,
+                detail=f'User {username} not found.'
+            )
+
         cli_api.kick_users_by_name([username])
         cli_api.traffic_status(display_output=False)
         cli_api.remove_users([username])
@@ -238,14 +304,18 @@ async def reset_user_api(username: str):
     try:
         user = cli_api.get_user(username)
         if not user:
-            raise HTTPException(status_code=404, detail=f'User {username} not found.')
-        
+            raise HTTPException(
+                status_code=404,
+                detail=f'User {username} not found.'
+            )
+
         cli_api.reset_user(username)
         return DetailResponse(detail=f'User {username} has been reset.')
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f'Error: {str(e)}')
+
 
 @router.get('/{username}/uri', response_model=UserUriResponse)
 async def show_user_uri_api(username: str):
@@ -264,18 +334,33 @@ async def show_user_uri_api(username: str):
     try:
         uri_data_list = cli_api.show_user_uri_json([username])
         if not uri_data_list:
-            raise HTTPException(status_code=404, detail=f'URI for user {username} not found.')
-        
+            raise HTTPException(
+                status_code=404,
+                detail=f'URI for user {username} not found.'
+            )
+
         uri_data = uri_data_list[0]
         if uri_data.get('error'):
-            raise HTTPException(status_code=404, detail=f"{uri_data['error']}")
-        
+            raise HTTPException(
+                status_code=404,
+                detail=f"{uri_data['error']}"
+            )
+
         return UserUriResponse(**uri_data)
     except cli_api.ScriptNotFoundError as e:
-        raise HTTPException(status_code=500, detail=f'Server script error: {str(e)}')
+        raise HTTPException(
+            status_code=500,
+            detail=f'Server script error: {str(e)}'
+        )
     except cli_api.CommandExecutionError as e:
-        raise HTTPException(status_code=400, detail=f'Error executing script: {str(e)}')
+        raise HTTPException(
+            status_code=400,
+            detail=f'Error executing script: {str(e)}'
+        )
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=400, detail=f'Unexpected error: {str(e)}')
+        raise HTTPException(
+            status_code=400,
+            detail=f'Unexpected error: {str(e)}'
+        )

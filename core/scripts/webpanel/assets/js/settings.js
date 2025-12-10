@@ -295,69 +295,83 @@ $(document).ready(function () {
         });
     }
 
-    function renderNodes(nodes) {
-        const tableBody = $("#nodes_table tbody");
-        tableBody.empty();
+	function renderNodes(nodes) {
+		const tableBody = $("#nodes_table tbody");
+		tableBody.empty();
 
-        if (nodes && nodes.length > 0) {
-            $("#nodes_table").show();
-            $("#no_nodes_message").hide();
-            nodes.forEach(node => {
-                const row = `<tr>
-                                <td>${escapeHtml(node.name)}</td>
-                                <td>${escapeHtml(node.ip)}</td>
-                                <td>${escapeHtml(node.port || 'Н/Д')}</td>
-                                <td>${escapeHtml(node.sni || 'Н/Д')}</td>
-                                <td>${escapeHtml(node.obfs || 'Н/Д')}</td>
-                                <td>${escapeHtml(node.insecure ? 'Да' : 'Нет')}</td>
-                                <td>${escapeHtml(node.pinSHA256 || 'Н/Д')}</td>
-                                <td>
-                                    <button class="btn btn-xs btn-danger delete-node-btn" data-name="${escapeHtml(node.name)}">
-                                        <i class="fas fa-trash"></i> Удалить
-                                    </button>
-                                </td>
-                            </tr>`;
-                tableBody.append(row);
-            });
-        } else {
-            $("#nodes_table").hide();
-            $("#no_nodes_message").show();
-        }
-    }
+		if (nodes && nodes.length > 0) {
+			$("#nodes_table").show();
+			$("#no_nodes_message").hide();
 
-    function addNode() {
-        if (!validateForm('add_node_form')) return;
+			nodes.forEach(node => {
+				const rawType = (node.type || node.node_type || 'standard').toString().toLowerCase();
+				const isPremium = rawType === 'premium';
+				const typeLabel = isPremium ? 'Premium' : 'Standard';
+				const typeClass = isPremium ? 'badge badge-premium' : 'badge badge-standard';
 
-        const name = $("#node_name").val().trim();
-        const ip = $("#node_ip").val().trim();
-        const port = $("#node_port").val().trim();
-        const sni = $("#node_sni").val().trim();
-        const obfs = $("#node_obfs").val().trim();
-        const pinSHA256 = $("#node_pin").val().trim();
-        const insecure = $("#node_insecure").is(':checked');
-        
-        const data = { name: name, ip: ip, insecure: insecure };
-        if (port) data.port = parseInt(port);
-        if (sni) data.sni = sni;
-        if (obfs) data.obfs = obfs;
-        if (pinSHA256) data.pinSHA256 = pinSHA256;
+				const row = `<tr>
+								<td>${escapeHtml(node.name)}</td>
+								<td><span class="${typeClass}">${typeLabel}</span></td>
+								<td>${escapeHtml(node.ip)}</td>
+								<td>${escapeHtml(node.port || 'Н/Д')}</td>
+								<td>${escapeHtml(node.sni || 'Н/Д')}</td>
+								<td>${escapeHtml(node.obfs || 'Н/Д')}</td>
+								<td>${escapeHtml(node.insecure ? 'Да' : 'Нет')}</td>
+								<td>${escapeHtml(node.pinSHA256 || 'Н/Д')}</td>
+								<td>
+									<button class="btn btn-xs btn-danger delete-node-btn" data-name="${escapeHtml(node.name)}">
+										<i class="fas fa-trash"></i> Удалить
+									</button>
+								</td>
+							</tr>`;
+				tableBody.append(row);
+			});
+		} else {
+			$("#nodes_table").hide();
+			$("#no_nodes_message").show();
+		}
+	}
 
-        confirmAction(`добавить узел '${name}'`, function () {
-            sendRequest(
-                API_URLS.addNode,
-                "POST",
-                data,
-                `Узел '${name}' успешно добавлен!`,
-                "#add_node_btn",
-                false,
-                function() {
-                    $("#add_node_form")[0].reset();
-                    $("#add_node_form .form-control").removeClass('is-invalid');
-                    fetchNodes();
-                }
-            );
-        });
-    }
+	function addNode() {
+		if (!validateForm('add_node_form')) return;
+
+		const name = $("#node_name").val().trim();
+		const ip = $("#node_ip").val().trim();
+		const port = $("#node_port").val().trim();
+		const sni = $("#node_sni").val().trim();
+		const obfs = $("#node_obfs").val().trim();
+		const pinSHA256 = $("#node_pin").val().trim();
+		const insecure = $("#node_insecure").is(':checked');
+		const type = ($("#node_type").val() || 'standard').toLowerCase();
+
+		const data = {
+			name: name,
+			ip: ip,
+			insecure: insecure,
+			type: type  // Standard / Premium (на бэке тип: "standard"/"premium")
+		};
+
+		if (port) data.port = parseInt(port);
+		if (sni) data.sni = sni;
+		if (obfs) data.obfs = obfs;
+		if (pinSHA256) data.pinSHA256 = pinSHA256;
+
+		confirmAction(`добавить узел '${name}'`, function () {
+			sendRequest(
+				API_URLS.addNode,
+				"POST",
+				data,
+				`Узел '${name}' успешно добавлен!`,
+				"#add_node_btn",
+				false,
+				function() {
+					$("#add_node_form")[0].reset();
+					$("#add_node_form .form-control").removeClass('is-invalid');
+					fetchNodes();
+				}
+			);
+		});
+	}
 
     function deleteNode(nodeName) {
          confirmAction(`удалить узел '${nodeName}'`, function () {

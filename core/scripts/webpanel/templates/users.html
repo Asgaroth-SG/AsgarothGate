@@ -14,16 +14,72 @@
         margin-bottom: 0.5rem;
         display: flex;
         justify-content: space-between;
-        align-items: center;
-        border-bottom: 1px dashed #e9ecef;
-        padding-bottom: 0.5rem;
+        font-size: 0.9rem;
     }
-    .user-details-content p:last-child {
-        border-bottom: none;
+    .user-details-content p strong {
+        margin-right: 0.5rem;
+        white-space: nowrap;
     }
-    
-    body.dark-mode .user-details-content p {
-        border-bottom-color: rgba(255,255,255,0.1);
+    .user-details-content p span {
+        text-align: right;
+        word-break: break-all;
+        margin-left: 0.5rem;
+    }
+    .user-details-content .note-text {
+        max-height: 4rem;
+        overflow-y: auto;
+    }
+    .label-badge {
+        font-size: 0.75rem;
+    }
+
+    .user-details-row {
+        background-color: #f9fafb;
+    }
+
+    /* Скрываем чекбокс в шапке таблицы, если список пустой */
+    #userTable thead #selectAll {
+        display: none;
+    }
+
+    /* Кнопки фильтрации */
+    .filter-button.active {
+        box-shadow: 0 0 0 0.15rem rgba(56, 149, 211, 0.3);
+    }
+
+    /* Индикатор сортировки */
+    .sortable {
+        cursor: pointer;
+        white-space: nowrap;
+    }
+    .sortable i {
+        opacity: 0.3;
+        transition: opacity 0.2s;
+    }
+    .sortable.active i {
+        opacity: 1;
+    }
+
+    /* Для компактного отображения в мобильной версии */
+    @media (max-width: 768px) {
+        .table-responsive {
+            overflow-x: visible;
+        }
+        .user-details-content p {
+            font-size: 0.85rem;
+        }
+    }
+
+    /* Прячем длинные значения */
+    .truncate {
+        max-width: 150px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .note-icon {
+        cursor: pointer;
     }
 </style>
 {% endblock %}
@@ -42,405 +98,391 @@
 <section class="content"
     data-service-status-url="{{ url_for('server_services_status_api') }}"
     data-bulk-remove-url="{{ url_for('bulk_remove_users_api') }}"
-    data-remove-user-url-template="{{ url_for('remove_user_api', username='U') }}"
-    data-bulk-add-url="{{ url_for('add_bulk_users_api') }}"
+    data-user-info-url="{{ url_for('user_info_api') }}"
+    data-bulk-user-info-url="{{ url_for('bulk_user_info_api') }}"
+    data-reset-traffic-url="{{ url_for('reset_traffic_api') }}"
+    data-bulk-reset-traffic-url="{{ url_for('bulk_reset_traffic_api') }}"
+    data-bulk-reset-expiration-url="{{ url_for('bulk_reset_expiration_api') }}"
     data-add-user-url="{{ url_for('add_user_api') }}"
-    data-edit-user-url-template="{{ url_for('edit_user_api', username='U') }}"
-    data-reset-user-url-template="{{ url_for('reset_user_api', username='U') }}"
-    data-user-uri-url-template="{{ url_for('show_user_uri_api', username='U') }}"
-    data-bulk-uri-url="{{ url_for('show_multiple_user_uris_api') }}"
-    data-users-base-url="{{ url_for('users') }}"
-    data-get-user-url-template="{{ url_for('get_user_api', username='U') }}"
-    data-search-url="{{ url_for('search_users') }}">
+    data-bulk-add-users-url="{{ url_for('bulk_add_users_api') }}"
+    data-edit-user-url="{{ url_for('edit_user_api') }}"
+    data-export-sub-url="{{ url_for('export_sub_api') }}"
+    data-get-qr-config-url="{{ url_for('get_qr_config_api') }}"
+    data-generate-bulk-links-url="{{ url_for('generate_bulk_links_api') }}"
+>
     <div class="container-fluid">
-        <div class="card">
-            <div class="card-header border-0">
-                <div class="d-flex justify-content-between align-items-center flex-wrap">
-                    <h3 class="card-title mr-3">
-                        Список клиентов 
-                        {% if total_users is defined %}
-                        <span class="badge badge-pill badge-secondary ml-2" id="user-total-count">{{ total_users }}</span>
-                        {% endif %}
-                    </h3>
-                    
-                    <div class="card-tools d-flex align-items-center flex-wrap ml-auto">
-                        <div class="d-flex align-items-center mr-4 mb-1">
-                            <span class="text-muted small font-weight-bold mr-2 text-uppercase" style="letter-spacing: 0.5px;">Фильтры:</span>
-                            
-                            <button type="button" class="btn btn-sm btn-outline-secondary filter-button active mr-1" data-filter="all" title="Все">
-                                Все
+        <div class="row">
+            <div class="col-12">
+                <div class="card card-primary card-outline">
+
+                    <div class="card-header d-flex flex-wrap align-items-center">
+                        <div class="btn-group btn-group-sm mr-2 mb-1" role="group">
+                            <button type="button" class="btn btn-primary" id="addUserBtn">
+                                <i class="fas fa-user-plus mr-1"></i> Добавить
                             </button>
-                            <button type="button" class="btn btn-sm btn-outline-success filter-button mr-1" data-filter="online" title="Онлайн">
+                            <button type="button" class="btn btn-outline-danger" id="bulkRemoveBtn" disabled>
+                                <i class="fas fa-user-minus mr-1"></i> Удалить выбранных
+                            </button>
+                        </div>
+
+                        <div class="btn-group btn-group-sm mr-2 mb-1" role="group">
+                            <button type="button" class="btn btn-outline-secondary" id="bulkResetTrafficBtn" disabled>
+                                <i class="fas fa-sync-alt mr-1"></i> Сброс трафика
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" id="bulkResetExpirationBtn" disabled>
+                                <i class="far fa-clock mr-1"></i> Продлить срок
+                            </button>
+                        </div>
+
+                        <div class="btn-group btn-group-sm mr-2 mb-1" role="group">
+                            <button type="button" class="btn btn-outline-info" id="exportSubBtn" disabled>
+                                <i class="fas fa-link mr-1"></i> Подписка
+                            </button>
+                            <button type="button" class="btn btn-outline-info" id="bulkExportSubBtn">
+                                <i class="fas fa-layer-group mr-1"></i> Массовые ссылки
+                            </button>
+                        </div>
+
+                        <div class="btn-group btn-group-sm mr-3 mb-1" role="group">
+                            <button type="button" class="btn btn-outline-secondary filter-button active" data-filter="all" title="Все">
+                                <i class="fas fa-list"></i>
+                            </button>
+                            <button type="button" class="btn btn-outline-success filter-button mr-1" data-filter="online" title="Онлайн">
                                 <i class="fas fa-wifi"></i>
                             </button>
-                             <button type="button" class="btn btn-sm btn-outline-warning filter-button mr-1" data-filter="on-hold" title="Приостановленные">
+                            <button type="button" class="btn btn-outline-warning filter-button mr-1" data-filter="on-hold" title="Приостановленные">
                                 <i class="fas fa-pause"></i>
                             </button>
-                            <button type="button" class="btn btn-sm btn-outline-danger filter-button" data-filter="disable" title="Заблокированные">
+                            <button type="button" class="btn btn-outline-danger filter-button" data-filter="disable" title="Заблокированные">
                                 <i class="fas fa-ban"></i>
                             </button>
                         </div>
 
                         <div class="input-group input-group-sm mr-4 mb-1" style="width: 200px;">
                             <input type="text" id="searchInput" class="form-control" placeholder="Поиск пользователя...">
+                            <div class="input-group-append">
+                                <span class="input-group-text">
+                                    <i class="fas fa-search"></i>
+                                </span>
+                            </div>
                         </div>
 
-                        <div class="d-flex mb-1">
-                            <button type="button" class="btn btn-sm btn-primary mr-2" data-toggle="modal" data-target="#addUserModal" title="Создать нового">
-                                <i class="fas fa-plus mr-1"></i> Создать
-                            </button>
-                            <button type="button" class="btn btn-sm btn-info mr-2" id="showSelectedLinks" title="Ссылки для выбранных">
-                                <i class="fas fa-link"></i>
-                            </button>
-                            <button type="button" class="btn btn-sm btn-danger" id="deleteSelected" title="Удалить выбранных">
-                                <i class="fas fa-trash"></i>
-                            </button>
+                        <div class="ml-auto d-flex align-items-center">
+                            <span class="mr-2 small text-muted">Сервис IP Limit:</span>
+                            <span id="ipLimitStatusBadge" class="badge badge-secondary">Неизвестно</span>
                         </div>
                     </div>
+
+                    <div class="card-body table-responsive p-0">
+                        <table class="table table-hover table-sm table-compact" id="userTable">
+                            <thead>
+                                <tr>
+                                    <th style="width: 30px;" class="text-center">
+                                        <input type="checkbox" id="selectAll" style="cursor: pointer;">
+                                    </th>
+                                    <th style="width: 40px;">#</th>
+                                    <th>Пользователь</th>
+                                    <th class="d-none d-md-table-cell text-nowrap">Тариф</th>
+                                    <th class="d-none d-md-table-cell">Статус</th>
+                                    <th class="d-none d-md-table-cell text-center">Трафик</th>
+                                    <th class="d-none d-md-table-cell text-nowrap">Истекает</th>
+                                    <th class="d-none d-md-table-cell text-nowrap text-center">Срок</th>
+                                    <th class="d-none d-md-table-cell text-nowrap text-center">Дней активности</th>
+                                    <th class="d-none d-md-table-cell text-center">Активен</th>
+                                    <th class="d-none d-md-table-cell">Заметка</th>
+                                    <th class="d-none d-md-table-cell text-center">IP Limit</th>
+                                    <th class="d-none d-md-table-cell text-center">QR</th>
+                                    <th class="d-none d-md-table-cell text-center">Редактировать</th>
+                                    <th class="d-table-cell d-md-none text-center">Детали</th>
+                                </tr>
+                            </thead>
+                            <tbody id="userTableBody">
+                                {% set offset = (current_page - 1) * limit %}
+                                {% include 'users_rows.html' %}
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <div class="card-footer clearfix bg-white" id="paginationContainer">
+                        {% if total_pages is defined %}
+                        <div class="row align-items-center">
+                            <div class="col-sm-12 col-md-5 mb-2 mb-md-0 text-muted small">
+                                Показано с <b>{{ ((current_page - 1) * limit) + 1 }}</b> по <b>{{ [current_page * limit, total_users] | min }}</b> из <b>{{ total_users }}</b>
+                            </div>
+                            <div class="col-sm-12 col-md-7">
+                                <div class="d-flex justify-content-md-end justify-content-center align-items-center">
+                                    <form id="limit-form" method="get" class="form-inline mr-3">
+                                        <label for="limit" class="mr-2 small">На странице:</label>
+                                        <select name="limit" id="limit" class="form-control form-control-sm" onchange="this.form.submit()">
+                                            {% for l in [10, 20, 50, 100] %}
+                                                <option value="{{ l }}" {% if limit == l %}selected{% endif %}>{{ l }}</option>
+                                            {% endfor %}
+                                        </select>
+                                        {% if sort %}
+                                            <input type="hidden" name="sort" value="{{ sort }}">
+                                        {% endif %}
+                                        {% if order %}
+                                            <input type="hidden" name="order" value="{{ order }}">
+                                        {% endif %}
+                                    </form>
+                                    <ul class="pagination pagination-sm m-0">
+                                        <li class="page-item {% if current_page == 1 %}disabled{% endif %}">
+                                            <a class="page-link" href="?page={{ current_page - 1 if current_page > 1 else 1 }}&limit={{ limit }}{% if sort %}&sort={{ sort }}{% endif %}{% if order %}&order={{ order }}{% endif %}">&laquo;</a>
+                                        </li>
+                                        {% for page_num in range(1, total_pages + 1) %}
+                                            <li class="page-item {% if page_num == current_page %}active{% endif %}">
+                                                <a class="page-link" href="?page={{ page_num }}&limit={{ limit }}{% if sort %}&sort={{ sort }}{% endif %}{% if order %}&order={{ order }}{% endif %}">{{ page_num }}</a>
+                                            </li>
+                                        {% endfor %}
+                                        <li class="page-item {% if current_page == total_pages %}disabled{% endif %}">
+                                            <a class="page-link" href="?page={{ current_page + 1 if current_page < total_pages else total_pages }}&limit={{ limit }}{% if sort %}&sort={{ sort }}{% endif %}{% if order %}&order={{ order }}{% endif %}">&raquo;</a>
+                                        </li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        {% endif %}
+                    </div>
+
                 </div>
             </div>
-            
-            <div class="card-body table-responsive p-0">
-                <table class="table table-hover table-sm table-compact" id="userTable">
-                    <thead>
-                        <tr>
-                            <th style="width: 30px;" class="text-center">
-                                <input type="checkbox" id="selectAll" style="cursor: pointer;">
-                            </th>
-                            <th style="width: 40px;">#</th>
-                            <th>Пользователь</th>
-                            <th class="d-none d-md-table-cell">Статус</th>
-                            <th class="d-none d-md-table-cell text-center">Трафик</th>
-                            <th class="d-none d-md-table-cell text-nowrap">Истекает</th>
-                            <th class="d-none d-md-table-cell text-nowrap text-center">Срок</th>
-                            <th class="d-none d-md-table-cell text-nowrap text-center">Дней активности</th>
-                            <th class="d-none d-md-table-cell text-center">Активен</th>
-                            <th class="d-none d-md-table-cell">Заметка</th>
-                            <th class="d-none d-md-table-cell text-nowrap text-center requires-iplimit-service" style="display: none;">Limit IP</th>
-                            <th class="d-none d-md-table-cell text-nowrap text-center">QR-код</th>
-                            <th class="d-none d-md-table-cell text-nowrap text-right">Действия</th>
-                            <th class="d-md-none text-center">Инфо</th>
-                        </tr>
-                    </thead>
-                    <tbody id="userTableBody">
-                        {% set offset = (current_page - 1) * limit %}
-                        {% include 'users_rows.html' %}
-                    </tbody>
-                </table>
-            </div>
-            
-            <div class="card-footer clearfix bg-white" id="paginationContainer">
-                {% if total_pages is defined %}
-                <div class="row align-items-center">
-                    <div class="col-sm-12 col-md-5 mb-2 mb-md-0 text-muted small">
-                        Показано с <b>{{ ((current_page - 1) * limit) + 1 }}</b> по <b>{{ [((current_page - 1) * limit) + limit, total_users] | min }}</b> из <b>{{ total_users }}</b>
-                    </div>
-                    <div class="col-sm-12 col-md-7">
-                        <div class="d-flex justify-content-md-end justify-content-center align-items-center">
-                            <form id="limit-form" method="get" class="form-inline mr-3">
-                                <label for="limit-select" class="mr-2 small text-muted">Показать:</label>
-                                <select id="limit-select" class="custom-select custom-select-sm form-control-sm" style="width: 70px;">
-                                    <option value="10">10</option>
-                                    <option value="25">25</option>
-                                    <option value="50" selected>50</option>
-                                    <option value="100">100</option>
-                                </select>
+        </div>
+    </div>
+
+    <!-- Модал: Новый пользователь -->
+    <div class="modal fade" id="addUserModal" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Новый пользователь</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">×</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <ul class="nav nav-pills nav-fill mb-3" id="addUserTab" role="tablist">
+                        <li class="nav-item">
+                            <a class="nav-link active" id="single-user-tab" data-toggle="tab" href="#single-user" role="tab">Одиночный</a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link" id="bulk-user-tab" data-toggle="tab" href="#bulk-user" role="tab">Массовый</a>
+                        </li>
+                    </ul>
+                    <div class="tab-content" id="addUserTabContent">
+                        <div class="tab-pane fade show active" id="single-user" role="tabpanel">
+                            <form id="addUserForm">
+                                <div class="form-group">
+                                    <label>Имя пользователя <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" id="addUsername" name="username" placeholder="Только латиница, цифры, _" required>
+                                    <small class="text-danger" id="addUsernameError"></small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Тариф</label>
+                                    <select class="form-control" id="addPlan" name="plan">
+                                        <option value="standard" selected>Standard</option>
+                                        <option value="premium">Premium</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group col-md-6">
+                                        <label>Лимит трафика (ГБ)</label>
+                                        <input type="number" class="form-control" id="addTrafficLimit" name="traffic_limit" value="0" required>
+                                        <small class="form-text text-muted">0 = Безлимит</small>
+                                    </div>
+                                    <div class="form-group col-md-6">
+                                        <label>Срок действия (дней)</label>
+                                        <input type="number" class="form-control" id="addExpirationDays" name="expiration_days" required>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Примечание</label>
+                                    <input type="text" class="form-control" id="addNote" name="note">
+                                </div>
                             </form>
-                            {% if total_pages > 1 %}
-                            <nav aria-label="Page navigation">
-                                <ul class="pagination pagination-sm m-0">
-                                    <li class="page-item {% if current_page == 1 %}disabled{% endif %}">
-                                        <a class="page-link" href="{{ url_for('users_paginated', page=current_page - 1) }}">&laquo;</a>
-                                    </li>
-                                    
-                                    {% set page_start = [1, current_page - 2] | max %}
-                                    {% set page_end = [total_pages, current_page + 2] | min %}
-            
-                                    {% if page_start > 1 %}
-                                        <li class="page-item"><a class="page-link" href="{{ url_for('users_paginated', page=1) }}">1</a></li>
-                                        {% if page_start > 2 %}
-                                            <li class="page-item disabled"><span class="page-link">...</span></li>
-                                        {% endif %}
-                                    {% endif %}
-            
-                                    {% for page_num in range(page_start, page_end + 1) %}
-                                    <li class="page-item {% if page_num == current_page %}active{% endif %}">
-                                        <a class="page-link" href="{{ url_for('users_paginated', page=page_num) }}">{{ page_num }}</a>
-                                    </li>
-                                    {% endfor %}
-            
-                                    {% if page_end < total_pages %}
-                                        {% if page_end < total_pages - 1 %}
-                                            <li class="page-item disabled"><span class="page-link">...</span></li>
-                                        {% endif %}
-                                        <li class="page-item"><a class="page-link" href="{{ url_for('users_paginated', page=total_pages) }}">{{ total_pages }}</a></li>
-                                    {% endif %}
-                                    
-                                    <li class="page-item {% if current_page == total_pages %}disabled{% endif %}">
-                                        <a class="page-link" href="{{ url_for('users_paginated', page=current_page + 1) }}">&raquo;</a>
-                                    </li>
-                                </ul>
-                            </nav>
-                            {% endif %}
+                        </div>
+                        <div class="tab-pane fade" id="bulk-user" role="tabpanel">
+                            <form id="addBulkUsersForm">
+                                <div class="form-group">
+                                    <label>Префикс имени <span class="text-danger">*</span></label>
+                                    <input type="text" class="form-control" id="addBulkPrefix" name="prefix" placeholder="user_" required>
+                                    <small class="text-danger" id="addBulkPrefixError"></small>
+                                </div>
+                                <div class="form-row">
+                                    <div class="form-group col-md-6">
+                                        <label>Количество</label>
+                                        <input type="number" class="form-control" id="addBulkCount" name="count" value="10" min="1" required>
+                                    </div>
+                                    <div class="form-group col-md-6">
+                                        <label>Начать с номера</label>
+                                        <input type="number" class="form-control" id="addBulkStartNumber" name="start_number" value="1" min="1" required>
+                                    </div>
+                                </div>
+
+                                <div class="form-group">
+                                    <label>Тариф</label>
+                                    <select class="form-control" id="addBulkPlan" name="plan">
+                                        <option value="standard" selected>Standard</option>
+                                        <option value="premium">Premium</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group col-md-6">
+                                        <label>Трафик (ГБ)</label>
+                                        <input type="number" class="form-control" id="addBulkTrafficLimit" name="traffic_limit" value="0" required>
+                                        <small class="form-text text-muted">0 = Безлимит</small>
+                                    </div>
+                                    <div class="form-group col-md-6">
+                                        <label>Срок (дней)</label>
+                                        <input type="number" class="form-control" id="addBulkExpirationDays" name="expiration_days" required>
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label>Примечание</label>
+                                    <input type="text" class="form-control" id="addBulkNote" name="note">
+                                </div>
+                            </form>
                         </div>
                     </div>
                 </div>
-                {% endif %}
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-primary" id="saveUserBtn">Сохранить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модал: Редактировать пользователя -->
+    <div class="modal fade" id="editUserModal" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Редактировать пользователя</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">×</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <form id="editUserForm">
+                        <div class="form-group" style="display:none">
+                             <input type="text" class="form-control" id="editUsername" readonly>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Смена пароля</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="editPassword" name="new_password" placeholder="Пусто = не менять">
+                                <div class="input-group-append">
+                                    <button class="btn btn-outline-secondary" type="button" id="generatePasswordBtn" title="Сгенерировать новый">
+                                        <i class="fas fa-sync-alt"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <small class="text-danger" id="editPasswordError"></small>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group col-md-6">
+                                <label>Лимит трафика (ГБ)</label>
+                                <input type="number" class="form-control" id="editTrafficLimit" name="new_traffic_limit">
+                            </div>
+                            <div class="form-group col-md-6">
+                                <label>Срок (дней)</label>
+                                <input type="number" class="form-control" id="editExpirationDays" name="new_expiration_days">
+                            </div>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Тариф</label>
+                            <select class="form-control" id="editPlan" name="new_plan">
+                                <option value="standard">Standard</option>
+                                <option value="premium">Premium</option>
+                            </select>
+                        </div>
+
+						<div class="form-group requires-iplimit-service bg-light p-2 rounded" style="display: none;">
+						    <div class="form-row align-items-center">
+                                <div class="col-md-6">
+                                    <label>Макс. IP (Limit IP)</label>
+                                    <input type="number" class="form-control form-control-sm" id="editMaxIps" name="max_ips">
+                                    <small class="form-text text-muted">0 = Без ограничения</small>
+                                </div>
+                                <div class="col-md-6">
+                                     <div class="custom-control custom-switch mt-3">
+                                        <input type="checkbox" class="custom-control-input" id="editBlocked" name="blocked">
+                                        <label class="custom-control-label" for="editBlocked">Заблокировать (IP Limit)</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <small class="text-muted d-block mt-1">
+                                Управление доступом по IP. Требуется запущенный сервис Limit IP.
+                            </small>
+						</div>
+
+                        <div class="form-group">
+                            <label>Заметка</label>
+                            <input type="text" class="form-control" id="editNote" name="new_note">
+                        </div>
+                        
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-primary" id="saveEditUserBtn">Сохранить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модал: QR-код -->
+    <div class="modal fade" id="qrCodeModal" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog modal-sm modal-dialog-centered" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">QR-код</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">×</span>
+                    </button>
+                </div>
+                <div class="modal-body text-center">
+                    <div id="qrCodeContainer"></div>
+                    <small class="text-muted d-block mt-2">Сканируйте для подключения</small>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Модал: Массовые ссылки -->
+    <div class="modal fade" id="bulkLinksModal" tabindex="-1" role="dialog" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable" role="document">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Массовые ссылки подписки</h5>
+                    <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                        <span aria-hidden="true">×</span>
+                    </button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        Сгенерированные ссылки подписки для выбранных пользователей. Можно скопировать все или только отдельные строки.
+                    </div>
+                    <div class="mb-2">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="copyAllLinksButton">
+                            <i class="fas fa-copy mr-1"></i> Копировать все
+                        </button>
+                    </div>
+                    <textarea id="bulkLinksTextarea" class="form-control" rows="12" readonly></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">Закрыть</button>
+                    <button type="button" class="btn btn-success" id="copySelectedLinksButton"><i class="fas fa-copy mr-1"></i> Копировать</button>
+                </div>
             </div>
         </div>
     </div>
 </section>
-
-{% include 'modals.html' ignore missing %} 
-<div class="modal fade" id="addUserModal" tabindex="-1" role="dialog" aria-hidden="true">
-    <div class="modal-dialog" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Новый пользователь</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">×</span>
-                </button>
-            </div>
-            <div class="modal-body">
-                <ul class="nav nav-pills nav-fill mb-3" id="addUserTab" role="tablist">
-                    <li class="nav-item">
-                        <a class="nav-link active" id="single-user-tab" data-toggle="tab" href="#single-user" role="tab">Одиночный</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" id="bulk-users-tab" data-toggle="tab" href="#bulk-users" role="tab">Массовое создание</a>
-                    </li>
-                </ul>
-                <div class="tab-content" id="addUserTabContent">
-                    <div class="tab-pane fade show active" id="single-user" role="tabpanel">
-                        <form id="addUserForm">
-                            <div class="form-group">
-                                <label>Имя пользователя <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control" id="addUsername" name="username" placeholder="Только латиница, цифры, _" required>
-                                <small class="text-danger" id="addUsernameError"></small>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group col-md-6">
-                                    <label>Лимит трафика (ГБ)</label>
-                                    <input type="number" class="form-control" id="addTrafficLimit" name="traffic_limit" value="0" required>
-                                    <small class="form-text text-muted">0 = Безлимит</small>
-                                </div>
-                                <div class="form-group col-md-6">
-                                    <label>Срок действия (дней)</label>
-                                    <input type="number" class="form-control" id="addExpirationDays" name="expiration_days" required>
-                                </div>
-                            </div>
-                            <div class="form-group">
-                                <label>Примечание</label>
-                                <input type="text" class="form-control" id="addNote" name="note" placeholder="Например: Telegram ID">
-                            </div>
-							<div class="form-group requires-iplimit-service bg-light p-2 rounded" style="display: none;">
-								<label class="d-flex justify-content-between">
-                                    Лимит IP адресов
-                                    <small class="text-muted">0 = Использовать глобальную настройку</small>
-                                </label>
-    							<div class="input-group">
-    								<div class="input-group-prepend">
-    									<span class="input-group-text"><i class="fas fa-network-wired"></i></span>
-    								</div>
-    							    <input type="number" class="form-control" id="addMaxIps" name="max_ips" placeholder="0" value="0">
-    							</div>
-                                <div class="custom-control custom-switch mt-2">
-                                    <input type="checkbox" class="custom-control-input" id="addUnlimited" name="unlimited">
-                                    <label class="custom-control-label text-primary" for="addUnlimited">Отключить проверку IP (Безлимит)</label>
-                                </div>
-							</div>
-                            <button type="submit" class="btn btn-primary btn-block" id="addSubmitButton">Создать пользователя</button>
-                        </form>
-                    </div>
-                    
-                    <div class="tab-pane fade" id="bulk-users" role="tabpanel">
-                        <form id="addBulkUsersForm">
-                            <div class="form-group">
-                                <label>Префикс имени <span class="text-danger">*</span></label>
-                                <input type="text" class="form-control" id="addBulkPrefix" name="prefix" placeholder="user_" required>
-                                <small class="text-danger" id="addBulkPrefixError"></small>
-                            </div>
-                             <div class="form-row">
-                                <div class="form-group col-md-6">
-                                    <label>Количество</label>
-                                    <input type="number" class="form-control" id="addBulkCount" name="count" value="10" min="1" required>
-                                </div>
-                                <div class="form-group col-md-6">
-                                    <label>Начать с номера</label>
-                                    <input type="number" class="form-control" id="addBulkStartNumber" name="start_number" value="1" min="1" required>
-                                </div>
-                            </div>
-                            <div class="form-row">
-                                <div class="form-group col-md-6">
-                                    <label>Трафик (ГБ)</label>
-                                    <input type="number" class="form-control" id="addBulkTrafficLimit" name="traffic_gb" required>
-                                </div>
-                                <div class="form-group col-md-6">
-                                    <label>Дней</label>
-                                    <input type="number" class="form-control" id="addBulkExpirationDays" name="expiration_days" required>
-                                </div>
-                            </div>
-                            <div class="form-group requires-iplimit-service bg-light p-2 rounded" style="display: none;">
-                                <label class="d-flex justify-content-between">
-                                    Лимит IP
-                                    <small class="text-muted">0 = Глобальный</small>
-                                </label>
-                                <div class="input-group">
-                                    <div class="input-group-prepend">
-                                        <span class="input-group-text"><i class="fas fa-network-wired"></i></span>
-                                    </div>
-                                    <input type="number" class="form-control" id="addBulkMaxIps" name="max_ips" placeholder="0" value="0">
-                                </div>
-                                <div class="custom-control custom-switch mt-2">
-                                    <input type="checkbox" class="custom-control-input" id="addBulkUnlimited" name="unlimited">
-                                    <label class="custom-control-label text-primary" for="addBulkUnlimited">Отключить проверку IP (Безлимит)</label>
-                                </div>
-                            </div>
-                            <button type="submit" class="btn btn-primary btn-block" id="addBulkSubmitButton">Сгенерировать пользователей</button>
-                        </form>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="modal fade" id="editUserModal" tabindex="-1" role="dialog" aria-hidden="true">
-    <div class="modal-dialog" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Редактирование: <span id="editUserTitleUsername" class="text-primary font-weight-bold"></span></h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">×</span>
-                </button>
-            </div>
-            <div class="modal-body">
-                <form id="editUserForm">
-                    <div class="form-group" style="display:none">
-                         <input type="text" class="form-control" id="editUsername" readonly>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label>Смена пароля</label>
-                        <div class="input-group">
-                            <input type="text" class="form-control" id="editPassword" name="new_password" placeholder="Пусто = не менять">
-                            <div class="input-group-append">
-                                <button class="btn btn-outline-secondary" type="button" id="generatePasswordBtn" title="Сгенерировать новый">
-                                    <i class="fas fa-sync-alt"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <small class="form-text text-warning"><i class="fas fa-exclamation-triangle"></i> Изменение пароля сбросит текущее подключение пользователя.</small>
-                        <small class="text-danger" id="editPasswordError"></small>
-                    </div>
-                    
-                    <div class="form-row">
-                        <div class="form-group col-md-6">
-                            <label>Лимит трафика (ГБ)</label>
-                            <input type="number" class="form-control" id="editTrafficLimit" name="new_traffic_limit">
-                        </div>
-                        <div class="form-group col-md-6">
-                            <label>Срок (дней)</label>
-                            <input type="number" class="form-control" id="editExpirationDays" name="new_expiration_days">
-                        </div>
-                    </div>
-
-					<div class="form-group requires-iplimit-service bg-light p-2 rounded" style="display: none;">
-					     <label class="d-flex justify-content-between">
-                             Лимит IP 
-                             <small class="text-muted">0 = Глобальный</small>
-                         </label>
-    					<div class="input-group">
-    						<div class="input-group-prepend">
-    						  <span class="input-group-text"><i class="fas fa-network-wired"></i></span>
-    					    </div>
-    						<input type="number" class="form-control" id="editMaxIps" name="max_ips" placeholder="0">
-    					</div>
-                         <div class="custom-control custom-switch mt-2">
-                            <input type="checkbox" class="custom-control-input" id="editUnlimitedIp" name="unlimited_ip">
-                            <label class="custom-control-label text-primary" for="editUnlimitedIp">Безлимитный IP</label>
-                        </div>
-					</div>
-
-                    <div class="form-group">
-                        <label>Примечание</label>
-                        <textarea class="form-control" id="editNote" name="note" rows="2"></textarea>
-                    </div>
-                    
-                    <div class="form-group border-top pt-3">
-                        <div class="custom-control custom-switch">
-                            <input type="checkbox" class="custom-control-input" id="editBlocked" name="blocked">
-                            <label class="custom-control-label text-danger font-weight-bold" for="editBlocked">
-                                <i class="fas fa-ban mr-1"></i> Заблокировать пользователя
-                            </label>
-                        </div>
-                    </div>
-                    
-                    <input type="hidden" id="originalUsername" name="username">
-                    <button type="submit" class="btn btn-primary btn-block" id="editSubmitButton">Сохранить изменения</button>
-                </form>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="modal fade" id="qrcodeModal" tabindex="-1" role="dialog" aria-hidden="true">
-    <div class="modal-dialog modal-dialog-centered" role="document">
-        <div class="modal-content">
-            <div class="modal-header border-0 pb-0">
-                 <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">×</span>
-                </button>
-            </div>
-            <div class="modal-body text-center pt-0">
-                <h5 class="modal-title font-weight-bold mb-3">Подключение</h5>
-                <div id="qrcodesContainer" class="d-flex justify-content-center"></div>
-                <p class="text-muted small mt-2">Нажмите на QR-код, чтобы скопировать ссылку</p>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div class="modal fade" id="showLinksModal" tabindex="-1" role="dialog" aria-hidden="true">
-    <div class="modal-dialog modal-lg" role="document">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Экспорт подписок</h5>
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
-            </div>
-            <div class="modal-body">
-                <div class="mb-3">
-                    <label class="mr-2 font-weight-bold">Формат:</label>
-                    <div class="custom-control custom-checkbox custom-control-inline" style="display: none;">
-                        <input type="checkbox" class="custom-control-input" id="extractIPv4" value="ipv4">
-                        <label class="custom-control-label" for="extractIPv4">IPv4</label>
-                    </div>
-                    <div class="custom-control custom-checkbox custom-control-inline" style="display: none;">
-                        <input type="checkbox" class="custom-control-input" id="extractIPv6" value="ipv6">
-                        <label class="custom-control-label" for="extractIPv6">IPv6</label>
-                    </div>
-                    <div class="custom-control custom-checkbox custom-control-inline">
-                        <input type="checkbox" class="custom-control-input" id="extractNormalSub" value="normal_sub" checked>
-                        <label class="custom-control-label" for="extractNormalSub">Ссылка на подписку</label>
-                    </div>
-                    <div class="custom-control custom-checkbox custom-control-inline">
-                        <input type="checkbox" class="custom-control-input" id="extractNodes" value="nodes">
-                        <label class="custom-control-label" for="extractNodes">Отдельные узлы (VMess/VLESS)</label>
-                    </div>
-                    <button type="button" class="btn btn-sm btn-outline-primary ml-2" id="extractLinksButton">Обновить список</button>
-                </div>
-                
-                <textarea id="linksTextarea" class="form-control font-family-monospace" rows="10" readonly style="font-size: 0.85rem; background-color: #f8f9fa;" placeholder="Выберите формат и нажмите 'Обновить список'"></textarea>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-dismiss="modal">Закрыть</button>
-                <button type="button" class="btn btn-success" id="copyExtractedLinksButton"><i class="fas fa-copy mr-1"></i> Копировать</button>
-            </div>
-        </div>
-    </div>
-</div>
 {% endblock %}
 
 {% block javascripts %}

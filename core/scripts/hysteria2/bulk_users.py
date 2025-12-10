@@ -8,7 +8,16 @@ import argparse
 import re
 from db.database import db
 
-def add_bulk_users(traffic_gb, expiration_days, count, prefix, start_number, unlimited_user, max_ips=0):
+def add_bulk_users(
+    traffic_gb,
+    expiration_days,
+    count,
+    prefix,
+    start_number,
+    unlimited_user,
+    max_ips=0,
+    plan="standard",  # новый параметр тарифа
+):
     if db is None:
         print("Ошибка: Подключение к базе данных не удалось. Убедитесь, что MongoDB запущен.")
         return 1
@@ -65,7 +74,9 @@ def add_bulk_users(traffic_gb, expiration_days, count, prefix, start_number, unl
             "blocked": False,
             "unlimited_user": unlimited_user,
             "status": "On-hold",
-            "max_ips": int(max_ips) 
+            "max_ips": int(max_ips),
+            # тариф пользователя
+            "plan": plan or "standard",
         }
         users_to_insert.append(user_doc)
 
@@ -85,7 +96,14 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--prefix", type=str, required=True, help="Prefix for usernames.")
     parser.add_argument("-s", "--start-number", type=int, default=1, help="Starting number for username suffix (default: 1).")
     parser.add_argument("-u", "--unlimited", action='store_true', help="Flag to mark users as unlimited (exempt from IP limits).")
-    parser.add_argument("--max-ips", type=int, default=0, help="Max IP limit per user.") # Добавлен аргумент
+    parser.add_argument("--max-ips", type=int, default=0, help="Max IP limit per user.")  # Добавлен аргумент
+    # Новый CLI-аргумент тарифа
+    parser.add_argument(
+        "--plan",
+        default="standard",
+        choices=["standard", "premium"],
+        help="User plan for all created users (standard or premium). Default: standard.",
+    )
 
     args = parser.parse_args()
 
@@ -96,5 +114,6 @@ if __name__ == "__main__":
         prefix=args.prefix,
         start_number=args.start_number,
         unlimited_user=args.unlimited,
-        max_ips=args.max_ips
+        max_ips=args.max_ips,
+        plan=args.plan,
     ))
