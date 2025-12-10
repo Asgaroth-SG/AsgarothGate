@@ -343,12 +343,12 @@ $(document).ready(function () {
 		const pinSHA256 = $("#node_pin").val().trim();
 		const insecure = $("#node_insecure").is(':checked');
 		const type = ($("#node_type").val() || 'standard').toLowerCase();
-
 		const data = {
 			name: name,
 			ip: ip,
 			insecure: insecure,
-			type: type  // Standard / Premium (на бэке тип: "standard"/"premium")
+			type: type 
+
 		};
 
 		if (port) data.port = parseInt(port);
@@ -364,7 +364,7 @@ $(document).ready(function () {
 				`Узел '${name}' успешно добавлен!`,
 				"#add_node_btn",
 				false,
-				function() {
+				function () {
 					$("#add_node_form")[0].reset();
 					$("#add_node_form .form-control").removeClass('is-invalid');
 					fetchNodes();
