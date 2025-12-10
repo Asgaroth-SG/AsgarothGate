@@ -351,10 +351,27 @@ def node():
 @click.option('--pinSHA256', required=False, type=str, help='Optional: Public key SHA256 pin.')
 @click.option('--obfs', required=False, type=str, help='Optional: Obfuscation key.')
 @click.option('--insecure', is_flag=True, default=False, help='Optional: Skip certificate verification.')
-def add_node(name, ip, port, sni, pinsha256, obfs, insecure):
+@click.option(
+    '--type',
+    'node_type',
+    type=click.Choice(['standard', 'premium'], case_sensitive=False),
+    default='standard',
+    show_default=True,
+    help='Node type (standard or premium).'
+)
+def add_node(name, ip, port, sni, pinsha256, obfs, insecure, node_type):
     """Add a new external node."""
     try:
-        output = cli_api.add_node(name, ip, sni, pinSHA256=pinsha256, port=port, obfs=obfs, insecure=insecure)
+        output = cli_api.add_node(
+            name,
+            ip,
+            sni,
+            pinSHA256=pinsha256,
+            port=port,
+            obfs=obfs,
+            insecure=insecure,
+            node_type=node_type,   # <<< ВАЖНО
+        )
         click.echo(output.strip())
     except Exception as e:
         click.echo(f'{e}', err=True)
