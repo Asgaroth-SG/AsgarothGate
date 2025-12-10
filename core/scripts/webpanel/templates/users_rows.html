@@ -6,20 +6,23 @@
 </tr>
 {% else %}
     {% for user in users|sort(attribute='username', case_sensitive=false) %}
-    <tr class="user-main-row" data-note="{{ user.note or '' }}">
+    {% set plan = user.plan if user.plan is defined else 'standard' %}
+    <tr class="user-main-row" data-note="{{ user.note or '' }}" data-plan="{{ plan }}">
         <td>
             <input type="checkbox" class="user-checkbox" value="{{ user.username }}">
         </td>
         <td>{{ loop.index + (offset if offset is defined else 0) }}</td>
         <td data-username="{{ user.username }}"><strong>{{ user.username }}</strong></td>
-        <td class="d-none d-md-table-cell text-nowrap">
-            {% set plan = (user.plan or 'standard')|lower %}
+
+        <!-- Тариф -->
+        <td class="d-none d-md-table-cell">
             {% if plan == 'premium' %}
-                <span class="badge badge-premium">Premium</span>
+                <span class="badge badge-info">Premium</span>
             {% else %}
-                <span class="badge badge-standard">Standard</span>
+                <span class="badge badge-secondary">Standard</span>
             {% endif %}
         </td>
+
         <td class="d-none d-md-table-cell">
             {% if user.status == "Online" %}
                 <span class="badge badge-success">Онлайн</span>
@@ -64,25 +67,23 @@
         </td>
         <td class="d-none d-md-table-cell text-center">
             {% if user.day_usage == "On-hold" %}
-                <span class="text-muted">-</span>
+                 <span class="text-muted">-</span>
+            {% elif user.day_usage == "Error" %}
+                 <span class="text-danger">Err</span>
             {% else %}
-                {{ user.day_usage }}
+                 {{ user.day_usage }}
             {% endif %}
         </td>
-        
         <td class="d-none d-md-table-cell text-center">
             {% if user.enable %}
-                <i class="fas fa-check text-success"></i>
+            <i class="fas fa-check text-success"></i>
             {% else %}
-                <i class="fas fa-times text-danger"></i>
+            <i class="fas fa-times text-danger"></i>
             {% endif %}
         </td>
-        
-        <td class="d-none d-md-table-cell">
+        <td class="d-none d-md-table-cell note-cell">
             {% if user.note %}
-                <span class="truncate" title="{{ user.note }}">{{ user.note }}</span>
-            {% else %}
-                <span class="text-muted">-</span>
+                <small class="text-muted" title="{{ user.note }}">{{ user.note | truncate(15, True) }}</small>
             {% endif %}
         </td>
         
@@ -117,9 +118,9 @@
                 <i class="fas fa-trash"></i>
             </button>
         </td>
-        <td class="d-table-cell d-md-none text-center align-middle">
-            <button type="button" class="btn btn-xs btn-outline-primary toggle-details">
-                <i class="fas fa-chevron-down"></i>
+        <td class="d-md-none text-center">
+            <button type="button" class="btn btn-sm btn-secondary toggle-details-btn">
+                <i class="fas fa-plus"></i>
             </button>
         </td>
     </tr>
@@ -143,16 +144,17 @@
                     {% endif %}
                     </span>
                 </p>
+
                 <p><strong>Тариф:</strong>
                     <span>
-                        {% set plan = (user.plan or 'standard')|lower %}
                         {% if plan == 'premium' %}
-                            <span class="badge badge-premium">Premium</span>
+                            Premium
                         {% else %}
-                            <span class="badge badge-standard">Standard</span>
+                            Standard
                         {% endif %}
                     </span>
                 </p>
+
                 <p><strong>Трафик:</strong> <span>{{ user.traffic_used }}</span></p>
                 <p><strong>Истекает:</strong> 
                     <span>
@@ -165,12 +167,12 @@
                     {% endif %}
                     </span>
                 </p>
-                <p><strong>Срок (дней):</strong> 
+                <p><strong>Дней:</strong> 
                     <span>
-                    {% if user.expiry_days == "Unlimited" %}
-                        ∞
-                    {% elif user.expiry_days == "On-hold" %}
+                    {% if user.expiry_days == "On-hold" %}
                         -
+                    {% elif user.expiry_days == "Unlimited" %}
+                        ∞
                     {% else %}
                         {{ user.expiry_days }}
                     {% endif %}
@@ -199,7 +201,7 @@
                     </span>
                 </p>
                 <div class="mt-2 user-details-actions">
-                    <a href="#" class="btn btn-sm btn-outline-secondary config-link" data-toggle="modal" data-target="#qrcodeModal" data-username="{{ user.username }}">
+                    <a href="#" class="btn btn-sm btn-outline-secondary" data-toggle="modal" data-target="#qrcodeModal" data-username="{{ user.username }}">
                         <i class="fas fa-qrcode"></i> QR
                     </a>
                     <button type="button" class="btn btn-sm btn-info edit-user" data-user="{{ user.username }}" data-toggle="modal" data-target="#editUserModal">
@@ -217,3 +219,4 @@
     </tr>
     {% endfor %}
 {% endif %}
+
