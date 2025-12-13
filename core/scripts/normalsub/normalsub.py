@@ -78,7 +78,6 @@ class UserInfo:
     account_creation_date: str
     expiration_days: int
     blocked: bool = False
-    # Тариф пользователя: standard / premium
     plan: str = "standard"
 
     @property
@@ -95,10 +94,20 @@ class UserInfo:
     @property
     def expiration_date(self) -> str:
         if not self.account_creation_date or self.expiration_days <= 0:
-            return "N/A"
+            return "Ожидает подключения"
+
         creation_timestamp = int(time.mktime(time.strptime(self.account_creation_date, "%Y-%m-%d")))
         expiration_timestamp = creation_timestamp + (self.expiration_days * 24 * 3600)
-        return time.strftime("%Y-%m-%d", time.localtime(expiration_timestamp))
+
+        months = [
+            "января", "февраля", "марта", "апреля", "мая", "июня",
+            "июля", "августа", "сентября", "октября", "ноября", "декабря"
+        ]
+        lt = time.localtime(expiration_timestamp)
+        day = lt.tm_mday
+        month_name = months[lt.tm_mon - 1]
+        year = lt.tm_year
+        return f"{day} {month_name} {year} г."
 
     @property
     def usage_human_readable(self) -> str:
@@ -465,19 +474,15 @@ class SubscriptionManager:
             if not uri:
                 continue
 
-            # фильтруем IPv6 по URI (как раньше)
             if "[" in uri or "v6" in uri or "IPv6" in uri:
                 continue
 
-            # Если это удалённая нода, смотрим её тип
             if label.startswith("Node:"):
                 node_name = label[len("Node:"):].strip()
                 node_type = nodes_types.get(node_name, "standard")
-                # обычному пользователю не даём premium-ноды
                 if (not is_premium_user) and node_type == "premium":
                     continue
 
-            # спец-обработка pinSHA256 для v2rayNG
             if "v2ray" in user_agent and "ng" in user_agent:
                 match = re.search(r'pinSHA256=sha256/([^&]+)', uri)
                 if match:
@@ -490,7 +495,6 @@ class SubscriptionManager:
 
             processed_uris.append(uri)
 
-        # ✅ extra.json теперь тоже фильтруется по тарифу пользователя
         extra_uris = self._get_extra_uris_for_user(user_plan)
 
         all_processed_uris = processed_uris + extra_uris
@@ -656,7 +660,7 @@ class HysteriaServer:
             return web.Response(status=500, text="Error: Internal server error")
 
     async def _handle_blocked_user(self, request: web.Request, user_info: UserInfo) -> web.Response:
-        fake_uri = "hysteria2://x@end.com:443?sni=support.me#⛔Account-Expired⚠️"
+        fake_uri = "hysteria2://x@end.com:443?sni=support.me#⛔Подписка истекла⚠️"
         user_agent = request.headers.get('User-Agent', '').lower()
 
         if any(browser in user_agent for browser in ['chrome', 'firefox', 'safari', 'edge', 'opera']):
@@ -728,7 +732,6 @@ class HysteriaServer:
         local_uris: List[NodeURI] = []
         node_uris: List[NodeURI] = []
 
-        # фильтрация premium-ноды и extra-config в HTML-представлении
         user_plan = Utils.normalize_plan(getattr(user_info, "plan", "standard"))
         is_premium_user = (user_plan == "premium")
 
@@ -750,7 +753,6 @@ class HysteriaServer:
             label = item.get('label', '')
             uri = item.get('uri', '')
 
-            # не показываем IPv6-строки (по label, как было)
             if "IPv6" in label or "v6" in label:
                 continue
 
@@ -770,8 +772,6 @@ class HysteriaServer:
                 node_uris.append(node_uri)
             else:
                 local_uris.append(node_uri)
-
-        # ✅ Плюс выводим extra-config в HTML (с фильтрацией по тарифу)
         extra_items = self.subscription_manager._filter_extra_configs_for_user(user_plan)
         for x in extra_items:
             uri = str(x.get("uri", "")).strip()
@@ -780,11 +780,7 @@ class HysteriaServer:
             name = str(x.get("name", "Extra")).strip() or "Extra"
             item_plan = Utils.normalize_plan(x.get("type") or x.get("plan") or "standard")
 
-            # Тут можно помечать Premium визуально (не обязательно)
-            if item_plan == "premium":
-                label = f"Extra (Premium): {name}"
-            else:
-                label = f"Extra: {name}"
+            label = f"{name}"
 
             local_uris.append(NodeURI(
                 label=label,
