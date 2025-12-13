@@ -160,14 +160,12 @@ function parseTwemoji(root) {
             return tag === 'input' || tag === 'textarea' || tag === 'script' || tag === 'style';
         };
 
-        window.twemoji.parse(root, {
-            folder: 'svg',
-            ext: '.svg',
-            callback: (icon, options, variant) => {
-                return `${icon}${options.ext}`;
-            },
-            filter: (node, icon) => !shouldSkip(node)
-        });
+	window.twemoji.parse(root, {
+		base: 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/',
+		folder: 'svg',
+		ext: '.svg',
+		filter: (node, icon) => !shouldSkip(node)
+	});
     } catch (e) {
         console.warn('Twemoji parse skipped:', e);
     }
