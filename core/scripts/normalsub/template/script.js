@@ -161,10 +161,10 @@ function parseTwemoji(root) {
         };
 
 	window.twemoji.parse(root, {
-		base: 'https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/assets/',
-		folder: 'svg',
-		ext: '.svg',
-		filter: (node, icon) => !shouldSkip(node)
+	  base: 'twemoji/',
+	  folder: 'svg',
+	  ext: '.svg',
+	  filter: (node, icon) => !shouldSkip(node)
 	});
     } catch (e) {
         console.warn('Twemoji parse skipped:', e);
