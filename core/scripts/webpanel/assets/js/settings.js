@@ -44,7 +44,7 @@ $(document).ready(function () {
     function translateError(errorMsg) {
         if (!errorMsg) return "Произошла неизвестная ошибка.";
         if (typeof errorMsg !== 'string') return errorMsg;
-        
+
         const map = {
             "failed with exit code": "Ошибка выполнения системной команды.",
             "No such file or directory": "Файл или каталог не найден.",
@@ -59,7 +59,7 @@ $(document).ready(function () {
         for (const [key, val] of Object.entries(map)) {
             if (errorMsg.includes(key)) return val;
         }
-        return errorMsg; 
+        return errorMsg;
     }
 
     function escapeHtml(text) {
@@ -73,7 +73,7 @@ $(document).ready(function () {
         if (text === null || typeof text === 'undefined') {
             return '';
         }
-        return String(text).replace(/[&<>"']/g, function(m) { return map[m]; });
+        return String(text).replace(/[&<>"']/g, function (m) { return map[m]; });
     }
 
     function isValidURI(uri) {
@@ -92,7 +92,7 @@ $(document).ready(function () {
         const lowerDomain = domain.toLowerCase();
         if (lowerDomain.startsWith("http://") || lowerDomain.startsWith("https://")) return false;
         const ipV4Regex = /^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/;
-        if(ipV4Regex.test(domain)) return false;
+        if (ipV4Regex.test(domain)) return false;
         const domainRegex = /^(?!-)(?:[a-zA-Z\d-]{0,62}[a-zA-Z\d]\.){1,126}(?!\d+$)[a-zA-Z\d]{1,63}$/;
         return domainRegex.test(lowerDomain);
     }
@@ -154,10 +154,10 @@ $(document).ready(function () {
             type: type,
             contentType: "application/json",
             data: data ? JSON.stringify(data) : null,
-            beforeSend: function() {
+            beforeSend: function () {
                 if (buttonSelector) {
                     $(buttonSelector).prop('disabled', true);
-                     $(buttonSelector + ' .spinner-border').show();
+                    $(buttonSelector + ' .spinner-border').show();
                 }
             },
             success: function (response) {
@@ -193,7 +193,7 @@ $(document).ready(function () {
                 Swal.fire("Ошибка!", translateError(errorMessage), "error");
                 console.error("AJAX Error:", status, error, xhr.responseText);
             },
-            complete: function() {
+            complete: function () {
                 if (buttonSelector) {
                     $(buttonSelector).prop('disabled', false);
                     $(buttonSelector + ' .spinner-border').hide();
@@ -225,9 +225,9 @@ $(document).ready(function () {
                 fieldValid = isValidURI(input.val());
             } else if (id === 'block_duration' || id === 'max_ips' || id === 'telegram_backup_interval') {
                 if (input.val().trim() === '' && id === 'telegram_backup_interval') {
-                   fieldValid = true;
+                    fieldValid = true;
                 } else {
-                   fieldValid = isValidPositiveNumber(input.val());
+                    fieldValid = isValidPositiveNumber(input.val());
                 }
             } else if (id === 'decoy_path') {
                 fieldValid = isValidPath(input.val());
@@ -241,7 +241,7 @@ $(document).ready(function () {
                 fieldValid = true;
             } else {
                 if (input.attr('placeholder') && (input.attr('placeholder').includes('Enter') || input.attr('placeholder').includes('Введите')) && !input.attr('id').startsWith('ipv')) {
-                     fieldValid = input.val().trim() !== "";
+                    fieldValid = input.val().trim() !== "";
                 }
             }
 
@@ -264,11 +264,11 @@ $(document).ready(function () {
             },
             error: function (xhr, status, error) {
                 console.error("Failed to fetch service status:", error, xhr.responseText);
-                 Swal.fire("Ошибка!", "Не удалось получить статусы служб.", "error");
+                Swal.fire("Ошибка!", "Не удалось получить статусы служб.", "error");
             }
         });
 
-         $.ajax({
+        $.ajax({
             url: API_URLS.getIp,
             type: "GET",
             success: function (data) {
@@ -288,28 +288,28 @@ $(document).ready(function () {
             success: function (nodes) {
                 renderNodes(nodes);
             },
-            error: function(xhr) {
+            error: function (xhr) {
                 Swal.fire("Ошибка!", "Не удалось получить список внешних узлов.", "error");
                 console.error("Error fetching nodes:", xhr.responseText);
             }
         });
     }
 
-	function renderNodes(nodes) {
-		const tableBody = $("#nodes_table tbody");
-		tableBody.empty();
+    function renderNodes(nodes) {
+        const tableBody = $("#nodes_table tbody");
+        tableBody.empty();
 
-		if (nodes && nodes.length > 0) {
-			$("#nodes_table").show();
-			$("#no_nodes_message").hide();
+        if (nodes && nodes.length > 0) {
+            $("#nodes_table").show();
+            $("#no_nodes_message").hide();
 
-			nodes.forEach(node => {
-				const rawType = (node.type || node.node_type || 'standard').toString().toLowerCase();
-				const isPremium = rawType === 'premium';
-				const typeLabel = isPremium ? 'Premium' : 'Standard';
-				const typeClass = isPremium ? 'badge badge-premium' : 'badge badge-standard';
+            nodes.forEach(node => {
+                const rawType = (node.type || node.node_type || 'standard').toString().toLowerCase();
+                const isPremium = rawType === 'premium';
+                const typeLabel = isPremium ? 'Premium' : 'Standard';
+                const typeClass = isPremium ? 'badge badge-premium' : 'badge badge-standard';
 
-				const row = `<tr>
+                const row = `<tr>
 								<td>${escapeHtml(node.name)}</td>
 								<td><span class="${typeClass}">${typeLabel}</span></td>
 								<td>${escapeHtml(node.ip)}</td>
@@ -324,57 +324,57 @@ $(document).ready(function () {
 									</button>
 								</td>
 							</tr>`;
-				tableBody.append(row);
-			});
-		} else {
-			$("#nodes_table").hide();
-			$("#no_nodes_message").show();
-		}
-	}
+                tableBody.append(row);
+            });
+        } else {
+            $("#nodes_table").hide();
+            $("#no_nodes_message").show();
+        }
+    }
 
-	function addNode() {
-		if (!validateForm('add_node_form')) return;
+    function addNode() {
+        if (!validateForm('add_node_form')) return;
 
-		const name = $("#node_name").val().trim();
-		const ip = $("#node_ip").val().trim();
-		const port = $("#node_port").val().trim();
-		const sni = $("#node_sni").val().trim();
-		const obfs = $("#node_obfs").val().trim();
-		const pinSHA256 = $("#node_pin").val().trim();
-		const insecure = $("#node_insecure").is(':checked');
-		const type = ($("#node_type").val() || 'standard').toLowerCase();
-		const data = {
-			name: name,
-			ip: ip,
-			insecure: insecure,
-			node_type: type 
+        const name = $("#node_name").val().trim();
+        const ip = $("#node_ip").val().trim();
+        const port = $("#node_port").val().trim();
+        const sni = $("#node_sni").val().trim();
+        const obfs = $("#node_obfs").val().trim();
+        const pinSHA256 = $("#node_pin").val().trim();
+        const insecure = $("#node_insecure").is(':checked');
+        const type = ($("#node_type").val() || 'standard').toLowerCase();
+        const data = {
+            name: name,
+            ip: ip,
+            insecure: insecure,
+            node_type: type
 
-		};
+        };
 
-		if (port) data.port = parseInt(port);
-		if (sni) data.sni = sni;
-		if (obfs) data.obfs = obfs;
-		if (pinSHA256) data.pinSHA256 = pinSHA256;
+        if (port) data.port = parseInt(port);
+        if (sni) data.sni = sni;
+        if (obfs) data.obfs = obfs;
+        if (pinSHA256) data.pinSHA256 = pinSHA256;
 
-		confirmAction(`добавить узел '${name}'`, function () {
-			sendRequest(
-				API_URLS.addNode,
-				"POST",
-				data,
-				`Узел '${name}' успешно добавлен!`,
-				"#add_node_btn",
-				false,
-				function () {
-					$("#add_node_form")[0].reset();
-					$("#add_node_form .form-control").removeClass('is-invalid');
-					fetchNodes();
-				}
-			);
-		});
-	}
+        confirmAction(`добавить узел '${name}'`, function () {
+            sendRequest(
+                API_URLS.addNode,
+                "POST",
+                data,
+                `Узел '${name}' успешно добавлен!`,
+                "#add_node_btn",
+                false,
+                function () {
+                    $("#add_node_form")[0].reset();
+                    $("#add_node_form .form-control").removeClass('is-invalid');
+                    fetchNodes();
+                }
+            );
+        });
+    }
 
     function deleteNode(nodeName) {
-         confirmAction(`удалить узел '${nodeName}'`, function () {
+        confirmAction(`удалить узел '${nodeName}'`, function () {
             sendRequest(
                 API_URLS.deleteNode,
                 "POST",
@@ -394,7 +394,7 @@ $(document).ready(function () {
             success: function (configs) {
                 renderExtraConfigs(configs);
             },
-            error: function(xhr) {
+            error: function (xhr) {
                 Swal.fire("Ошибка!", "Не удалось получить дополнительные конфигурации.", "error");
                 console.error("Error fetching extra configs:", xhr.responseText);
             }
@@ -408,11 +408,20 @@ $(document).ready(function () {
         if (configs && configs.length > 0) {
             $("#extra_configs_table").show();
             $("#no_extra_configs_message").hide();
+
             configs.forEach(config => {
-                const shortUri = config.uri.length > 50 ? config.uri.substring(0, 50) + '...' : config.uri;
+                const rawPlan = (config.plan || config.type || "standard").toString().toLowerCase();
+                const isPremium = rawPlan === "premium";
+                const planLabel = isPremium ? "Premium" : "Standard";
+                const planClass = isPremium ? "badge badge-premium" : "badge badge-standard";
+
+                const uriVal = (config.uri || "").toString();
+                const shortUri = uriVal.length > 50 ? uriVal.substring(0, 50) + '...' : uriVal;
+
                 const row = `<tr>
                                 <td>${escapeHtml(config.name)}</td>
-                                <td title="${escapeHtml(config.uri)}">${escapeHtml(shortUri)}</td>
+                                <td><span class="${planClass}">${planLabel}</span></td>
+                                <td title="${escapeHtml(uriVal)}">${escapeHtml(shortUri)}</td>
                                 <td>
                                     <button class="btn btn-xs btn-danger delete-extra-config-btn" data-name="${escapeHtml(config.name)}">
                                         <i class="fas fa-trash"></i> Удалить
@@ -432,18 +441,20 @@ $(document).ready(function () {
 
         const name = $("#extra_config_name").val().trim();
         const uri = $("#extra_config_uri").val().trim();
+        const plan = ($("#extra_config_plan").val() || "standard").toLowerCase();
 
         confirmAction(`добавить конфигурацию '${name}'`, function () {
             sendRequest(
                 API_URLS.addExtraConfig,
                 "POST",
-                { name: name, uri: uri },
+                { name: name, uri: uri, plan: plan },
                 `Конфигурация '${name}' успешно добавлена!`,
                 "#add_extra_config_btn",
                 false,
-                function() {
+                function () {
                     $("#extra_config_name").val('');
                     $("#extra_config_uri").val('');
+                    $("#extra_config_plan").val('standard');
                     $("#add_extra_config_form .form-control").removeClass('is-invalid');
                     fetchExtraConfigs();
                 }
@@ -452,7 +463,7 @@ $(document).ready(function () {
     }
 
     function deleteExtraConfig(configName) {
-         confirmAction(`удалить конфигурацию '${configName}'`, function () {
+        confirmAction(`удалить конфигурацию '${configName}'`, function () {
             sendRequest(
                 API_URLS.deleteExtraConfig,
                 "POST",
@@ -466,7 +477,7 @@ $(document).ready(function () {
     }
 
     function updateServiceUI(data) {
-         const servicesMap = {
+        const servicesMap = {
             "hysteria_telegram_bot": "#telegram_form",
             "hysteria_normal_sub": "#normal_sub_service_form",
             "hysteria_iplimit": "#ip-limit-service",
@@ -484,7 +495,7 @@ $(document).ready(function () {
                     $("#telegram_stop").show();
                     $("#telegram_save_interval").show();
                     if ($form.find(".alert-info").length === 0) {
-                       $form.prepend(`<div class='alert alert-info'>Служба работает. Вы можете остановить её или изменить интервал бэкапа.</div>`);
+                        $form.prepend(`<div class='alert alert-info'>Служба работает. Вы можете остановить её или изменить интервал бэкапа.</div>`);
                     }
                     fetchTelegramBackupInterval();
                 } else {
@@ -528,26 +539,26 @@ $(document).ready(function () {
                 const $ipLimitServiceForm = $("#ip_limit_service_form");
                 const $configTabLi = $(".ip-limit-config-tab-li");
                 if (isRunning) {
-                   $("#ip_limit_start").hide();
-                   $("#ip_limit_stop").show();
-                   $("#ip_limit_clean").show();
-                   $configTabLi.show();
-                   fetchIpLimitConfig();
-                   if ($ipLimitServiceForm.find(".alert-info").length === 0) {
-                       $ipLimitServiceForm.prepend(`<div class='alert alert-info'>Служба IP-Limit работает. Вы можете остановить её при необходимости.</div>`);
-                   }
+                    $("#ip_limit_start").hide();
+                    $("#ip_limit_stop").show();
+                    $("#ip_limit_clean").show();
+                    $configTabLi.show();
+                    fetchIpLimitConfig();
+                    if ($ipLimitServiceForm.find(".alert-info").length === 0) {
+                        $ipLimitServiceForm.prepend(`<div class='alert alert-info'>Служба IP-Limit работает. Вы можете остановить её при необходимости.</div>`);
+                    }
                 } else {
-                   $("#ip_limit_start").show();
-                   $("#ip_limit_stop").hide();
-                   $("#ip_limit_clean").hide();
-                   $configTabLi.hide();
-                   if ($('#ip-limit-config-tab').hasClass('active')) {
-                       $('#ip-limit-service-tab').tab('show');
-                   }
-                   $ipLimitServiceForm.find(".alert-info").remove();
-                   $("#block_duration").val("");
-                   $("#max_ips").val("");
-                   $("#block_duration, #max_ips").removeClass('is-invalid');
+                    $("#ip_limit_start").show();
+                    $("#ip_limit_stop").hide();
+                    $("#ip_limit_clean").hide();
+                    $configTabLi.hide();
+                    if ($('#ip-limit-config-tab').hasClass('active')) {
+                        $('#ip-limit-service-tab').tab('show');
+                    }
+                    $ipLimitServiceForm.find(".alert-info").remove();
+                    $("#block_duration").val("");
+                    $("#max_ips").val("");
+                    $("#block_duration, #max_ips").removeClass('is-invalid');
                 }
             } else if (serviceKey === "hysteria_warp") {
                 const isWarpServiceRunning = data[serviceKey];
@@ -559,7 +570,7 @@ $(document).ready(function () {
                     $("#warp_initial_controls").show();
                     $("#warp_active_controls").hide();
                     if ($("#warp_config_form").length > 0) {
-                       $("#warp_config_form")[0].reset();
+                        $("#warp_config_form")[0].reset();
                     }
                 }
             }
@@ -619,110 +630,15 @@ $(document).ready(function () {
         });
     }
 
-    function editNormalSubPath() {
-        if (!validateForm('normal_sub_config_form')) return;
-        const subpath = $("#normal_subpath_input").val();
-
-        confirmAction("изменить путь подписки на '" + subpath + "'", function () {
-            sendRequest(
-                API_URLS.normalSubEditSubpath,
-                "PUT",
-                { subpath: subpath },
-                "Путь подписки успешно обновлен!",
-                "#normal_subpath_save_btn",
-                false,
-                fetchNormalSubPath
-            );
-        });
-    }
-
-    function setupDecoy() {
-        if (!validateForm('decoy_form')) return;
-        const domain = $("#decoy_domain").val();
-        const path = $("#decoy_path").val();
-        confirmAction("установить сайт-маскировку", function () {
-            sendRequest(
-                API_URLS.setupDecoy,
-                "POST",
-                { domain: domain, decoy_path: path },
-                "Запрос на установку маскировки отправлен!",
-                "#decoy_setup",
-                false,
-                function() { setTimeout(fetchDecoyStatus, 1000); }
-            );
-        });
-    }
-
-    function stopDecoy() {
-        confirmAction("остановить сайт-маскировку", function () {
-            sendRequest(
-                API_URLS.stopDecoy,
-                "POST",
-                null,
-                "Запрос на остановку маскировки отправлен!",
-                "#decoy_stop",
-                false,
-                function() { setTimeout(fetchDecoyStatus, 1000); }
-            );
-        });
-    }
-
-    function fetchDecoyStatus() {
-        $.ajax({
-            url: API_URLS.getDecoyStatus,
-            type: "GET",
-            success: function (data) {
-                updateDecoyStatusUI(data);
-            },
-            error: function (xhr, status, error) {
-                $("#decoy_status_message").html('<div class="alert alert-danger">Не удалось получить статус маскировки.</div>');
-                console.error("Failed to fetch decoy status:", error, xhr.responseText);
-            }
-        });
-    }
-
-    function updateDecoyStatusUI(data) {
-        const $form = $("#decoy_form");
-        const $formGroups = $form.find(".form-group");
-        const $setupBtn = $("#decoy_setup");
-        const $stopBtn = $("#decoy_stop");
-        const $alertInfo = $form.find(".alert-info");
-
-        if (data.active) {
-            $formGroups.hide();
-            $setupBtn.hide();
-            $stopBtn.show();
-            if ($alertInfo.length === 0) {
-                $form.prepend(`<div class='alert alert-info'>Маскировка работает. Вы можете остановить её при необходимости.</div>`);
-            } else {
-                $alertInfo.text('Маскировка работает. Вы можете остановить её при необходимости.');
-            }
-            $("#decoy_status_message").html(`
-                <strong>Статус:</strong> <span class="text-success">Активен</span><br>
-                <strong>Путь:</strong> ${data.path || 'Н/Д'}
-            `);
-        } else {
-            $formGroups.show();
-            $setupBtn.show();
-            $stopBtn.hide();
-            $alertInfo.remove();
-            $("#decoy_status_message").html('<strong>Статус:</strong> <span class="text-danger">Не активен</span>');
-        }
-    }
-
     function startTelegram() {
         if (!validateForm('telegram_form')) return;
-        const apiToken = $("#telegram_api_token").val();
-        const adminId = $("#telegram_admin_id").val();
-        let backupInterval = $("#telegram_backup_interval").val();
 
-        const data = {
-            token: apiToken,
-            admin_id: adminId
-        };
-        if (backupInterval) {
-            data.backup_interval = parseInt(backupInterval);
-        }
+        const token = $("#telegram_api_token").val().trim();
+        const adminId = $("#telegram_admin_id").val().trim();
+        const interval = $("#telegram_backup_interval").val().trim();
+
+        const data = { token: token, admin_id: adminId };
+        if (interval !== "") data.backup_interval = parseInt(interval);
 
         confirmAction("запустить Telegram бота", function () {
             sendRequest(
@@ -739,7 +655,7 @@ $(document).ready(function () {
         confirmAction("остановить Telegram бота", function () {
             sendRequest(
                 API_URLS.telegramStop,
-                "DELETE",
+                "POST",
                 null,
                 "Telegram бот успешно остановлен!",
                 "#telegram_stop"
@@ -748,24 +664,22 @@ $(document).ready(function () {
     }
 
     function saveTelegramInterval() {
-        if (!validateForm('telegram_form')) return;
-        let backupInterval = $("#telegram_backup_interval").val();
-
-        if (!backupInterval) {
-             Swal.fire("Ошибка!", "Интервал бэкапа не может быть пустым.", "error");
+        const interval = $("#telegram_backup_interval").val().trim();
+        if (interval !== "" && !isValidPositiveNumber(interval)) {
+            $("#telegram_backup_interval").addClass('is-invalid');
             return;
         }
+        $("#telegram_backup_interval").removeClass('is-invalid');
 
-        const data = {
-            backup_interval: parseInt(backupInterval)
-        };
+        const data = {};
+        if (interval !== "") data.backup_interval = parseInt(interval);
 
-        confirmAction(`изменить интервал бэкапа на ${backupInterval} ч.`, function () {
+        confirmAction("сохранить интервал бэкапа Telegram бота", function () {
             sendRequest(
                 API_URLS.telegramSetInterval,
                 "POST",
                 data,
-                "Интервал бэкапа успешно обновлен!",
+                "Интервал бэкапа успешно сохранён!",
                 "#telegram_save_interval",
                 false,
                 fetchTelegramBackupInterval
@@ -773,16 +687,17 @@ $(document).ready(function () {
         });
     }
 
-
     function startNormal() {
         if (!validateForm('normal_sub_service_form')) return;
-        const domain = $("#normal_domain").val();
-        const port = $("#normal_port").val();
-        confirmAction("запустить службу подписки", function () {
+
+        const domain = $("#normal_domain").val().trim();
+        const port = $("#normal_port").val().trim();
+
+        confirmAction("запустить службу подписок", function () {
             sendRequest(
                 API_URLS.normalSubStart,
                 "POST",
-                { domain: domain, port: port },
+                { domain: domain, port: parseInt(port) },
                 "Служба подписки успешно запущена!",
                 "#normal_start"
             );
@@ -790,10 +705,10 @@ $(document).ready(function () {
     }
 
     function stopNormal() {
-        confirmAction("остановить службу подписки", function () {
+        confirmAction("остановить службу подписок", function () {
             sendRequest(
                 API_URLS.normalSubStop,
-                "DELETE",
+                "POST",
                 null,
                 "Служба подписки успешно остановлена!",
                 "#normal_stop"
@@ -801,16 +716,34 @@ $(document).ready(function () {
         });
     }
 
+    function editNormalSubPath() {
+        if (!validateForm('normal_sub_config_form')) return;
+
+        const newSubpath = $("#normal_subpath_input").val().trim();
+
+        confirmAction(`изменить подпуть подписки на '${newSubpath}'`, function () {
+            sendRequest(
+                API_URLS.normalSubEditSubpath,
+                "POST",
+                { subpath: newSubpath },
+                "Путь подписки успешно обновлён!",
+                "#normal_subpath_save_btn"
+            );
+        });
+    }
+
     function saveIP() {
         if (!validateForm('change_ip_form')) return;
-        const ipv4 = $("#ipv4").val().trim() || null;
-        const ipv6 = $("#ipv6").val().trim() || null;
-        confirmAction("сохранить настройки IP", function () {
+
+        const ipv4 = $("#ipv4").val().trim();
+        const ipv6 = $("#ipv6").val().trim();
+
+        confirmAction("сохранить IP/домен", function () {
             sendRequest(
                 API_URLS.editIp,
                 "POST",
                 { ipv4: ipv4, ipv6: ipv6 },
-                "Настройки IP успешно сохранены!",
+                "IP/домен успешно сохранены!",
                 "#ip_change"
             );
         });
@@ -818,35 +751,32 @@ $(document).ready(function () {
 
     function downloadBackup() {
         window.location.href = API_URLS.backup;
-         Swal.fire("Начало загрузки", "Загрузка бэкапа начнется автоматически.", "info");
     }
 
     function uploadBackup() {
-        var fileInput = document.getElementById('backup_file');
-        var file = fileInput.files[0];
-
-        if (!file) {
-            Swal.fire("Ошибка!", "Пожалуйста, выберите файл для загрузки.", "error");
+        const fileInput = document.getElementById("backup_file");
+        if (!fileInput.files.length) {
+            Swal.fire("Ошибка!", "Пожалуйста, выберите файл бэкапа.", "error");
             return;
         }
-        if (!file.name.toLowerCase().endsWith('.zip')) {
-           Swal.fire("Ошибка!", "Разрешены только файлы .zip для восстановления.", "error");
-           return;
-        }
 
-        confirmAction(`восстановить систему из файла (${file.name})`, function() {
-            var formData = new FormData();
-            formData.append('file', file);
+        const file = fileInput.files[0];
+        const formData = new FormData();
+        formData.append("file", file);
 
-            var progressBar = document.getElementById('backup_progress_bar');
-            var progressContainer = progressBar.parentElement;
-            var statusDiv = document.getElementById('backup_status');
+        Swal.fire({
+            title: "Подтвердите",
+            text: "Вы уверены, что хотите восстановить из этого бэкапа? Текущие данные будут заменены.",
+            icon: "warning",
+            showCancelButton: true,
+            confirmButtonText: "Да, восстановить",
+            cancelButtonText: "Отмена"
+        }).then((result) => {
+            if (!result.isConfirmed) return;
 
-            progressContainer.style.display = 'block';
-            progressBar.style.width = '0%';
-            progressBar.setAttribute('aria-valuenow', 0);
-            statusDiv.innerText = 'Загрузка...';
-            statusDiv.className = 'mt-2';
+            $("#upload_backup").prop('disabled', true);
+            $("#upload_backup .spinner-border").show();
+            $(".progress").show();
 
             $.ajax({
                 url: API_URLS.restore,
@@ -854,49 +784,93 @@ $(document).ready(function () {
                 data: formData,
                 processData: false,
                 contentType: false,
-                xhr: function() {
-                    var xhr = new window.XMLHttpRequest();
-                    xhr.upload.addEventListener("progress", function(evt) {
+                xhr: function () {
+                    const xhr = new window.XMLHttpRequest();
+                    xhr.upload.addEventListener("progress", function (evt) {
                         if (evt.lengthComputable) {
-                            var percentComplete = Math.round((evt.loaded / evt.total) * 100);
-                            progressBar.style.width = percentComplete + '%';
-                            progressBar.setAttribute('aria-valuenow', percentComplete);
-                            statusDiv.innerText = `Загрузка... ${percentComplete}%`;
+                            const percentComplete = Math.round((evt.loaded / evt.total) * 100);
+                            $("#backup_progress_bar")
+                                .css("width", percentComplete + "%")
+                                .attr("aria-valuenow", percentComplete)
+                                .text(percentComplete + "%");
                         }
                     }, false);
                     return xhr;
                 },
-                success: function(response) {
-                    progressBar.style.width = '100%';
-                    progressBar.classList.add('bg-success');
-                    statusDiv.innerText = 'Бэкап успешно восстановлен! Перезагрузка страницы...';
-                    statusDiv.className = 'mt-2 text-success';
-                    Swal.fire("Успешно!", "Бэкап успешно восстановлен!", "success").then(() => {
-                            location.reload();
+                success: function (response) {
+                    Swal.fire("Успешно!", "Бэкап успешно восстановлен. Страница будет перезагружена.", "success").then(() => {
+                        location.reload();
                     });
-                    console.log("Restore Success:", response);
                 },
-                error: function(xhr, status, error) {
-                    progressBar.classList.add('bg-danger');
-                    let detail = (xhr.responseJSON && xhr.responseJSON.detail) ? xhr.responseJSON.detail : 'Проверьте консоль для деталей.';
-                    
-                    // Перевод ошибки восстановления
-                    detail = translateError(detail);
-                    
-                    statusDiv.innerText = `Ошибка восстановления: ${detail}`;
-                    statusDiv.className = 'mt-2 text-danger';
-                    Swal.fire("Ошибка!", `Не удалось восстановить бэкап. ${detail}`, "error");
-                    console.error("Restore Error:", status, error, xhr.responseText);
+                error: function (xhr, status, error) {
+                    let errorMessage = "Ошибка восстановления бэкапа.";
+                    if (xhr.responseJSON && xhr.responseJSON.detail) {
+                        errorMessage = translateError(xhr.responseJSON.detail);
+                    }
+                    Swal.fire("Ошибка!", errorMessage, "error");
                 },
-                complete: function() {
-                   fileInput.value = '';
+                complete: function () {
+                    $("#upload_backup").prop('disabled', false);
+                    $("#upload_backup .spinner-border").hide();
+                    $(".progress").hide();
+                    $("#backup_progress_bar").css("width", "0%").text("0%");
+                    fileInput.value = "";
                 }
             });
         });
     }
 
+    function fetchDecoyStatus() {
+        $.ajax({
+            url: API_URLS.getDecoyStatus,
+            type: "GET",
+            success: function (data) {
+                const messageEl = $("#decoy_status_message");
+                if (data.active) {
+                    messageEl.html(`<strong>Активно</strong><br>Путь: ${escapeHtml(data.path || 'N/A')}`);
+                    $("#decoy_stop").show();
+                } else {
+                    messageEl.html(`<strong>Не активно</strong>`);
+                    $("#decoy_stop").hide();
+                }
+            },
+            error: function () {
+                $("#decoy_status_message").text("Не удалось получить статус.");
+            }
+        });
+    }
+
+    function setupDecoy() {
+        if (!validateForm('decoy_form')) return;
+
+        const domain = $("#decoy_domain").val().trim();
+        const path = $("#decoy_path").val().trim();
+
+        confirmAction("настроить сайт-маскировку", function () {
+            sendRequest(
+                API_URLS.setupDecoy,
+                "POST",
+                { domain: domain, path: path },
+                "Сайт-маскировка успешно настроен!",
+                "#decoy_setup"
+            );
+        });
+    }
+
+    function stopDecoy() {
+        confirmAction("остановить сайт-маскировку", function () {
+            sendRequest(
+                API_URLS.stopDecoy,
+                "POST",
+                null,
+                "Сайт-маскировка успешно остановлен!",
+                "#decoy_stop"
+            );
+        });
+    }
+
     function startIPLimit() {
-         confirmAction("запустить службу IP Limit", function () {
+        confirmAction("запустить службу IP Limit", function () {
             sendRequest(
                 API_URLS.startIpLimit,
                 "POST",
@@ -908,7 +882,7 @@ $(document).ready(function () {
     }
 
     function stopIPLimit() {
-         confirmAction("остановить службу IP Limit", function () {
+        confirmAction("остановить службу IP Limit", function () {
             sendRequest(
                 API_URLS.stopIpLimit,
                 "POST",
@@ -921,22 +895,22 @@ $(document).ready(function () {
 
     function cleanIPLimit() {
         confirmAction("очистить базу IP Limit и разблокировать все IP", function () {
-           sendRequest(
-               API_URLS.cleanIpLimit,
-               "POST",
-               null,
-               "База IP Limit успешно очищена!",
-               "#ip_limit_clean",
-               true
-           );
-       });
-   }
+            sendRequest(
+                API_URLS.cleanIpLimit,
+                "POST",
+                null,
+                "База IP Limit успешно очищена!",
+                "#ip_limit_clean",
+                true
+            );
+        });
+    }
 
     function configIPLimit() {
         if (!validateForm('ip_limit_config_form')) return;
         const blockDuration = $("#block_duration").val();
         const maxIps = $("#max_ips").val();
-         confirmAction("сохранить конфигурацию IP Limit", function () {
+        confirmAction("сохранить конфигурацию IP Limit", function () {
             sendRequest(
                 API_URLS.configIpLimit,
                 "POST",
@@ -964,7 +938,7 @@ $(document).ready(function () {
             },
             error: function (xhr, status, error) {
                 let errorMsg = "Не удалось получить конфигурацию WARP.";
-                 if (xhr.responseJSON && xhr.responseJSON.detail) {
+                if (xhr.responseJSON && xhr.responseJSON.detail) {
                     errorMsg = translateError(xhr.responseJSON.detail);
                 }
                 console.error("Error fetching WARP config:", errorMsg, xhr.responseText);
@@ -973,20 +947,20 @@ $(document).ready(function () {
                     $("#warp_initial_controls").show();
                     $("#warp_active_controls").hide();
                     if ($("#warp_config_form").length > 0) {
-                       $("#warp_config_form")[0].reset();
+                        $("#warp_config_form")[0].reset();
                     }
                     Swal.fire("Инфо", "Служба WARP возможно не полностью настроена. Попробуйте переустановить, если проблема сохранится.", "info");
                 } else {
-                     if ($("#warp_config_form").length > 0) {
-                       $("#warp_config_form")[0].reset();
+                    if ($("#warp_config_form").length > 0) {
+                        $("#warp_config_form")[0].reset();
                     }
-                     Swal.fire("Внимание", "Не удалось загрузить текущие настройки WARP. Пожалуйста, проверьте вручную или пересохраните.", "warning");
+                    Swal.fire("Внимание", "Не удалось загрузить текущие настройки WARP. Пожалуйста, проверьте вручную или пересохраните.", "warning");
                 }
             }
         });
     }
 
-    $("#warp_start_btn").on("click", function() {
+    $("#warp_start_btn").on("click", function () {
         confirmAction("установить и запустить WARP", function () {
             sendRequest(
                 API_URLS.installWarp,
@@ -999,7 +973,7 @@ $(document).ready(function () {
         });
     });
 
-    $("#warp_stop_btn").on("click", function() {
+    $("#warp_stop_btn").on("click", function () {
         confirmAction("остановить и удалить WARP", function () {
             sendRequest(
                 API_URLS.uninstallWarp,
@@ -1012,7 +986,7 @@ $(document).ready(function () {
         });
     });
 
-    $("#warp_save_config_btn").on("click", function() {
+    $("#warp_save_config_btn").on("click", function () {
         const configData = {
             all: $("#warp_all_traffic").is(":checked"),
             popular_sites: $("#warp_popular_sites").is(":checked"),
@@ -1048,12 +1022,12 @@ $(document).ready(function () {
     $("#decoy_setup").on("click", setupDecoy);
     $("#decoy_stop").on("click", stopDecoy);
     $("#add_node_btn").on("click", addNode);
-    $("#nodes_table").on("click", ".delete-node-btn", function() {
+    $("#nodes_table").on("click", ".delete-node-btn", function () {
         const nodeName = $(this).data("name");
         deleteNode(nodeName);
     });
     $("#add_extra_config_btn").on("click", addExtraConfig);
-    $("#extra_configs_table").on("click", ".delete-extra-config-btn", function() {
+    $("#extra_configs_table").on("click", ".delete-extra-config-btn", function () {
         const configName = $(this).data("name");
         deleteExtraConfig(configName);
     });
@@ -1064,42 +1038,42 @@ $(document).ready(function () {
         } else if ($(this).val().trim() !== "") {
             $(this).addClass('is-invalid');
         } else {
-             $(this).removeClass('is-invalid');
+            $(this).removeClass('is-invalid');
         }
     });
 
     $('#normal_port').on('input', function () {
-         if (isValidPort($(this).val())) {
+        if (isValidPort($(this).val())) {
             $(this).removeClass('is-invalid');
         } else if ($(this).val().trim() !== "") {
             $(this).addClass('is-invalid');
         } else {
-             $(this).removeClass('is-invalid');
+            $(this).removeClass('is-invalid');
         }
     });
 
     $('#normal_subpath_input').on('input', function () {
-         if (isValidSubPath($(this).val())) {
+        if (isValidSubPath($(this).val())) {
             $(this).removeClass('is-invalid');
         } else if ($(this).val().trim() !== "") {
             $(this).addClass('is-invalid');
         } else {
-             $(this).removeClass('is-invalid');
+            $(this).removeClass('is-invalid');
         }
     });
 
     $('#ipv4, #ipv6, #node_ip').on('input', function () {
         const isLocalIpField = $(this).attr('id') === 'ipv4' || $(this).attr('id') === 'ipv6';
         if (isLocalIpField && $(this).val().trim() === '') {
-             $(this).removeClass('is-invalid');
+            $(this).removeClass('is-invalid');
         } else if (isValidIPorDomain($(this).val())) {
-             $(this).removeClass('is-invalid');
+            $(this).removeClass('is-invalid');
         } else {
             $(this).addClass('is-invalid');
         }
     });
 
-    $('#node_name, #extra_config_name').on('input', function() {
+    $('#node_name, #extra_config_name').on('input', function () {
         if ($(this).val().trim() !== "") {
             $(this).removeClass('is-invalid');
         } else {
@@ -1119,10 +1093,10 @@ $(document).ready(function () {
         if ($(this).val().trim() !== "") {
             $(this).removeClass('is-invalid');
         } else {
-             $(this).addClass('is-invalid');
+            $(this).addClass('is-invalid');
         }
     });
-     $('#block_duration, #max_ips, #telegram_backup_interval').on('input', function () {
+    $('#block_duration, #max_ips, #telegram_backup_interval').on('input', function () {
         if ($(this).attr('id') === 'telegram_backup_interval' && $(this).val().trim() === '') {
             $(this).removeClass('is-invalid');
             return;
@@ -1132,7 +1106,7 @@ $(document).ready(function () {
         } else if ($(this).val().trim() !== "") {
             $(this).addClass('is-invalid');
         } else {
-             $(this).addClass('is-invalid');
+            $(this).addClass('is-invalid');
         }
     });
 
@@ -1142,7 +1116,7 @@ $(document).ready(function () {
         } else if ($(this).val().trim() !== "") {
             $(this).addClass('is-invalid');
         } else {
-             $(this).addClass('is-invalid');
+            $(this).removeClass('is-invalid');
         }
     });
 
@@ -1154,7 +1128,7 @@ $(document).ready(function () {
             $(this).addClass('is-invalid');
         }
     });
-    
+
     $('#node_sni').on('input', function () {
         const val = $(this).val().trim();
         if (val === '' || isValidDomain(val)) {
@@ -1163,7 +1137,7 @@ $(document).ready(function () {
             $(this).addClass('is-invalid');
         }
     });
-    
+
     $('#node_pin').on('input', function () {
         const val = $(this).val().trim();
         if (val === '' || isValidSha256Pin(val)) {

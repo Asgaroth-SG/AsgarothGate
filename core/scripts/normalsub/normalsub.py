@@ -180,6 +180,11 @@ class Utils:
         except ValueError:
             return False
 
+    @staticmethod
+    def normalize_plan(value: Optional[str]) -> str:
+        v = str(value or "standard").strip().lower()
+        return "premium" if v == "premium" else "standard"
+
 
 class HysteriaCLI:
     def __init__(self, cli_path: str):
@@ -361,22 +366,6 @@ class SubscriptionManager:
         self.hysteria_cli = hysteria_cli
         self.config = config
 
-    def _get_extra_configs(self) -> List[str]:
-        if not os.path.exists(self.config.extra_config_path):
-            return []
-        try:
-            with open(self.config.extra_config_path, 'r') as f:
-                content = f.read()
-                if not content:
-                    return []
-                configs = json.loads(content)
-                if isinstance(configs, list):
-                    return [str(c['uri']) for c in configs if 'uri' in c]
-                return []
-        except (json.JSONDecodeError, IOError, KeyError) as e:
-            print(f"Warning: Could not read or parse extra configs from {self.config.extra_config_path}: {e}")
-            return []
-
     def _load_nodes_types(self) -> Dict[str, str]:
         """
         Считывает nodes.json и строит карту:
@@ -397,20 +386,71 @@ class SubscriptionManager:
                     name = str(node.get("name", "")).strip()
                     if not name:
                         continue
-                    node_type = str(node.get("type", "standard")).strip().lower()
-                    if node_type not in ("standard", "premium"):
-                        node_type = "standard"
+                    node_type = Utils.normalize_plan(node.get("type", "standard"))
                     nodes_map[name] = node_type
         except Exception as e:
             print(f"Warning: failed to load nodes from {self.config.nodes_json_path}: {e}")
         return nodes_map
+
+    def _get_extra_configs_raw(self) -> List[Dict[str, Any]]:
+        """
+        Читает extra.json как список объектов.
+        Допускает пустой файл/отсутствие.
+        """
+        if not os.path.exists(self.config.extra_config_path):
+            return []
+        try:
+            with open(self.config.extra_config_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                if not content:
+                    return []
+                data = json.loads(content)
+                if isinstance(data, list):
+                    return [x for x in data if isinstance(x, dict)]
+                return []
+        except (json.JSONDecodeError, IOError) as e:
+            print(f"Warning: Could not read or parse extra configs from {self.config.extra_config_path}: {e}")
+            return []
+
+    def _filter_extra_configs_for_user(
+        self,
+        user_plan: str
+    ) -> List[Dict[str, Any]]:
+        """
+        Возвращает список extra-config элементов, доступных пользователю.
+        - Standard: только standard
+        - Premium: standard + premium
+        Поддерживает поля:
+          - type: "standard"/"premium"
+          - plan: "standard"/"premium"
+        Если поле отсутствует — считаем standard (обратная совместимость).
+        """
+        user_plan = Utils.normalize_plan(user_plan)
+        is_premium_user = (user_plan == "premium")
+
+        allowed: List[Dict[str, Any]] = []
+        for item in self._get_extra_configs_raw():
+            uri = str(item.get("uri", "")).strip()
+            if not uri:
+                continue
+
+            item_plan = Utils.normalize_plan(item.get("type") or item.get("plan") or "standard")
+            if (not is_premium_user) and item_plan == "premium":
+                continue
+
+            allowed.append(item)
+
+        return allowed
+
+    def _get_extra_uris_for_user(self, user_plan: str) -> List[str]:
+        return [str(x.get("uri")).strip() for x in self._filter_extra_configs_for_user(user_plan)]
 
     def get_normal_subscription(self, username: str, user_agent: str) -> str:
         user_info = self.hysteria_cli.get_user_info(username)
         if user_info is None:
             return "User not found"
 
-        user_plan = getattr(user_info, "plan", "standard").lower()
+        user_plan = Utils.normalize_plan(getattr(user_info, "plan", "standard"))
         is_premium_user = (user_plan == "premium")
 
         nodes_types = self._load_nodes_types()
@@ -450,7 +490,9 @@ class SubscriptionManager:
 
             processed_uris.append(uri)
 
-        extra_uris = self._get_extra_configs()
+        # ✅ extra.json теперь тоже фильтруется по тарифу пользователя
+        extra_uris = self._get_extra_uris_for_user(user_plan)
+
         all_processed_uris = processed_uris + extra_uris
 
         if not all_processed_uris:
@@ -686,8 +728,8 @@ class HysteriaServer:
         local_uris: List[NodeURI] = []
         node_uris: List[NodeURI] = []
 
-        # фильтрация premium-ноды и в HTML-представлении
-        user_plan = getattr(user_info, "plan", "standard").lower()
+        # фильтрация premium-ноды и extra-config в HTML-представлении
+        user_plan = Utils.normalize_plan(getattr(user_info, "plan", "standard"))
         is_premium_user = (user_plan == "premium")
 
         nodes_types: Dict[str, str] = {}
@@ -700,10 +742,7 @@ class HysteriaServer:
                         name = str(node.get("name", "")).strip()
                         if not name:
                             continue
-                        node_type = str(node.get("type", "standard")).strip().lower()
-                        if node_type not in ("standard", "premium"):
-                            node_type = "standard"
-                        nodes_types[name] = node_type
+                        nodes_types[name] = Utils.normalize_plan(node.get("type", "standard"))
         except Exception as e:
             print(f"Warning: failed to load nodes from {self.config.nodes_json_path} for HTML view: {e}")
 
@@ -719,7 +758,6 @@ class HysteriaServer:
                 node_name = label[len("Node:"):].strip()
                 node_type = nodes_types.get(node_name, "standard")
                 if (not is_premium_user) and node_type == "premium":
-                    # обычный пользователь не видит premium-ноды
                     continue
 
             node_uri = NodeURI(
@@ -732,6 +770,27 @@ class HysteriaServer:
                 node_uris.append(node_uri)
             else:
                 local_uris.append(node_uri)
+
+        # ✅ Плюс выводим extra-config в HTML (с фильтрацией по тарифу)
+        extra_items = self.subscription_manager._filter_extra_configs_for_user(user_plan)
+        for x in extra_items:
+            uri = str(x.get("uri", "")).strip()
+            if not uri:
+                continue
+            name = str(x.get("name", "Extra")).strip() or "Extra"
+            item_plan = Utils.normalize_plan(x.get("type") or x.get("plan") or "standard")
+
+            # Тут можно помечать Premium визуально (не обязательно)
+            if item_plan == "premium":
+                label = f"Extra (Premium): {name}"
+            else:
+                label = f"Extra: {name}"
+
+            local_uris.append(NodeURI(
+                label=label,
+                uri=uri,
+                qrcode=Utils.generate_qrcode_base64(uri)
+            ))
 
         return TemplateContext(
             username=username,

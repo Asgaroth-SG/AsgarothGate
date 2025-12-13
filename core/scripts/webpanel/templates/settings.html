@@ -307,12 +307,14 @@
                                         <h3 class="card-title">Внешние прокси-конфигурации для подписок</h3>
                                     </div>
                                     <div class="card-body">
-                                        <p>Добавьте внешние прокси-ссылки (Vmess, Vless, SS, Trojan), чтобы включить их в подписки всех пользователей.</p>
+                                        <p>Добавьте внешние прокси-ссылки (Vmess, Vless, SS, Trojan), чтобы включить их в подписки пользователей. Premium-конфиги будут доступны только Premium-пользователям.</p>
+
                                         <div class="table-responsive">
                                             <table class="table table-bordered table-striped" id="extra_configs_table">
                                                 <thead>
                                                     <tr>
                                                         <th>Название</th>
+                                                        <th>Тип</th>
                                                         <th>URI</th>
                                                         <th>Действие</th>
                                                     </tr>
@@ -326,17 +328,27 @@
                             
                                         <hr>
                                         <h5>Добавить новую конфигурацию</h5>
-                                        <form id="add_extra_config_form" class="form-inline">
+                                        <form id="add_extra_config_form" class="form-inline flex-wrap">
                                             <div class="form-group mb-2 mr-sm-2">
                                                 <label for="extra_config_name" class="sr-only">Название</label>
                                                 <input type="text" class="form-control" id="extra_config_name" placeholder="например, My-Vmess-Link">
                                                 <div class="invalid-feedback">Пожалуйста, введите уникальное название.</div>
                                             </div>
-                                            <div class="form-group mb-2 mr-sm-2 flex-grow-1">
+
+                                            <div class="form-group mb-2 mr-sm-2">
+                                                <label for="extra_config_plan" class="sr-only">Тип</label>
+                                                <select class="form-control" id="extra_config_plan">
+                                                    <option value="standard" selected>Standard</option>
+                                                    <option value="premium">Premium</option>
+                                                </select>
+                                            </div>
+
+                                            <div class="form-group mb-2 mr-sm-2 flex-grow-1" style="min-width: 260px;">
                                                 <label for="extra_config_uri" class="sr-only">URI</label>
                                                 <input type="text" class="form-control w-100" id="extra_config_uri" placeholder="vmess://...">
                                                 <div class="invalid-feedback">URI должен начинаться с vmess://, vless://, ss:// или trojan://.</div>
                                             </div>
+
                                             <button type="button" id="add_extra_config_btn" class="btn btn-success mb-2">
                                                 <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
                                                 Добавить конфиг
@@ -345,7 +357,6 @@
                                     </div>
                                 </div>
                             </div>
-
 
                             <div class='tab-pane fade' id='backup' role='tabpanel' aria-labelledby='backup-tab'>
                                 <div class="row">

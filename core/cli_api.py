@@ -104,7 +104,7 @@ def run_cmd(command: list[str]) -> str:
             error_output = process.stderr.strip() if process.stderr.strip() else process.stdout.strip()
             if not error_output:
                 error_output = f"Command exited with status {process.returncode} without specific error message."
-            
+
             detailed_error_message = f"Command '{' '.join(command)}' failed with exit code {process.returncode}: {error_output}"
             raise CommandExecutionError(detailed_error_message)
 
@@ -112,9 +112,9 @@ def run_cmd(command: list[str]) -> str:
 
     except FileNotFoundError as e:
         raise ScriptNotFoundError(f"Script or command not found: {command[0]}. Original error: {e}")
-    except subprocess.TimeoutExpired as e: 
+    except subprocess.TimeoutExpired as e:
         raise CommandExecutionError(f"Command '{' '.join(command)}' timed out. Original error: {e}")
-    except OSError as e: 
+    except OSError as e:
         raise CommandExecutionError(f"OS error while trying to run command '{' '.join(command)}': {e}")
 
 
@@ -223,10 +223,12 @@ def disable_hysteria2_obfs():
     '''Removes 'obfs' from Hysteria2 configuration.'''
     run_cmd(['python3', Command.MANAGE_OBFS.value, '--remove'])
 
+
 def check_hysteria2_obfs():
     '''Removes 'obfs' from Hysteria2 configuration.'''
     result = subprocess.run(["python3", Command.MANAGE_OBFS.value, "--check"], check=True, capture_output=True, text=True)
     return result.stdout.strip()
+
 
 def enable_hysteria2_masquerade(domain: str):
     '''Enables masquerade for Hysteria2.'''
@@ -293,20 +295,20 @@ def add_user(
 
     if password:
         command.extend(['--password', password])
-    
+
     if unlimited:
         command.append('--unlimited')
-    
+
     if note:
         command.extend(['--note', note])
-    
+
     if creation_date:
         command.extend(['--creation-date', creation_date])
 
     # тариф пользователя (standard/premium)
     if plan:
         command.extend(['--plan', plan])
-        
+
     run_cmd(command)
 
 
@@ -324,7 +326,7 @@ def bulk_user_add(
     Executes the bulk user creation script with specified parameters.
     """
     command = [
-        'python3', 
+        'python3',
         Command.BULK_USER.value,
         '--traffic-gb', str(traffic_gb),
         '--expiration-days', str(expiration_days),
@@ -340,7 +342,7 @@ def bulk_user_add(
     # общий тариф для всех создаваемых пользователей
     if plan:
         command.extend(['--plan', plan])
-        
+
     run_cmd(command)
 
 
@@ -387,20 +389,20 @@ def edit_user(
         if new_expiration_days < 0:
             raise InvalidInputError('Error: expiration days must be a non-negative number.')
         command_args.extend(['--expiration-days', str(new_expiration_days)])
-        
+
     if renew_creation_date:
         creation_date = datetime.now().strftime('%Y-%m-%d')
         command_args.extend(['--creation-date', creation_date])
-        
+
     if blocked is not None:
         command_args.extend(['--blocked', 'true' if blocked else 'false'])
-        
+
     if unlimited_ip is not None:
         command_args.extend(['--unlimited', 'true' if unlimited_ip else 'false'])
 
     if note is not None:
         command_args.extend(['--note', note])
-    
+
     if max_ips is not None:
         command_args.extend(['--max-ips', str(max_ips)])
 
@@ -426,6 +428,7 @@ def remove_users(usernames: list[str]):
         return
     run_cmd(['python3', Command.REMOVE_USER.value, *usernames])
 
+
 def kick_users_by_name(usernames: list[str]):
     '''Kicks one or more users by username.'''
     if not usernames:
@@ -437,7 +440,8 @@ def kick_users_by_name(usernames: list[str]):
         subprocess.run(['python3', script_path, *usernames], check=True)
     except subprocess.CalledProcessError as e:
         raise CommandExecutionError(f"Failed to execute kick user script: {e}")
-        
+
+
 # TODO: it's better to return json
 def show_user_uri(username: str, qrcode: bool, ipv: int, all: bool, singbox: bool, normalsub: bool) -> str | None:
     '''
@@ -456,6 +460,7 @@ def show_user_uri(username: str, qrcode: bool, ipv: int, all: bool, singbox: boo
         command_args.append('-n')
     return run_cmd(command_args)
 
+
 def show_user_uri_json(usernames: list[str]) -> list[dict[str, Any]] | None:
     '''
     Displays the URI for a list of users in JSON format.
@@ -471,10 +476,12 @@ def show_user_uri_json(usernames: list[str]) -> list[dict[str, Any]] | None:
     except FileNotFoundError:
         raise ScriptNotFoundError(f'Script not found: {script_path}')
     except json.JSONDecodeError:
-        raise CommandExecutionError(f"Failed to decode JSON output from script: {script_path}\nOutput: {process.stdout if 'process' in locals() else 'No output'}") # Add process check
+        raise CommandExecutionError(
+            f"Failed to decode JSON output from script: {script_path}\nOutput: {process.stdout if 'process' in locals() else 'No output'}"
+        )
     except Exception as e:
         raise HysteriaError(f'An unexpected error occurred: {e}')
-        
+
 # endregion
 
 # region Server
@@ -486,7 +493,7 @@ def traffic_status(no_gui=False, display_output=True):
         traffic.kick_expired_users()
     else:
         data = traffic.traffic_status(no_gui=True if not display_output else no_gui)
-    
+
     return data
 
 
@@ -569,6 +576,7 @@ def add_node(
 
     return run_cmd(command)
 
+
 def delete_node(name: str):
     """
     Deletes an external node by name.
@@ -605,9 +613,25 @@ def update_geo(country: str):
         raise HysteriaError(f'An unexpected error occurred: {e}')
 
 
-def add_extra_config(name: str, uri: str) -> str:
-    """Adds an extra proxy configuration."""
-    return run_cmd(['python3', Command.EXTRA_CONFIG_SCRIPT.value, 'add', '--name', name, '--uri', uri])
+def add_extra_config(name: str, uri: str, plan: str = "standard") -> str:
+    """
+    Adds an extra proxy configuration.
+
+    plan: 'standard' | 'premium' (если не задано — стандарт)
+    """
+    plan_norm = (plan or "standard").strip().lower()
+    if plan_norm not in ("standard", "premium"):
+        raise InvalidInputError("plan must be either 'standard' or 'premium'")
+
+    cmd = [
+        'python3',
+        Command.EXTRA_CONFIG_SCRIPT.value,
+        'add',
+        '--name', name,
+        '--uri', uri,
+        '--plan', plan_norm,
+    ]
+    return run_cmd(cmd)
 
 
 def delete_extra_config(name: str) -> str:
@@ -645,9 +669,9 @@ def uninstall_warp():
     run_cmd(['python3', Command.UNINSTALL_WARP.value])
 
 
-def configure_warp(all_state: str | None = None, 
-                   popular_sites_state: str | None = None, 
-                   domestic_sites_state: str | None = None, 
+def configure_warp(all_state: str | None = None,
+                   popular_sites_state: str | None = None,
+                   domestic_sites_state: str | None = None,
                    block_adult_sites_state: str | None = None):
     '''
     Configures WARP with various options. States are 'on' or 'off'.
@@ -664,9 +688,9 @@ def configure_warp(all_state: str | None = None,
     if block_adult_sites_state:
         cmd_args.extend(['--set-block-adult', block_adult_sites_state])
 
-    if len(cmd_args) == 2: 
+    if len(cmd_args) == 2:
         print("No WARP configuration options provided to cli_api.configure_warp.")
-        return 
+        return
 
     run_cmd(cmd_args)
 
@@ -680,11 +704,11 @@ def start_telegram_bot(token: str, adminid: str, backup_interval: Optional[int] 
     '''Starts the Telegram bot.'''
     if not token or not adminid:
         raise InvalidInputError('Error: Both --token and --adminid are required for the start action.')
-    
+
     command = ['python3', Command.INSTALL_TELEGRAMBOT.value, 'start', token, adminid]
     if backup_interval is not None:
         command.append(str(backup_interval))
-    
+
     run_cmd(command)
 
 
@@ -697,17 +721,17 @@ def get_telegram_bot_backup_interval() -> int | None:
     '''Retrievels the current BACKUP_INTERVAL_HOUR for the Telegram Bot service from its .env file.'''
     try:
         if not os.path.exists(TELEGRAM_ENV_FILE):
-            return None 
-        
+            return None
+
         env_vars = dotenv_values(TELEGRAM_ENV_FILE)
         interval_str = env_vars.get('BACKUP_INTERVAL_HOUR')
-        
+
         if interval_str:
             try:
                 return int(float(interval_str))
             except (ValueError, TypeError):
                 return None
-        
+
         return None
     except Exception as e:
         print(f"Error reading Telegram Bot .env file: {e}")
@@ -746,7 +770,7 @@ def edit_normalsub_subpath(new_subpath: str):
         raise InvalidInputError('Error: New subpath cannot be empty.')
     if not new_subpath.isalnum():
         raise InvalidInputError('Error: New subpath must contain only alphanumeric characters (a-z, A-Z, 0-9).')
-    
+
     run_cmd(['bash', Command.INSTALL_NORMALSUB.value, 'edit_subpath', new_subpath])
 
 
@@ -754,8 +778,8 @@ def get_normalsub_subpath() -> str | None:
     '''Retrieves the current SUBPATH for the NormalSub service from its .env file.'''
     try:
         if not os.path.exists(NORMALSUB_ENV_FILE):
-            return None 
-        
+            return None
+
         env_vars = dotenv_values(NORMALSUB_ENV_FILE)
         return env_vars.get('SUBPATH')
     except Exception as e:
@@ -828,21 +852,21 @@ def get_webpanel_env_config() -> dict[str, Any]:
     try:
         if not os.path.exists(WEBPANEL_ENV_FILE):
             return {}
-        
+
         env_vars = dotenv_values(WEBPANEL_ENV_FILE)
         config = {}
 
         config['DOMAIN'] = env_vars.get('DOMAIN')
         config['ROOT_PATH'] = env_vars.get('ROOT_PATH')
-        
+
         port_val = env_vars.get('PORT')
         if port_val and port_val.isdigit():
             config['PORT'] = int(port_val)
-        
+
         exp_val = env_vars.get('EXPIRATION_MINUTES')
         if exp_val and exp_val.isdigit():
             config['EXPIRATION_MINUTES'] = int(exp_val)
-            
+
         return config
     except Exception as e:
         print(f"Error reading WebPanel .env file: {e}")
@@ -859,7 +883,7 @@ def reset_webpanel_credentials(new_username: str | None = None, new_password: st
         cmd_args.extend(['-u', new_username])
     if new_password:
         cmd_args.extend(['-p', new_password])
-    
+
     run_cmd(cmd_args)
 
 
@@ -884,13 +908,13 @@ def change_webpanel_domain_port(domain: str | None = None, port: int | None = No
     '''Changes the domain and/or port for the WebPanel.'''
     if not domain and not port:
         raise InvalidInputError('Error: At least a new domain or new port must be provided.')
-    
+
     cmd_args = ['bash', Command.SHELL_WEBPANEL.value, 'changedomain']
     if domain:
         cmd_args.extend(['-d', domain])
     if port:
         cmd_args.extend(['-p', str(port)])
-    
+
     run_cmd(cmd_args)
 
 
@@ -951,14 +975,14 @@ def get_ip_limiter_config() -> dict[str, int | None]:
     try:
         if not os.path.exists(CONFIG_ENV_FILE):
             return {"block_duration": None, "max_ips": None}
-        
+
         env_vars = dotenv_values(CONFIG_ENV_FILE)
         block_duration_str = env_vars.get('BLOCK_DURATION')
         max_ips_str = env_vars.get('MAX_IPS')
-        
+
         block_duration = int(block_duration_str) if block_duration_str and block_duration_str.isdigit() else None
         max_ips = int(max_ips_str) if max_ips_str and max_ips_str.isdigit() else None
-            
+
         return {"block_duration": block_duration, "max_ips": max_ips}
     except Exception as e:
         print(f"Error reading IP Limiter config from .configs.env: {e}")
