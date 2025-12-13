@@ -542,11 +542,6 @@ class HysteriaServer:
         base_path = f'/{safe_subpath}'
         self.app.router.add_get(f'{base_path}/sub/normal/style.css', self.handle_style)
         self.app.router.add_get(f'{base_path}/sub/normal/script.js', self.handle_script)
-        self.app.router.add_static(
-            f'{base_path}/sub/normal/twemoji/',
-            os.path.join(self.config.template_dir, 'twemoji'),
-            show_index=False
-        )        
         self.app.router.add_get(f'{base_path}/sub/normal/{{password_token}}', self.handle)
         self.app.router.add_get(f'{base_path}/robots.txt', self.robots_handler)
         self.app.router.add_route('*', f'{base_path}/{{tail:.*}}', self.handle_404_subpath)
