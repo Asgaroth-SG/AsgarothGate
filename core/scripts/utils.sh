@@ -10,13 +10,21 @@ define_colors() {
 }
 
 get_system_info() {
-    OS=$(lsb_release -d | awk -F'\t' '{print $2}')
+    OS=$(lsb_release -d 2>/dev/null | awk -F'\t' '{print $2}')
     ARCH=$(uname -m)
-    IP_API_DATA=$(curl -s https://ipapi.co/json/ -4)
-    ISP=$(echo "$IP_API_DATA" | jq -r '.org')
-    IP=$(echo "$IP_API_DATA" | jq -r '.ip')
-    CPU=$(top -bn1 | grep "Cpu(s)" | awk '{print $2 + $4 "%"}')
-    RAM=$(free -m | awk 'NR==2{printf "%.2f%%", $3*100/$2 }')
+
+    IP_API_DATA=$(curl -fsS --max-time 4 -4 https://ipapi.co/json/ 2>/dev/null || true)
+
+    if echo "$IP_API_DATA" | jq -e . >/dev/null 2>&1; then
+        ISP=$(echo "$IP_API_DATA" | jq -r '.org // "Unknown"')
+        IP=$(echo "$IP_API_DATA" | jq -r '.ip // "Unknown"')
+    else
+        ISP="Unknown"
+        IP=$(curl -fsS --max-time 3 -4 ip.sb 2>/dev/null || echo "Unknown")
+    fi
+
+    CPU=$(top -bn1 2>/dev/null | grep "Cpu(s)" | awk '{print $2 + $4 "%"}')
+    RAM=$(free -m 2>/dev/null | awk 'NR==2{printf "%.2f%%", $3*100/$2 }')
 }
 
 version_greater_equal() {
