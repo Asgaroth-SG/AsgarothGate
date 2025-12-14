@@ -161,15 +161,25 @@ $(document).ready(function () {
                 }
             },
             success: function (response) {
-                Swal.fire("Успешно!", successMessage, "success").then(() => {
+                if (window.showToast) {
+                    showToast("success", "Успешно!", successMessage);
+                    // Keep previous behaviour: auto-reload by default
                     if (showReload) {
-                        location.reload();
-                    } else {
-                        if (postSuccessCallback) {
-                            postSuccessCallback(response);
-                        }
+                        setTimeout(() => location.reload(), 800);
+                    } else if (postSuccessCallback) {
+                        postSuccessCallback(response);
                     }
-                });
+                } else {
+                    Swal.fire("Успешно!", successMessage, "success").then(() => {
+                        if (showReload) {
+                            location.reload();
+                        } else {
+                            if (postSuccessCallback) {
+                                postSuccessCallback(response);
+                            }
+                        }
+                    });
+                }
             },
             error: function (xhr, status, error) {
                 let errorMessage = "Произошла непредвиденная ошибка.";
@@ -190,7 +200,7 @@ $(document).ready(function () {
                         errorMessage = userMessage;
                     }
                 }
-                Swal.fire("Ошибка!", translateError(errorMessage), "error");
+                if (window.showToast) { showToast("error", "Ошибка!", translateError(errorMessage), { timer: 5000 }); } else { Swal.fire("Ошибка!", translateError(errorMessage), "error"); }
                 console.error("AJAX Error:", status, error, xhr.responseText);
             },
             complete: function () {
@@ -264,7 +274,7 @@ $(document).ready(function () {
             },
             error: function (xhr, status, error) {
                 console.error("Failed to fetch service status:", error, xhr.responseText);
-                Swal.fire("Ошибка!", "Не удалось получить статусы служб.", "error");
+                if (window.showToast) { showToast("error", "Ошибка!", "Не удалось получить статусы служб."); } else { Swal.fire("Ошибка!", "Не удалось получить статусы служб.", "error"); }
             }
         });
 
@@ -289,7 +299,7 @@ $(document).ready(function () {
                 renderNodes(nodes);
             },
             error: function (xhr) {
-                Swal.fire("Ошибка!", "Не удалось получить список внешних узлов.", "error");
+                if (window.showToast) { showToast("error", "Ошибка!", "Не удалось получить список внешних узлов."); } else { Swal.fire("Ошибка!", "Не удалось получить список внешних узлов.", "error"); }
                 console.error("Error fetching nodes:", xhr.responseText);
             }
         });
@@ -395,7 +405,7 @@ $(document).ready(function () {
                 renderExtraConfigs(configs);
             },
             error: function (xhr) {
-                Swal.fire("Ошибка!", "Не удалось получить дополнительные конфигурации.", "error");
+                if (window.showToast) { showToast("error", "Ошибка!", "Не удалось получить дополнительные конфигурации."); } else { Swal.fire("Ошибка!", "Не удалось получить дополнительные конфигурации.", "error"); }
                 console.error("Error fetching extra configs:", xhr.responseText);
             }
         });
@@ -756,7 +766,7 @@ $(document).ready(function () {
     function uploadBackup() {
         const fileInput = document.getElementById("backup_file");
         if (!fileInput.files.length) {
-            Swal.fire("Ошибка!", "Пожалуйста, выберите файл бэкапа.", "error");
+            if (window.showToast) { showToast("error", "Ошибка!", "Пожалуйста, выберите файл бэкапа."); } else { Swal.fire("Ошибка!", "Пожалуйста, выберите файл бэкапа.", "error"); }
             return;
         }
 
@@ -798,16 +808,21 @@ $(document).ready(function () {
                     return xhr;
                 },
                 success: function (response) {
+                    if (window.showToast) { showToast("success", "Успешно!", "Бэкап успешно восстановлен. Страница будет перезагружена."); setTimeout(() => {
+                        location.reload();
+                    }, 1200);
+                } else {
                     Swal.fire("Успешно!", "Бэкап успешно восстановлен. Страница будет перезагружена.", "success").then(() => {
                         location.reload();
                     });
+                }
                 },
                 error: function (xhr, status, error) {
                     let errorMessage = "Ошибка восстановления бэкапа.";
                     if (xhr.responseJSON && xhr.responseJSON.detail) {
                         errorMessage = translateError(xhr.responseJSON.detail);
                     }
-                    Swal.fire("Ошибка!", errorMessage, "error");
+                    if (window.showToast) { showToast("error", "Ошибка!", errorMessage, { timer: 6000 }); } else { Swal.fire("Ошибка!", errorMessage, "error"); }
                 },
                 complete: function () {
                     $("#upload_backup").prop('disabled', false);
@@ -850,7 +865,7 @@ $(document).ready(function () {
             sendRequest(
                 API_URLS.setupDecoy,
                 "POST",
-                { domain: domain, path: path },
+                { domain: domain, decoy_path: path },
                 "Сайт-маскировка успешно настроен!",
                 "#decoy_setup"
             );
@@ -949,12 +964,12 @@ $(document).ready(function () {
                     if ($("#warp_config_form").length > 0) {
                         $("#warp_config_form")[0].reset();
                     }
-                    Swal.fire("Инфо", "Служба WARP возможно не полностью настроена. Попробуйте переустановить, если проблема сохранится.", "info");
+                    if (window.showToast) { showToast("info", "Инфо", "Служба WARP возможно не полностью настроена. Попробуйте переустановить, если проблема сохранится.", { timer: 7000 }); } else { Swal.fire("Инфо", "Служба WARP возможно не полностью настроена. Попробуйте переустановить, если проблема сохранится.", "info"); }
                 } else {
                     if ($("#warp_config_form").length > 0) {
                         $("#warp_config_form")[0].reset();
                     }
-                    Swal.fire("Внимание", "Не удалось загрузить текущие настройки WARP. Пожалуйста, проверьте вручную или пересохраните.", "warning");
+                    if (window.showToast) { showToast("warning", "Внимание", "Не удалось загрузить текущие настройки WARP. Пожалуйста, проверьте вручную или пересохраните.", { timer: 7000 }); } else { Swal.fire("Внимание", "Не удалось загрузить текущие настройки WARP. Пожалуйста, проверьте вручную или пересохраните.", "warning"); }
                 }
             }
         });

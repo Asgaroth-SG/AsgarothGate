@@ -20,7 +20,7 @@ $(function () {
     let searchTimeout = null;
 
     // --- Настройка компактных уведомлений (Toasts) ---
-    const Toast = Swal.mixin({
+    const Toast = (window.Toast || Swal).mixin({
         toast: true,
         position: 'top-end',
         showConfirmButton: false,
@@ -264,7 +264,8 @@ $(function () {
     $("#deleteSelected").on("click", function () {
         const selectedUsers = $(".user-checkbox:checked").map((_, el) => $(el).val()).get();
         if (selectedUsers.length === 0) {
-            return Swal.fire("Внимание!", "Пожалуйста, выберите хотя бы одного пользователя для удаления.", "warning");
+            if (window.showToast) { showToast("warning", "Внимание", "Пожалуйста, выберите хотя бы одного пользователя для удаления."); } else { Toast.fire({icon: "warning", title: "Пожалуйста, выберите хотя бы одного пользователя для удаления."}); }
+            return;
         }
         Swal.fire({
             title: "Вы уверены?",
@@ -296,7 +297,10 @@ $(function () {
                     Toast.fire({icon: 'success', title: "Выбранные пользователи удалены."});
                     refreshUserList();
                 })
-                .fail((err) => Swal.fire("Ошибка!", translateError(err.responseJSON?.detail), "error"));
+                .fail((err) => {
+                    const msg = translateError(err.responseJSON?.detail) || 'Произошла ошибка.';
+                    if (window.showToast) { showToast('error', 'Ошибка!', msg, { timer: 6000 }); } else { Toast.fire({ icon: 'error', title: msg }); }
+                });
             } else {
                 const singleUrl = REMOVE_USER_URL_TEMPLATE.replace('U', selectedUsers[0]);
                 $.ajax({
@@ -308,7 +312,10 @@ $(function () {
                     Toast.fire({icon: 'success', title: `Пользователь ${selectedUsers[0]} удален.`});
                     refreshUserList();
                 })
-                .fail((err) => Swal.fire("Ошибка!", translateError(err.responseJSON?.detail), "error"));
+                .fail((err) => {
+                    const msg = translateError(err.responseJSON?.detail) || 'Произошла ошибка.';
+                    if (window.showToast) { showToast('error', 'Ошибка!', msg, { timer: 6000 }); } else { Toast.fire({ icon: 'error', title: msg }); }
+                });
             }
         });
     });
@@ -363,7 +370,10 @@ $(function () {
             Toast.fire({icon: 'success', title: successMsg});
             refreshUserList();
         })
-        .fail(err => Swal.fire("Ошибка!", translateError(err.responseJSON?.detail), "error"))
+        .fail(err => {
+            const msg = translateError(err.responseJSON?.detail) || 'Произошла ошибка.';
+            if (window.showToast) { showToast('error', 'Ошибка!', msg, { timer: 6000 }); } else { Toast.fire({ icon: 'error', title: msg }); }
+        })
         .always(() => button.prop('disabled', false));
     });
 
@@ -474,7 +484,10 @@ $(function () {
             Toast.fire({icon: 'success', title: `Данные пользователя ${originalUsername} обновлены.`});
             refreshUserList();
         })
-        .fail(err => Swal.fire("Ошибка!", translateError(err.responseJSON?.detail), "error"))
+        .fail(err => {
+            const msg = translateError(err.responseJSON?.detail) || 'Произошла ошибка.';
+            if (window.showToast) { showToast('error', 'Ошибка!', msg, { timer: 6000 }); } else { Toast.fire({ icon: 'error', title: msg }); }
+        })
         .always(() => button.prop('disabled', false));
     });
 
@@ -520,7 +533,10 @@ $(function () {
                 Toast.fire({icon: 'success', title: msg});
                 refreshUserList();
             })
-            .fail(() => Swal.fire("Ошибка!", `Не удалось ${actionRus} пользователя.`, "error"));
+            .fail(() => {
+                const msg = `Не удалось ${actionRus} пользователя.`;
+                if (window.showToast) { showToast('error', 'Ошибка!', msg, { timer: 6000 }); } else { Toast.fire({ icon: 'error', title: msg }); }
+            });
         });
     });
 
@@ -558,7 +574,8 @@ $(function () {
     $("#showSelectedLinks").on("click", function () {
         const selectedUsers = $(".user-checkbox:checked").map((_, el) => $(el).val()).get();
         if (selectedUsers.length === 0) {
-            return Swal.fire("Внимание!", "Пожалуйста, выберите хотя бы одного пользователя.", "warning");
+            if (window.showToast) { showToast("warning", "Внимание", "Пожалуйста, выберите хотя бы одного пользователя."); } else { Toast.fire({icon: "warning", title: "Пожалуйста, выберите хотя бы одного пользователя."}); }
+            return;
         }
 
         Swal.fire({ title: 'Получение ссылок...', text: 'Пожалуйста, подождите.', allowOutsideClick: false, didOpen: () => Swal.showLoading() });
