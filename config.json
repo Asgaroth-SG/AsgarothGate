@@ -19,17 +19,17 @@
     }
   },
     "quic": {
-        "initStreamReceiveWindow": 8388608,
-        "maxStreamReceiveWindow": 8388608,
-        "initConnReceiveWindow": 20971520,
-        "maxConnReceiveWindow": 20971520,
-        "maxIdleTimeout": "20s",
-        "maxIncomingStreams": 1024,
-        "disablePathMTUDiscovery": false
+        "initStreamReceiveWindow": 4194304,
+		"maxStreamReceiveWindow": 4194304,
+		"initConnReceiveWindow": 10485760,
+		"maxConnReceiveWindow": 10485760,
+		"maxIdleTimeout": "15s",
+		"maxIncomingStreams": 128,
+		"disablePathMTUDiscovery": true
     },
     "bandwidth": {
-        "up": "200 mbps",
-        "down": "200 mbps"
+        "up": "100 mbps",
+        "down": "100 mbps"
     },
     "ignoreClientBandwidth": false,
     "disableUDP": false,
@@ -38,7 +38,7 @@
     "resolver": {
         "type": "udp",
         "udp": {
-            "addr": "8.8.8.8:53",
+            "addr": "94.140.14.14:53",
             "timeout": "4s"
         }
     },
