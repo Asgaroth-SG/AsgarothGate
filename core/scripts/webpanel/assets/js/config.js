@@ -31,6 +31,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function showErrorMessage(message) {
+    if (window.showToast) {
+        showToast('error', 'Ошибка', message, { timer: 5000 });
+    } else {
         Swal.fire({
             title: "Ошибка",
             text: message,
@@ -43,6 +46,7 @@ document.addEventListener('DOMContentLoaded', function () {
             hideClass: { popup: 'animate__animated animate__fadeOutUp' }
         });
     }
+}
 
     function hideErrorMessage() {
         Swal.close();
@@ -65,10 +69,10 @@ document.addEventListener('DOMContentLoaded', function () {
                     body: JSON.stringify(editor.get())
                 })
                 .then(() => {
-                    Swal.fire('Сохранено!', 'Ваши изменения были сохранены.', 'success');
+                    if (window.showToast) { showToast('success', 'Сохранено!', 'Ваши изменения были сохранены.'); } else { Swal.fire('Сохранено!', 'Ваши изменения были сохранены.', 'success'); }
                 })
                 .catch(error => {
-                    Swal.fire('Ошибка!', 'Произошла ошибка при сохранении данных.', 'error');
+                    if (window.showToast) { showToast('error', 'Ошибка!', 'Произошла ошибка при сохранении данных.', { timer: 6000 }); } else { Swal.fire('Ошибка!', 'Произошла ошибка при сохранении данных.', 'error'); }
                     console.error("Error saving JSON:", error);
                 });
             }
@@ -80,10 +84,10 @@ document.addEventListener('DOMContentLoaded', function () {
             .then(response => response.json())
             .then(json => {
                 editor.set(json);
-                Swal.fire('Успешно!', 'JSON успешно загружен.', 'success');
+                if (window.showToast) { showToast('success', 'Успешно!', 'JSON успешно загружен.'); } else { Swal.fire('Успешно!', 'JSON успешно загружен.', 'success'); }
             })
             .catch(error => {
-                Swal.fire('Ошибка!', 'Произошла ошибка при загрузке JSON.', 'error');
+                if (window.showToast) { showToast('error', 'Ошибка!', 'Произошла ошибка при загрузке JSON.'); } else { Swal.fire('Ошибка!', 'Произошла ошибка при загрузке JSON.', 'error'); }
                 console.error("Error loading JSON:", error);
             });
     }

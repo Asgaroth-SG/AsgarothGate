@@ -4,6 +4,19 @@ source /etc/hysteria/core/scripts/utils.sh
 source /etc/hysteria/core/scripts/path.sh
 source /etc/hysteria/core/scripts/services_status.sh >/dev/null 2>&1
 
+# --- TTY safety ---
+# Prevent 100% CPU spin when script is launched without an interactive stdin.
+if [[ ! -t 0 ]]; then
+    if [[ -r /dev/tty ]]; then
+        exec </dev/tty
+    else
+        echo "Ошибка: menu.sh запущен без TTY (stdin не терминал). Завершаю работу, чтобы не грузить CPU."
+        exit 1
+    fi
+fi
+# --- /TTY safety ---
+
+
 check_services() {
     for service in "${services[@]}"; do
         service_base_name=$(basename "$service" .service)
@@ -178,7 +191,7 @@ hysteria2_remove_user_handler() {
             echo -e "${red}Ошибка:${NC} Имя пользователя может содержать только буквы и цифры."
         fi
     done
-    python3 $CLI_PATH remove-user --username "$username"
+    python3 "$CLI_PATH" remove-user "$username"
 }
 
 hysteria2_get_user_handler() {
@@ -191,7 +204,8 @@ hysteria2_get_user_handler() {
         fi
     done
 
-    user_data=$(python3 "$CLI_PATH" get-user --username "$username" 2>/dev/null)
+    user_data=$(python3 "$CLI_PATH" get-user -u "$username" 2>/dev/null)
+    exit_code=$?
 
     if [[ $exit_code -ne 0 || -z "$user_data" ]]; then
         echo -e "${red}Ошибка:${NC} Пользователь '$username' не найден или получен неверный ответ."
@@ -245,7 +259,7 @@ hysteria2_list_users_handler() {
     fi
     
     printf "%-20s %-20s %-15s %-20s %-30s %-10s %-15s %-15s %-15s %-10s\n" \
-        "Пользователь" "Трафик(ГБ)" "Срок(Дни)" "Создан" "Пароль" "Блок" "Статус" "Скач(МБ)" "Загр(МБ)"
+        "Пользователь" "Трафик(ГБ)" "Срок(Дни)" "Создан" "Пароль" "Блок" "Статус" "Скач(МБ)" "Загр(МБ)" "Online"
     
     echo "$users_json" | jq -r '.[] | 
         [.username, 
@@ -261,7 +275,7 @@ hysteria2_list_users_handler() {
         @tsv' | \
     while IFS=$'\t' read -r username traffic expiry created password blocked status down up online; do
         printf "%-20s %-20s %-15s %-20s %-30s %-10s %-15s %-15s %-15s %-10s\n" \
-            "$username" "$traffic" "$expiry" "$created" "$password" "$blocked" "$status" "$down" "$up"
+            "$username" "$traffic" "$expiry" "$created" "$password" "$blocked" "$status" "$down" "$up" "${online:-0}"
     done
 }
 
@@ -355,7 +369,7 @@ edit_ips() {
             1)
                 read -p "Введите новый IPv4 адрес или домен: " new_ip4_or_domain
                 if [[ $new_ip4_or_domain =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-                    if [[ $(echo "$new_ip4_or_domain" | awk -F. '{for (i=1;i<=NF;i++) if ($i>255) exit 1}') ]]; then
+                    if ! echo "$new_ip4_or_domain" | awk -F. '{for (i=1;i<=NF;i++) if ($i>255) exit 1}'; then
                         echo "Ошибка: Неверный IPv4 адрес. Значения должны быть от 0 до 255."
                     else
                         python3 "$CLI_PATH" ip-address --edit -4 "$new_ip4_or_domain"
@@ -1084,7 +1098,10 @@ main_menu() {
     while true; do
         get_system_info
         display_main_menu
-        read -r choice
+        if ! read -r choice; then
+            echo "Ввод недоступен. Выход."
+            exit 1
+        fi
         case $choice in
             1) hysteria2_menu ;;
             2) advance_menu ;;
@@ -1093,7 +1110,9 @@ main_menu() {
             *) echo "Неверная опция. Пожалуйста, попробуйте снова." ;;
         esac
         echo
-        read -rp "Нажмите Enter, чтобы продолжить..."
+        if ! read -rp "Нажмите Enter, чтобы продолжить..."; then
+            exit 1
+        fi
     done
 }
 
@@ -1129,7 +1148,10 @@ hysteria2_menu() {
     while true; do
         get_system_info
         display_hysteria2_menu
-        read -r choice
+        if ! read -r choice; then
+            echo "Ввод недоступен. Выход."
+            exit 1
+        fi
         case $choice in
             1) hysteria2_install_handler ;;
             2) hysteria2_add_user_handler ;;
@@ -1144,7 +1166,9 @@ hysteria2_menu() {
             *) echo "Неверная опция. Пожалуйста, попробуйте снова." ;;
         esac
         echo
-        read -rp "Нажмите Enter, чтобы продолжить..."
+        if ! read -rp "Нажмите Enter, чтобы продолжить..."; then
+            exit 1
+        fi
     done
 }
 
@@ -1183,7 +1207,10 @@ advance_menu() {
     local choice
     while true; do
         display_advance_menu
-        read -r choice
+        if ! read -r choice; then
+            echo "Ввод недоступен. Выход."
+            exit 1
+        fi
         case $choice in
             1) python3 $CLI_PATH install-tcp-brutal ;;
             2) python3 $CLI_PATH install-warp ;;
@@ -1210,7 +1237,9 @@ advance_menu() {
             *) echo "Неверная опция. Пожалуйста, попробуйте снова." ;;
         esac
         echo
-        read -rp "Нажмите Enter, чтобы продолжить..."
+        if ! read -rp "Нажмите Enter, чтобы продолжить..."; then
+            exit 1
+        fi
     done
 }
 

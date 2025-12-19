@@ -136,3 +136,45 @@ $(function () {
 
     setTimeout(checkForUpdates, 2000);
 });
+
+// Global toast notifications (SweetAlert2) — unified style across all pages
+(function () {
+    if (typeof Swal === 'undefined') return;
+
+    // Expose a shared Toast instance so every page uses identical styling
+    if (!window.Toast) {
+        window.Toast = Swal.mixin({
+            toast: true,
+            position: 'top-end',
+            showConfirmButton: false,
+            timer: 3000,
+            timerProgressBar: true,
+            didOpen: (toast) => {
+                toast.addEventListener('mouseenter', Swal.stopTimer);
+                toast.addEventListener('mouseleave', Swal.resumeTimer);
+            }
+        });
+    }
+
+    /**
+     * showToast('success'|'error'|'info'|'warning'|'question', 'Title', 'Optional text', {timer, position})
+     */
+    window.showToast = function (icon, title, text, options) {
+        const opts = options || {};
+        const payload = Object.assign({}, opts, {
+            icon: icon || 'info',
+            title: title || '',
+        });
+
+        if (text) payload.text = text;
+
+        // Keep the unified default unless explicitly overridden
+        if (payload.position == null) payload.position = 'top-end';
+        if (payload.timer == null) payload.timer = 3000;
+        if (payload.timerProgressBar == null) payload.timerProgressBar = true;
+        if (payload.showConfirmButton == null) payload.showConfirmButton = false;
+
+        return (window.Toast || Swal).fire(payload);
+    };
+})();
+

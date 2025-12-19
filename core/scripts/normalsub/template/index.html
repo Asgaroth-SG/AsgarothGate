@@ -10,99 +10,144 @@
 </head>
 <body>
     <div class="background-animation"></div>
-    <div id="loading-indicator" class="loading-indicator">
-        <div class="spinner"></div>
+
+    <div id="loading-indicator" class="loading-indicator" aria-hidden="true">
+        <div class="spinner" role="status" aria-label="Загрузка"></div>
     </div>
 
     <div class="container">
         <header class="header">
             <h1 class="header-title"><strong>Ваша подписка</strong></h1>
             <button id="dark-mode-toggle" class="theme-toggle" aria-label="Переключить тему">
-                <i id="theme-icon" class="fas fa-sun"></i>
+                <i id="theme-icon" class="fas fa-sun" aria-hidden="true"></i>
             </button>
         </header>
 
         <main>
+            <!-- Инфо -->
             <section class="info-grid">
                 <div class="card info-card">
                     <div class="card-icon"><i class="fas fa-user"></i></div>
-                    <div class="card-content">
-                        <h2 class="card-title">Ваш ID</h2>
-                        <p class="card-value">{{ username }}</p>
+                    <div>
+                        <div class="card-title">Ваш ID</div>
+                        <div class="card-value">{{ username }}</div>
                     </div>
                 </div>
 
                 <div class="card info-card">
                     <div class="card-icon"><i class="fas fa-chart-line"></i></div>
-                    <div class="card-content" data-tooltip="{{ usage_raw }}">
-                        <h2 class="card-title">Использовано трафика</h2>
-                        <p class="card-value">{{ usage }}</p>
+                    <div data-tooltip="{{ usage_raw }}">
+                        <div class="card-title">Использовано</div>
+                        <div class="card-value">{{ usage }}</div>
                     </div>
                 </div>
 
                 <div class="card info-card">
                     <div class="card-icon"><i class="fas fa-calendar-check"></i></div>
-                    <div class="card-content">
-                        <h2 class="card-title">Истекает</h2>
-                        <p class="card-value">{{ expiration_date }}</p>
+                    <div>
+                        <div class="card-title">Истекает</div>
+                        <div class="card-value">{{ expiration_date }}</div>
                     </div>
                 </div>
             </section>
-            
+
+            <!-- Приложения -->
             <section class="card app-import-section {% if blocked %}blocked{% endif %}">
                 <div class="card-header">
                     <i class="fas fa-link"></i>
                     <h2>Подключение приложений</h2>
                 </div>
+
                 <div class="card-body">
                     {% if blocked %}
-                    <div class="blocked-message">
-                        <i class="fas fa-exclamation-triangle"></i>
-                        <h3>Аккаунт приостановлен</h3>
-                        <p>Ваша подписка в данный момент отключена.</p>
-                    </div>
+                        <div class="blocked-message">
+                            <i class="fas fa-exclamation-triangle"></i>
+                            <h3>Аккаунт приостановлен</h3>
+                            <p>Подписка сейчас недоступна.</p>
+                        </div>
                     {% else %}
+
                     <div class="app-tabs">
-                        <div class="app-tabs-nav">
+                        <div class="app-tabs-nav" role="tablist">
                             <button class="app-tab-btn active" data-target="#tab-general">Общее</button>
                             <button class="app-tab-btn" data-target="#tab-singbox">Sing-Box</button>
                             <button class="app-tab-btn" data-target="#tab-hiddify">Hiddify</button>
                             <button class="app-tab-btn" data-target="#tab-streisand">Streisand</button>
                             <button class="app-tab-btn" data-target="#tab-nekobox">NekoBox</button>
                         </div>
+
                         <div class="app-tabs-content">
+                            <!-- Общее -->
                             <div class="app-tab-pane active" id="tab-general">
-                                <img src="{{ sublink_qrcode }}" alt="QR-код универсальной подписки" class="qrcode">
-                                <button class="btn btn-primary" onclick="copyToClipboard('{{ sub_link }}')">
-                                    <i class="fas fa-copy"></i> Скопировать ссылку
-                                </button>
+                                {% if sublink_qrcode %}
+                                    <img src="{{ sublink_qrcode }}" class="qrcode" alt="QR подписки">
+                                {% else %}
+                                    <div class="qr-placeholder">
+                                        <i class="fas fa-qrcode"></i>
+                                        <div>
+                                            <div class="qr-placeholder-title">QR недоступен</div>
+                                            <div class="qr-placeholder-text">Скопируйте ссылку ниже</div>
+                                        </div>
+                                    </div>
+                                {% endif %}
+
+                                <div class="btn-row">
+                                    <button class="btn btn-secondary" data-copy-text="{{ sub_link }}">
+                                        <i class="fas fa-copy"></i> Копировать ссылку
+                                    </button>
+                                </div>
                             </div>
+
+                            <!-- Sing-Box -->
                             <div class="app-tab-pane" id="tab-singbox">
-                                <img src="{{ singbox_qrcode }}" alt="Sing-Box QR Code" class="qrcode">
-                                <a href="sing-box://import-remote-profile?url={{ sub_link }}" class="btn btn-secondary">
-                                    <i class="fas fa-arrow-right"></i> Добавить в Sing-Box
+                                {% if singbox_qrcode %}
+                                    <img src="{{ singbox_qrcode }}" class="qrcode">
+                                {% else %}
+                                    <div class="qr-placeholder"><i class="fas fa-qrcode"></i> QR недоступен</div>
+                                {% endif %}
+                                <a class="btn btn-secondary" href="sing-box://import-remote-profile?url={{ sub_link }}">
+                                    Добавить в Sing-Box
                                 </a>
                             </div>
+
+                            <!-- Hiddify -->
                             <div class="app-tab-pane" id="tab-hiddify">
-                                <img src="{{ hiddify_qrcode }}" alt="Hiddify QR Code" class="qrcode">
-                                <a href="hiddify://import/{{ sub_link }}" class="btn btn-secondary">
-                                    <i class="fas fa-arrow-right"></i> Добавить в Hiddify
+                                {% if hiddify_qrcode %}
+                                    <img src="{{ hiddify_qrcode }}" class="qrcode">
+                                {% else %}
+                                    <div class="qr-placeholder"><i class="fas fa-qrcode"></i> QR недоступен</div>
+                                {% endif %}
+                                <a class="btn btn-secondary" href="hiddify://import/{{ sub_link }}">
+                                    Добавить в Hiddify
                                 </a>
                             </div>
+
+                            <!-- Streisand -->
                             <div class="app-tab-pane" id="tab-streisand">
-                                <img src="{{ streisand_qrcode }}" alt="Streisand QR Code" class="qrcode">
-                                <a href="streisand://import/sub?url={{ sub_link }}" class="btn btn-secondary">
-                                    <i class="fas fa-arrow-right"></i> Добавить в Streisand
+                                {% if streisand_qrcode %}
+                                    <img src="{{ streisand_qrcode }}" class="qrcode">
+                                {% else %}
+                                    <div class="qr-placeholder"><i class="fas fa-qrcode"></i> QR недоступен</div>
+                                {% endif %}
+                                <a class="btn btn-secondary" href="streisand://import/sub?url={{ sub_link }}">
+                                    Добавить в Streisand
                                 </a>
                             </div>
+
+                            <!-- NekoBox -->
                             <div class="app-tab-pane" id="tab-nekobox">
-                                <img src="{{ nekobox_qrcode }}" alt="NekoBox QR Code" class="qrcode">
-                                <a href="nekobox://import?url={{ sub_link }}" class="btn btn-secondary">
-                                    <i class="fas fa-arrow-right"></i> Добавить в NekoBox
+                                {% if nekobox_qrcode %}
+                                    <img src="{{ nekobox_qrcode }}" class="qrcode">
+                                {% else %}
+                                    <div class="qr-placeholder"><i class="fas fa-qrcode"></i> QR недоступен</div>
+                                {% endif %}
+                                <a class="btn btn-secondary" href="nekobox://import?url={{ sub_link }}">
+                                    Добавить в NekoBox
                                 </a>
                             </div>
                         </div>
                     </div>
+
                     {% endif %}
                 </div>
             </section>
@@ -111,55 +156,30 @@
             <section class="card uri-section">
                 <div class="card-header">
                     <i class="fas fa-server"></i>
-                    <h2>Подключение вручную (URI)</h2>
+                    <h2>Подключение вручную</h2>
                 </div>
                 <div class="card-body">
                     <div class="qr-grid">
-                    {% for item in local_uris %}
+                        {% for item in local_uris %}
                         <div class="qr-item">
                             <h3 class="qr-title">{{ item.label }}</h3>
                             {% if item.qrcode %}
-                                <img src="{{ item.qrcode }}" alt="{{ item.label }} QR Code" class="qrcode">
-                                <button class="btn btn-secondary" onclick="copyToClipboard('{{ item.uri }}')">
-                                    <i class="fas fa-copy"></i> Копировать URI
-                                </button>
-                            {% else %}
-                                <p class="uri-unavailable">URI недоступен</p>
+                                <img src="{{ item.qrcode }}" class="qrcode">
                             {% endif %}
-                        </div>
-                    {% endfor %}
-                    </div>
-                </div>
-            </section>
-            {% endif %}
-
-            {% if node_uris and not blocked %}
-            <section class="card uri-section">
-                <div class="card-header">
-                    <i class="fas fa-globe"></i>
-                    <h2>Внешние узлы (Nodes)</h2>
-                </div>
-                <div class="card-body">
-                    <div class="qr-grid">
-                        {% for item in node_uris %}
-                        <div class="qr-item">
-                            <h3 class="qr-title">{{ item.label }}</h3>
-                            {% if item.qrcode %}
-                                <img src="{{ item.qrcode }}" alt="{{ item.label }} QR Code" class="qrcode">
-                                <button class="btn btn-secondary" onclick="copyToClipboard('{{ item.uri }}')">
-                                    <i class="fas fa-copy"></i> Копировать URI
-                                </button>
-                            {% else %}
-                                <p class="uri-unavailable">URI недоступен</p>
-                            {% endif %}
+                            <button class="btn btn-secondary" data-copy-text="{{ item.uri }}">
+                                Копировать URI
+                            </button>
                         </div>
                         {% endfor %}
                     </div>
                 </div>
             </section>
             {% endif %}
+
         </main>
     </div>
+
+    <script src="https://cdn.jsdelivr.net/gh/twitter/twemoji@14.0.2/dist/twemoji.min.js"></script>
     <script src="script.js"></script>
 </body>
 </html>

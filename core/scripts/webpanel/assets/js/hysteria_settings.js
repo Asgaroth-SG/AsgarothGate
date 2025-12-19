@@ -71,16 +71,23 @@ $(document).ready(function () {
                 }
             },
             success: function (response) {
-                Swal.fire("Успешно!", successMessage, "success").then(() => {
-                    if (showReload) {
-                        location.reload();
-                    } else {
-                        if (postSuccessCallback) {
-                            postSuccessCallback(response);
-                        }
-                    }
-                });
-            },
+    if (window.showToast) {
+        showToast("success", "Успешно!", successMessage);
+        if (showReload) {
+            setTimeout(() => location.reload(), 800);
+        } else if (postSuccessCallback) {
+            postSuccessCallback(response);
+        }
+    } else {
+        Swal.fire("Успешно!", successMessage, "success").then(() => {
+            if (showReload) {
+                location.reload();
+            } else if (postSuccessCallback) {
+                postSuccessCallback(response);
+            }
+        });
+    }
+},
             error: function (xhr, status, error) {
                 let errorMessage = "Произошла непредвиденная ошибка.";
                 if (xhr.responseJSON && xhr.responseJSON.detail) {
@@ -102,7 +109,7 @@ $(document).ready(function () {
                     }
                 }
                 // Применяем перевод
-                Swal.fire("Ошибка!", translateError(errorMessage), "error");
+                if (window.showToast) { showToast("error", "Ошибка!", translateError(errorMessage), { timer: 5000 }); } else { Swal.fire("Ошибка!", translateError(errorMessage), "error"); }
                 console.error("AJAX Error:", status, error, xhr.responseText);
             },
             complete: function() {
