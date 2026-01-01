@@ -6,6 +6,10 @@ CADDY_CONFIG_FILE="/etc/hysteria/core/scripts/webpanel/Caddyfile"
 WEBPANEL_ENV_FILE="/etc/hysteria/core/scripts/webpanel/.env"
 NORMALSUB_ENV_FILE="/etc/hysteria/core/scripts/normalsub/.env"
 
+DEFAULT_XHTTP_ENABLED="true"  
+DEFAULT_XHTTP_PATH="xhttp/9f3a1cfba29df6b437aed633b158d0e9" 
+DEFAULT_XHTTP_UPSTREAM="127.0.0.1:20000"
+
 install_dependencies() {
     sudo apt update -y > /dev/null 2>&1
 
@@ -35,15 +39,31 @@ update_env_file() {
     local port=$2
     local admin_username=$3
     local admin_password=$4
-    local admin_password_hash=$(echo -n "$admin_password" | sha256sum | cut -d' ' -f1)
+    local admin_password_hash
+    admin_password_hash=$(echo -n "$admin_password" | sha256sum | cut -d' ' -f1)
     local expiration_minutes=$5
     local debug=$6
     local decoy_path=$7
 
-    local api_token=$(openssl rand -hex 32) 
-    local root_path=$(openssl rand -hex 16)
+    local xhttp_path=${8:-""}
+    local xhttp_upstream=${9:-""}
 
-    cat <<EOL > /etc/hysteria/core/scripts/webpanel/.env
+    local xhttp_enabled="false"
+    if [ "${DEFAULT_XHTTP_ENABLED}" = "true" ]; then
+        xhttp_enabled="true"
+    fi
+
+    if [ "$xhttp_enabled" = "true" ]; then
+        xhttp_path="${xhttp_path:-$DEFAULT_XHTTP_PATH}"
+        xhttp_upstream="${xhttp_upstream:-$DEFAULT_XHTTP_UPSTREAM}"
+    fi
+
+    local api_token
+    api_token=$(openssl rand -hex 32)
+    local root_path
+    root_path=$(openssl rand -hex 16)
+
+    cat <<EOL > "$WEBPANEL_ENV_FILE"
 DEBUG=$debug
 DOMAIN=$domain
 PORT=$port
@@ -52,27 +72,54 @@ API_TOKEN=$api_token
 ADMIN_USERNAME=$admin_username
 ADMIN_PASSWORD=$admin_password_hash
 EXPIRATION_MINUTES=$expiration_minutes
+XHTTP_ENABLED=$xhttp_enabled
 EOL
 
     if [ -n "$decoy_path" ] && [ "$decoy_path" != "None" ]; then
-        echo "DECOY_PATH=$decoy_path" >> /etc/hysteria/core/scripts/webpanel/.env
+        echo "DECOY_PATH=$decoy_path" >> "$WEBPANEL_ENV_FILE"
+    fi
+
+    if [ "$xhttp_enabled" = "true" ]; then
+        echo "XHTTP_PATH=$xhttp_path" >> "$WEBPANEL_ENV_FILE"
+        echo "XHTTP_UPSTREAM=$xhttp_upstream" >> "$WEBPANEL_ENV_FILE"
     fi
 }
 
 update_caddy_file() {
-    source /etc/hysteria/core/scripts/webpanel/.env
-    
+    source "$WEBPANEL_ENV_FILE"
+
+    local XHTTP_ENABLED="${XHTTP_ENABLED:-}"
+    local XHTTP_PATH="${XHTTP_PATH:-}"
+    local XHTTP_UPSTREAM="${XHTTP_UPSTREAM:-}"
+
+    if [ -z "$XHTTP_ENABLED" ]; then
+        if [ "${DEFAULT_XHTTP_ENABLED}" = "true" ]; then
+            XHTTP_ENABLED="true"
+        else
+            XHTTP_ENABLED="false"
+        fi
+    fi
+
+    if [ "$XHTTP_ENABLED" = "true" ]; then
+        XHTTP_PATH="${XHTTP_PATH:-$DEFAULT_XHTTP_PATH}"
+        XHTTP_UPSTREAM="${XHTTP_UPSTREAM:-$DEFAULT_XHTTP_UPSTREAM}"
+    fi
+
     local SUB_PATH=""
     local SUB_PORT="28261"
     local SUB_DOMAIN=""
     local SUB_EXT_PORT=""
-    
+
     if [ -f "$NORMALSUB_ENV_FILE" ]; then
-        local sub_path_val=$(grep "^SUBPATH=" "$NORMALSUB_ENV_FILE" | cut -d'=' -f2)
-        local sub_port_val=$(grep "^AIOHTTP_LISTEN_PORT=" "$NORMALSUB_ENV_FILE" | cut -d'=' -f2)
-        local sub_dom_val=$(grep "^HYSTERIA_DOMAIN=" "$NORMALSUB_ENV_FILE" | cut -d'=' -f2)
-        local sub_ext_p_val=$(grep "^HYSTERIA_PORT=" "$NORMALSUB_ENV_FILE" | cut -d'=' -f2)
-        
+        local sub_path_val
+        sub_path_val=$(grep "^SUBPATH=" "$NORMALSUB_ENV_FILE" | cut -d'=' -f2)
+        local sub_port_val
+        sub_port_val=$(grep "^AIOHTTP_LISTEN_PORT=" "$NORMALSUB_ENV_FILE" | cut -d'=' -f2)
+        local sub_dom_val
+        sub_dom_val=$(grep "^HYSTERIA_DOMAIN=" "$NORMALSUB_ENV_FILE" | cut -d'=' -f2)
+        local sub_ext_p_val
+        sub_ext_p_val=$(grep "^HYSTERIA_PORT=" "$NORMALSUB_ENV_FILE" | cut -d'=' -f2)
+
         [ -n "$sub_path_val" ] && SUB_PATH="$sub_path_val"
         [ -n "$sub_port_val" ] && SUB_PORT="$sub_port_val"
         [ -n "$sub_dom_val" ] && SUB_DOMAIN="$sub_dom_val"
@@ -104,11 +151,21 @@ $DOMAIN:$PORT {
     }
 EOL
 
+    if [ "$XHTTP_ENABLED" = "true" ] && [ -n "$XHTTP_PATH" ] && [ "$XHTTP_PATH" != "None" ]; then
+        cat <<EOL >> "$CADDY_CONFIG_FILE"
+
+    # 3X-UI XHTTP VLESS
+    route /$XHTTP_PATH/* {
+        reverse_proxy $XHTTP_UPSTREAM
+    }
+EOL
+    fi
+
     local MERGE_SUBS=false
     if [ -n "$SUB_PATH" ] && [ "$SUB_DOMAIN" == "$DOMAIN" ] && [ "$SUB_EXT_PORT" == "$PORT" ]; then
         MERGE_SUBS=true
         cat <<EOL >> "$CADDY_CONFIG_FILE"
-    
+
     # Подписки
     route /$SUB_PATH/* {
         reverse_proxy http://127.0.0.1:$SUB_PORT {
@@ -122,18 +179,22 @@ EOL
     fi
 
     cat <<EOL >> "$CADDY_CONFIG_FILE"
-    
+
     @otherPaths {
         not path /$ROOT_PATH/*
 EOL
-    
+
+    if [ "$XHTTP_ENABLED" = "true" ] && [ -n "$XHTTP_PATH" ] && [ "$XHTTP_PATH" != "None" ]; then
+        echo "        not path /$XHTTP_PATH/*" >> "$CADDY_CONFIG_FILE"
+    fi
+
     if [ "$MERGE_SUBS" = true ]; then
         echo "        not path /$SUB_PATH/*" >> "$CADDY_CONFIG_FILE"
     fi
 
     cat <<EOL >> "$CADDY_CONFIG_FILE"
     }
-    
+
     handle @otherPaths {
 EOL
 
@@ -150,7 +211,6 @@ EOL
 EOL
 
     if [ -n "$SUB_PATH" ] && ([ "$SUB_DOMAIN" != "$DOMAIN" ] || [ "$SUB_EXT_PORT" != "$PORT" ]); then
-        
         cat <<EOL >> "$CADDY_CONFIG_FILE"
 
 $SUB_DOMAIN:$SUB_EXT_PORT {
@@ -162,7 +222,7 @@ $SUB_DOMAIN:$SUB_EXT_PORT {
             header_up X-Forwarded-Proto {scheme}
         }
     }
-    
+
     # Блокируем всё остальное на домене подписок
     @blocked {
         not path /$SUB_PATH/*
@@ -235,11 +295,13 @@ start_service() {
     local admin_password=$4
     local expiration_minutes=$5
     local debug=$6
-    local decoy_path=$7 
+    local decoy_path=$7
+    local xhttp_path=${8:-""}
+    local xhttp_upstream=${9:-""}
 
     install_dependencies
 
-    update_env_file "$domain" "$port" "$admin_username" "$admin_password" "$expiration_minutes" "$debug" "$decoy_path"
+    update_env_file "$domain" "$port" "$admin_username" "$admin_password" "$expiration_minutes" "$debug" "$decoy_path" "$xhttp_path" "$xhttp_upstream"
     if [ $? -ne 0 ]; then
         echo -e "${red}Ошибка: Не удалось обновить файл окружения.${NC}"
         return 1
@@ -275,54 +337,59 @@ start_service() {
     fi
 
     systemctl daemon-reload
-    systemctl enable hysteria-caddy.service 
+    systemctl enable hysteria-caddy.service
     systemctl start hysteria-caddy.service
     if [ $? -ne 0 ]; then
-        echo -e "${red}Ошибка: Не удалось перезапустить Caddy.${NC}"
+        echo -e "${red}Ошибка: Не удалось запустить Caddy.${NC}"
         return 1
     fi
 
     if systemctl is-active --quiet hysteria-webpanel.service; then
-        source /etc/hysteria/core/scripts/webpanel/.env
-        local webpanel_url="http://$domain:$port/$ROOT_PATH/"
+        source "$WEBPANEL_ENV_FILE"
+        local webpanel_url="https://$domain:$port/$ROOT_PATH/"
         echo -e "${green}Веб-панель Hysteria запущена. Сервис доступен по адресу: $webpanel_url ${NC}"
-        
-        if [ -n "$DECOY_PATH" ] && [ "$DECOY_PATH" != "None" ]; then
+
+        if [ "${XHTTP_ENABLED:-false}" = "true" ]; then
+            echo -e "${green}XHTTP (3X-UI) включён: /${XHTTP_PATH:-$DEFAULT_XHTTP_PATH}/* -> ${XHTTP_UPSTREAM:-$DEFAULT_XHTTP_UPSTREAM}${NC}"
+        else
+            echo -e "${yellow}XHTTP (3X-UI) выключен.${NC}"
+        fi
+
+        if [ -n "${DECOY_PATH:-}" ] && [ "${DECOY_PATH:-}" != "None" ]; then
             if [ "$port" -eq 443 ]; then
                 echo -e "${green}Сайт-маскировка настроен на том же порту (443) и будет обрабатывать пути, не относящиеся к веб-панели.${NC}"
             else
-                echo -e "${green}Сайт-маскировка настроен на порту 443 по адресу: http://$domain:443/${NC}"
+                echo -e "${green}Сайт-маскировка настроен на порту 443 по адресу: https://$domain:443/${NC}"
             fi
         fi
     else
-        echo -e "${red}Ошибка: Веб-панель Hysteria не запустилась после перезапуска Caddy.${NC}"
+        echo -e "${red}Ошибка: Веб-панель Hysteria не запустилась после запуска Caddy.${NC}"
     fi
 }
 
 setup_decoy_site() {
     local domain=$1
     local decoy_path=$2
-    
+
     if [ -z "$domain" ] || [ -z "$decoy_path" ]; then
         echo -e "${red}Использование: $0 decoy <DOMAIN> <PATH_TO_DECOY_SITE>${NC}"
         return 1
     fi
-    
+
     if [ ! -d "$decoy_path" ]; then
         echo -e "${yellow}Внимание: Путь к сайту-маскировке не существует. Создание директории...${NC}"
         mkdir -p "$decoy_path"
         echo "<html><body><h1>Сайт на реконструкции (Website Under Construction)</h1></body></html>" > "$decoy_path/index.html"
     fi
-    
-    if [ -f "/etc/hysteria/core/scripts/webpanel/.env" ]; then
-        source /etc/hysteria/core/scripts/webpanel/.env
-        sed -i "/DECOY_PATH=/d" /etc/hysteria/core/scripts/webpanel/.env
-        echo "DECOY_PATH=$decoy_path" >> /etc/hysteria/core/scripts/webpanel/.env
-        
+
+    if [ -f "$WEBPANEL_ENV_FILE" ]; then
+        source "$WEBPANEL_ENV_FILE"
+        sed -i "/DECOY_PATH=/d" "$WEBPANEL_ENV_FILE"
+        echo "DECOY_PATH=$decoy_path" >> "$WEBPANEL_ENV_FILE"
+
         update_caddy_file
-        
         systemctl restart hysteria-caddy.service
-        
+
         echo -e "${green}Сайт-маскировка успешно настроен для $domain${NC}"
         if [ "$PORT" -eq 443 ]; then
             echo -e "${green}Сайт-маскировка доступен по путям, не относящимся к веб-панели, на: https://$domain:443/${NC}"
@@ -336,36 +403,77 @@ setup_decoy_site() {
 }
 
 stop_decoy_site() {
-    if [ ! -f "/etc/hysteria/core/scripts/webpanel/.env" ]; then
+    if [ ! -f "$WEBPANEL_ENV_FILE" ]; then
         echo -e "${red}Ошибка: Веб-панель не настроена.${NC}"
         return 1
     fi
-    
-    source /etc/hysteria/core/scripts/webpanel/.env
-    
-    if [ -z "$DECOY_PATH" ] || [ "$DECOY_PATH" = "None" ]; then
+
+    source "$WEBPANEL_ENV_FILE"
+
+    if [ -z "${DECOY_PATH:-}" ] || [ "${DECOY_PATH:-}" = "None" ]; then
         echo -e "${yellow}Сайт-маскировка в данный момент не настроен.${NC}"
         return 0
     fi
-    
+
     local was_separate_port=false
     if [ "$PORT" -ne 443 ]; then
         was_separate_port=true
     fi
-    
-    sed -i "/DECOY_PATH=/d" /etc/hysteria/core/scripts/webpanel/.env
-    
+
+    sed -i "/DECOY_PATH=/d" "$WEBPANEL_ENV_FILE"
+
     DECOY_PATH=""
     update_caddy_file
-    
     systemctl restart hysteria-caddy.service
-    
+
     echo -e "${green}Сайт-маскировка остановлен и удален из конфигурации.${NC}"
     if [ "$was_separate_port" = true ]; then
         echo -e "${green}Порт 443 больше не обслуживается Caddy.${NC}"
     else
         echo -e "${green}Пути на порту 443, не относящиеся к веб-панели, теперь будут возвращать ошибку соединения (или 403 Forbidden).${NC}"
     fi
+}
+
+setup_xhttp_route() {
+    local xhttp_path=$1
+    local xhttp_upstream=${2:-"$DEFAULT_XHTTP_UPSTREAM"}
+
+    if [ -z "$xhttp_path" ]; then
+        echo -e "${red}Использование: $0 xhttp <XHTTP_PATH (без ведущего /)> [UPSTREAM default ${DEFAULT_XHTTP_UPSTREAM}]${NC}"
+        return 1
+    fi
+
+    if [ ! -f "$WEBPANEL_ENV_FILE" ]; then
+        echo -e "${red}Ошибка: .env веб-панели не найден. Сначала запусти: $0 start ...${NC}"
+        return 1
+    fi
+
+    sed -i "/^XHTTP_ENABLED=/d" "$WEBPANEL_ENV_FILE"
+    sed -i "/^XHTTP_PATH=/d" "$WEBPANEL_ENV_FILE"
+    sed -i "/^XHTTP_UPSTREAM=/d" "$WEBPANEL_ENV_FILE"
+    echo "XHTTP_ENABLED=true" >> "$WEBPANEL_ENV_FILE"
+    echo "XHTTP_PATH=$xhttp_path" >> "$WEBPANEL_ENV_FILE"
+    echo "XHTTP_UPSTREAM=$xhttp_upstream" >> "$WEBPANEL_ENV_FILE"
+
+    update_caddy_file
+    systemctl restart hysteria-caddy.service
+    echo -e "${green}XHTTP включён: /$xhttp_path/* -> $xhttp_upstream${NC}"
+}
+
+stop_xhttp_route() {
+    if [ ! -f "$WEBPANEL_ENV_FILE" ]; then
+        echo -e "${red}Ошибка: .env веб-панели не найден.${NC}"
+        return 1
+    fi
+
+    sed -i "/^XHTTP_ENABLED=/d" "$WEBPANEL_ENV_FILE"
+    sed -i "/^XHTTP_PATH=/d" "$WEBPANEL_ENV_FILE"
+    sed -i "/^XHTTP_UPSTREAM=/d" "$WEBPANEL_ENV_FILE"
+    echo "XHTTP_ENABLED=false" >> "$WEBPANEL_ENV_FILE"
+
+    update_caddy_file
+    systemctl restart hysteria-caddy.service
+    echo -e "${green}XHTTP выключен.${NC}"
 }
 
 reset_credentials() {
@@ -378,7 +486,7 @@ reset_credentials() {
         exit 1
     fi
 
-    OPTIND=1 
+    OPTIND=1
     while getopts ":u:p:" opt; do
         case $opt in
             u) new_username_val="$OPTARG" ;;
@@ -406,7 +514,8 @@ reset_credentials() {
 
     if [ -n "$new_password_val" ]; then
         echo "Обновление пароля..."
-        local new_password_hash=$(echo -n "$new_password_val" | sha256sum | cut -d' ' -f1)
+        local new_password_hash
+        new_password_hash=$(echo -n "$new_password_val" | sha256sum | cut -d' ' -f1)
         if sudo sed -i "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=$new_password_hash|" "$WEBPANEL_ENV_FILE"; then
             changes_made=true
         else
@@ -558,13 +667,13 @@ change_port_domain() {
 }
 
 show_webpanel_url() {
-    source /etc/hysteria/core/scripts/webpanel/.env
+    source "$WEBPANEL_ENV_FILE"
     local webpanel_url="https://$DOMAIN:$PORT/$ROOT_PATH/"
     echo "$webpanel_url"
 }
 
 show_webpanel_api_token() {
-    source /etc/hysteria/core/scripts/webpanel/.env
+    source "$WEBPANEL_ENV_FILE"
     echo "$API_TOKEN"
 }
 
@@ -573,30 +682,30 @@ stop_service() {
     systemctl disable hysteria-caddy.service > /dev/null 2>&1
     systemctl stop hysteria-caddy.service > /dev/null 2>&1
     echo "Caddy остановлен."
-    
+
     echo "Остановка веб-панели Hysteria..."
     systemctl disable hysteria-webpanel.service > /dev/null 2>&1
     systemctl stop hysteria-webpanel.service > /dev/null 2>&1
     echo "Веб-панель Hysteria остановлена."
 
     systemctl daemon-reload
-    rm -f /etc/hysteria/core/scripts/webpanel/.env
+    rm -f "$WEBPANEL_ENV_FILE"
     rm -f "$CADDY_CONFIG_FILE"
 }
 
 case "$1" in
     start)
-        if [ -z "$2" ] || [ -z "$3" ]; then
-            echo -e "${red}Использование: $0 start <DOMAIN> <PORT> [ADMIN_USERNAME] [ADMIN_PASSWORD] [EXPIRATION_MINUTES] [DEBUG] [DECOY_PATH]${NC}"
+        if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
+            echo -e "${red}Использование: $0 start <DOMAIN> <PORT> [ADMIN_USERNAME] [ADMIN_PASSWORD] [EXPIRATION_MINUTES] [DEBUG] [DECOY_PATH] [XHTTP_PATH] [XHTTP_UPSTREAM]${NC}"
             exit 1
         fi
-        start_service "$2" "$3" "$4" "$5" "$6" "$7" "$8"
+        start_service "$2" "$3" "$4" "$5" "$6" "$7" "$8" "${9:-}" "${10:-}"
         ;;
     stop)
         stop_service
         ;;
     decoy)
-        if [ -z "$2" ] || [ -z "$3" ]; then
+        if [ -z "${2:-}" ] || [ -z "${3:-}" ]; then
             echo -e "${red}Использование: $0 decoy <DOMAIN> <PATH_TO_DECOY_SITE>${NC}"
             exit 1
         fi
@@ -605,15 +714,21 @@ case "$1" in
     stopdecoy)
         stop_decoy_site
         ;;
+    xhttp)
+        setup_xhttp_route "${2:-}" "${3:-}"
+        ;;
+    stopxhttp)
+        stop_xhttp_route
+        ;;
     resetcreds)
-        shift 
+        shift
         reset_credentials "$@"
         ;;
     changeexp)
-        change_expiration "$2"
+        change_expiration "${2:-}"
         ;;
     changeroot)
-        change_root_path "$2"
+        change_root_path "${2:-}"
         ;;
     changedomain)
         shift
@@ -627,19 +742,21 @@ case "$1" in
         ;;
     genconfig)
         update_caddy_file
-        ;;	
-	*)
-        echo -e "${red}Использование: $0 {start|stop|decoy|stopdecoy|resetcreds|changeexp|changeroot|changedomain|url|api-token} [опции]${NC}"
-        echo -e "${yellow}start <DOMAIN> <PORT> [ADMIN_USERNAME] [ADMIN_PASSWORD] [EXPIRATION_MINUTES] [DEBUG] [DECOY_PATH]${NC}"
-        echo -e "${yellow}stop${NC}"
+        ;;
+    *)
+        echo -e "${red}Использование: $0 {start|stop|decoy|stopdecoy|xhttp|stopxhttp|resetcreds|changeexp|changeroot|changedomain|url|api-token|genconfig}${NC}"
+        echo -e "${yellow}start <DOMAIN> <PORT> [ADMIN_USERNAME] [ADMIN_PASSWORD] [EXPIRATION_MINUTES] [DEBUG] [DECOY_PATH] [XHTTP_PATH] [XHTTP_UPSTREAM]${NC}"
         echo -e "${yellow}decoy <DOMAIN> <PATH_TO_DECOY_SITE>${NC}"
         echo -e "${yellow}stopdecoy${NC}"
+        echo -e "${yellow}xhttp <XHTTP_PATH(without leading /)> [UPSTREAM default ${DEFAULT_XHTTP_UPSTREAM}]${NC}"
+        echo -e "${yellow}stopxhttp${NC}"
         echo -e "${yellow}resetcreds [-u new_username] [-p new_password]${NC}"
         echo -e "${yellow}changeexp <NEW_EXPIRATION_MINUTES>${NC}"
-        echo -e "${yellow}changeroot [NEW_ROOT_PATH] # Генерирует случайный, если не указан${NC}"
+        echo -e "${yellow}changeroot [NEW_ROOT_PATH]${NC}"
         echo -e "${yellow}changedomain [-d new_domain] [-p new_port]${NC}"
         echo -e "${yellow}url${NC}"
         echo -e "${yellow}api-token${NC}"
+        echo -e "${yellow}genconfig${NC}"
         exit 1
         ;;
 esac

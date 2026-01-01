@@ -258,16 +258,15 @@ add_alias() {
 }
 
 setup_main_node_label() {
-    log_info "Настройка отображаемого названия главной ноды..."
+    log_info "Настройка названия ноды..."
     echo
-    read -p "Отображаемое название главной ноды (например, '🇩🇪 Германия') [по умолчанию 🇺🇸 США]: " main_node_label
+    read -p "Название ноды (например, '🇺🇸 США') [по умолчанию 🇩🇪 Германия]: " main_node_label
     if [ -z "$main_node_label" ]; then
-        main_node_label="🇺🇸 США"
+        main_node_label="🇩🇪 Германия"
     fi
 
     mkdir -p /etc/hysteria
 
-    # если .configs.env уже есть – убираем старую строку MAIN_NODE_LABEL
     if [ -f /etc/hysteria/.configs.env ]; then
         grep -v '^MAIN_NODE_LABEL=' /etc/hysteria/.configs.env > /etc/hysteria/.configs.env.tmp || true
         mv /etc/hysteria/.configs.env.tmp /etc/hysteria/.configs.env
