@@ -6,8 +6,11 @@ trap 'echo -e "\n❌ Произошла ошибка. Прерывание."; ex
 # ========== Переменные ==========
 HYSTERIA_INSTALL_DIR="/etc/hysteria"
 HYSTERIA_VENV_DIR="$HYSTERIA_INSTALL_DIR/hysteria2_venv"
-GEOSITE_URL="https://raw.githubusercontent.com/Chocolate4U/Iran-v2ray-rules/release/geosite.dat"
-GEOIP_URL="https://raw.githubusercontent.com/Chocolate4U/Iran-v2ray-rules/release/geoip.dat"
+
+# ✅ RU GeoIP/GeoSite (IPv4) — latest release
+GEOSITE_URL="https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geosite.dat"
+GEOIP_URL="https://github.com/runetfreedom/russia-v2ray-rules-dat/releases/latest/download/geoip.dat"
+
 MIGRATE_SCRIPT_PATH="$HYSTERIA_INSTALL_DIR/core/scripts/db/migrate_users.py"
 
 # ========== Настройка цветов ==========
@@ -46,25 +49,25 @@ fix_caddy_repo() {
 
     if [[ -f "$old_caddy_key" ]] || { [[ -f "$caddy_source_list" ]] && grep -q "caddy.asc" "$caddy_source_list"; }; then
         warn "Обнаружена устаревшая конфигурация репозитория Caddy. Исправляем..."
-        
+
         if [[ -f "$old_caddy_key" ]]; then
             rm -f "$old_caddy_key"
             info "Удален старый GPG ключ Caddy."
         fi
-        
+
         rm -f "$new_caddy_keyring"
         info "Скачивание нового GPG ключа Caddy..."
         if ! curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o "$new_caddy_keyring"; then
             error "Не удалось скачать или обработать GPG ключ Caddy."
             exit 1
         fi
-        
+
         info "Обновление списка источников Caddy..."
         curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee "$caddy_source_list" > /dev/null
-        
+
         chmod o+r "$new_caddy_keyring"
         chmod o+r "$caddy_source_list"
-        
+
         info "Запуск apt update для применения изменений репозитория..."
         apt-get update -qq
         success "Конфигурация репозитория Caddy обновлена."
@@ -78,16 +81,16 @@ install_mongodb() {
     info "Проверка наличия MongoDB..."
     if ! command -v mongod &>/dev/null; then
         warn "MongoDB не найдена. Установка из официального репозитория..."
-        
+
         local os_name os_version
         os_name=$(grep '^ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
         os_version=$(grep '^VERSION_ID=' /etc/os-release | cut -d= -f2 | tr -d '"')
-        
-        apt-get update 
+
+        apt-get update
         apt-get install -y gnupg curl lsb-release
-        
+
         curl -fsSL https://www.mongodb.org/static/pgp/server-8.0.asc | gpg -o /usr/share/keyrings/mongodb-server-8.0.gpg --dearmor
-        
+
         if [[ "$os_name" == "ubuntu" ]]; then
             if [[ "$os_version" == "24.04" ]]; then
                 echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-8.0.gpg ] https://repo.mongodb.org/apt/ubuntu noble/mongodb-org/8.0 multiverse" > /etc/apt/sources.list.d/mongodb-org-8.0.list
@@ -102,7 +105,7 @@ install_mongodb() {
             error "Неподдерживаемая ОС для установки MongoDB: $os_name $os_version"
             exit 1
         fi
-        
+
         apt-get update -qq
         apt-get install -y mongodb-org
         systemctl start mongod
@@ -113,7 +116,7 @@ install_mongodb() {
     fi
 }
 
-# ========== Новая функция для миграции данных ==========
+# ========== Миграция данных ==========
 migrate_json_to_mongo() {
     info "Проверка необходимости миграции пользовательских данных..."
     if [[ -f "$HYSTERIA_INSTALL_DIR/users.json" ]]; then
@@ -155,16 +158,52 @@ download_and_extract_latest_release() {
     info "Удаление старой директории установки..."
     rm -rf "$HYSTERIA_INSTALL_DIR"
     mkdir -p "$HYSTERIA_INSTALL_DIR"
-    
+
     info "Распаковка в ${HYSTERIA_INSTALL_DIR}..."
     if ! unzip -q "$temp_zip" -d "$HYSTERIA_INSTALL_DIR"; then
         error "Не удалось распаковать архив."
         exit 1
     fi
     success "Распаковка прошла успешно."
-    
+
     rm "$temp_zip"
     info "Временный файл удален."
+}
+
+# ========== Скачивание Geo-данных (IPv4 + таймауты + атомарная замена) ==========
+download_geo_files_ipv4() {
+    info "Скачивание RU geosite.dat и geoip.dat (IPv4, таймауты, атомарно)..."
+
+    local wget_opts=(
+        -4
+        --timeout=15
+        --dns-timeout=10
+        --connect-timeout=10
+        --read-timeout=15
+        --tries=3
+        --waitretry=1
+        --retry-connrefused
+    )
+
+    # Скачиваем во временные файлы
+    wget "${wget_opts[@]}" -O "$HYSTERIA_INSTALL_DIR/geosite.dat.tmp" "$GEOSITE_URL"
+    wget "${wget_opts[@]}" -O "$HYSTERIA_INSTALL_DIR/geoip.dat.tmp" "$GEOIP_URL"
+
+    # Мини-проверка размеров (защита от "HTML/ошибка вместо dat")
+    if [[ ! -s "$HYSTERIA_INSTALL_DIR/geosite.dat.tmp" ]] || [[ $(stat -c%s "$HYSTERIA_INSTALL_DIR/geosite.dat.tmp") -lt 1024 ]]; then
+        error "geosite.dat слишком маленький/пустой — скачивание не похоже на корректное."
+        exit 1
+    fi
+    if [[ ! -s "$HYSTERIA_INSTALL_DIR/geoip.dat.tmp" ]] || [[ $(stat -c%s "$HYSTERIA_INSTALL_DIR/geoip.dat.tmp") -lt 1024 ]]; then
+        error "geoip.dat слишком маленький/пустой — скачивание не похоже на корректное."
+        exit 1
+    fi
+
+    # Атомарно заменяем
+    mv -f "$HYSTERIA_INSTALL_DIR/geosite.dat.tmp" "$HYSTERIA_INSTALL_DIR/geosite.dat"
+    mv -f "$HYSTERIA_INSTALL_DIR/geoip.dat.tmp" "$HYSTERIA_INSTALL_DIR/geoip.dat"
+
+    success "Geo-данные скачаны и заменены."
 }
 
 # ========== Захват активных сервисов ==========
@@ -189,13 +228,9 @@ for SERVICE in "${ALL_SERVICES[@]}"; do
     fi
 done
 
-# ========== Проверка поддержки AVX (Предварительное условие) ==========
+# ========== Проверки/предусловия ==========
 check_avx_support
-
-# ========== Исправление репозитория Caddy (Предварительное условие) ==========
 fix_caddy_repo
-
-# ========== Установка MongoDB (Предварительное условие) ==========
 install_mongodb
 
 # ========== Резервное копирование файлов ==========
@@ -230,11 +265,8 @@ done
 # ========== Скачивание и замена установки ==========
 download_and_extract_latest_release
 
-# ========== Скачивание Geo-данных ==========
-info "Скачивание geosite.dat и geoip.dat..."
-wget -q -O "$HYSTERIA_INSTALL_DIR/geosite.dat" "$GEOSITE_URL"
-wget -q -O "$HYSTERIA_INSTALL_DIR/geoip.dat" "$GEOIP_URL"
-success "Geo-данные скачаны."
+# ========== Скачивание Geo-данных (исправлено) ==========
+download_geo_files_ipv4
 
 # ========== Восстановление резервной копии ==========
 info "Восстановление конфигурационных файлов..."
@@ -252,7 +284,8 @@ done
 info "Обновление конфигурации Hysteria для HTTP аутентификации..."
 auth_block='{"type": "http", "http": {"url": "http://127.0.0.1:28262/auth"}}'
 if [[ -f "$HYSTERIA_INSTALL_DIR/config.json" ]]; then
-    jq --argjson auth_block "$auth_block" '.auth = $auth_block' "$HYSTERIA_INSTALL_DIR/config.json" > "$HYSTERIA_INSTALL_DIR/config.json.tmp" && mv "$HYSTERIA_INSTALL_DIR/config.json.tmp" "$HYSTERIA_INSTALL_DIR/config.json"
+    jq --argjson auth_block "$auth_block" '.auth = $auth_block' "$HYSTERIA_INSTALL_DIR/config.json" > "$HYSTERIA_INSTALL_DIR/config.json.tmp" \
+        && mv "$HYSTERIA_INSTALL_DIR/config.json.tmp" "$HYSTERIA_INSTALL_DIR/config.json"
     success "config.json обновлен для использования сервера аутентификации."
 else
     warn "config.json не найден после восстановления. Пропуск обновления аутентификации."
@@ -273,6 +306,7 @@ success "Права доступа обновлены."
 info "Настройка виртуального окружения и установка зависимостей..."
 cd "$HYSTERIA_INSTALL_DIR"
 python3 -m venv "$HYSTERIA_VENV_DIR"
+# shellcheck disable=SC1090
 source "$HYSTERIA_VENV_DIR/bin/activate"
 pip install --upgrade pip >/dev/null
 pip install -r requirements.txt >/dev/null
@@ -283,6 +317,7 @@ migrate_json_to_mongo
 
 # ========== Сервисы Systemd ==========
 info "Обеспечение конфигурации сервисов systemd..."
+# shellcheck disable=SC1090
 if source "$HYSTERIA_INSTALL_DIR/core/scripts/scheduler.sh"; then
     if ! check_auth_server_service; then
         setup_hysteria_auth_server && success "Сервис сервера аутентификации настроен." || warn "Настройка сервера аутентификации не удалась."
