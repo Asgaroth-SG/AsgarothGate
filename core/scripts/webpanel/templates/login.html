@@ -5,25 +5,80 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Вход в панель Asgaroth Gate</title>
+
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.2/dist/css/bootstrap.min.css">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
     <style>
         :root {
-            --bg-color: #181818;
-            --card-bg: #242424;
-            --input-bg: #121212;
-            --text-primary: #EAEAEA;
-            --text-secondary: #8E8E93;
-            --accent-color: #1faee9;
-            --accent-hover: #5ac8fa;
-            --border-color: #38383A;
+            /* --- СВЕТЛАЯ ТЕМА (по умолчанию) --- */
+            --ios-light-bg: #F9FAFB;
+            --ios-light-card: #FFFFFF;
+            --ios-light-text: #4B5563;
+            --ios-light-secondary: #9CA3AF;
+            --ios-light-blue: #60A5FA;
+            --ios-light-green: #34D399;
+            --ios-light-red: #F87171;
+            --ios-light-orange: #FBBF24;
+            --ios-light-border: rgba(0,0,0,0.05);
+            --ios-light-input-bg: #FFFFFF;
+            --ios-light-input-border: #E5E7EB;
+            --ios-light-placeholder: #9CA3AF;
+            
+            /* Переменные по умолчанию (для светлой темы) */
+            --bg-color: var(--ios-light-bg);
+            --card-bg: var(--ios-light-card);
+            --text-primary: var(--ios-light-text);
+            --text-secondary: var(--ios-light-secondary);
+            --accent-color: var(--ios-light-blue);
+            --accent-hover: #3B82F6;
+            --border-color: var(--ios-light-border);
+            --input-bg: var(--ios-light-input-bg);
+            --input-border: var(--ios-light-input-border);
             --danger-bg: rgba(255, 69, 58, 0.15);
             --danger-text: #FF453A;
             --danger-border: #FF453A;
+            --input-placeholder: var(--ios-light-placeholder);
         }
 
+        /* --- ТЕМНАЯ ТЕМА --- */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --ios-dark-bg: #111827;
+                --ios-dark-card: #1F2937;
+                --ios-dark-text: #F9FAFB;
+                --ios-dark-secondary: #9CA3AF;
+                --ios-dark-blue: #60A5FA;
+                --ios-dark-green: #34D399;
+                --ios-dark-red: #F87171;
+                --ios-dark-orange: #FBBF24;
+                --ios-dark-border: rgba(255,255,255,0.08);
+                --ios-dark-input-bg: #374151;
+                --ios-dark-input-border: rgba(255,255,255,0.1);
+                --ios-dark-placeholder: #6B7280;
+                
+                --bg-color: var(--ios-dark-bg);
+                --card-bg: var(--ios-dark-card);
+                --text-primary: var(--ios-dark-text);
+                --text-secondary: var(--ios-dark-secondary);
+                --accent-color: var(--ios-dark-blue);
+                --accent-hover: #93C5FD;
+                --border-color: var(--ios-dark-border);
+                --input-bg: var(--ios-dark-input-bg);
+                --input-border: var(--ios-dark-input-border);
+                --danger-bg: rgba(255, 69, 58, 0.2);
+                --danger-text: #FF6B6B;
+                --danger-border: #FF6B6B;
+                --input-placeholder: var(--ios-dark-placeholder);
+            }
+        }
+
+        /* Стили страницы */
         * {
             margin: 0;
             padding: 0;
@@ -31,7 +86,7 @@
         }
 
         body {
-            font-family: 'Inter', sans-serif;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-primary);
             min-height: 100vh;
@@ -39,15 +94,18 @@
             align-items: center;
             justify-content: center;
             padding: 16px;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            text-rendering: optimizeLegibility;
         }
 
         .login-container {
             background-color: var(--card-bg);
-            border-radius: 16px; /* Скругление как в style.css */
+            border-radius: 18px;
             padding: 48px 40px;
             width: 100%;
-            max-width: 400px;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2); /* Мягкая тень */
+            max-width: 420px;
+            box-shadow: 0 2px 4px -1px rgba(0, 0, 0, 0.03);
             border: 1px solid var(--border-color);
             position: relative;
             z-index: 1;
@@ -62,16 +120,17 @@
         @media (max-width: 480px) {
             .login-container {
                 padding: 32px 24px;
+                border-radius: 16px;
             }
         }
 
         .logo {
             text-align: center;
-            margin-bottom: 32px;
+            margin-bottom: 40px;
         }
 
         .logo h1 {
-            font-size: 28px;
+            font-size: 32px;
             font-weight: 700;
             color: var(--text-primary);
             margin-bottom: 8px;
@@ -88,50 +147,64 @@
             background: var(--danger-bg);
             border: 1px solid var(--danger-border);
             color: var(--danger-text);
-            padding: 12px;
+            padding: 12px 16px;
             border-radius: 12px;
             margin-bottom: 24px;
             font-size: 14px;
             text-align: center;
+            font-weight: 500;
         }
 
         .form-group {
             margin-bottom: 20px;
+            position: relative;
         }
 
         .form-input {
             width: 100%;
             padding: 16px;
-            background-color: var(--input-bg); /* Темнее карточки */
-            border: 1px solid var(--border-color);
+            background-color: var(--input-bg);
+            border: 1px solid var(--input-border);
             border-radius: 12px;
             font-size: 16px;
             color: var(--text-primary);
-            transition: all 0.2s ease;
+            transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
             outline: none;
+            font-family: 'Inter', sans-serif;
         }
 
         .form-input::placeholder {
-            color: var(--text-secondary);
+            color: var(--input-placeholder);
         }
 
         .form-input:focus {
             border-color: var(--accent-color);
-            box-shadow: 0 0 0 2px rgba(31, 174, 233, 0.2); /* Легкое свечение */
+            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.15);
+        }
+
+        .input-icon {
+            position: absolute;
+            right: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: var(--text-secondary);
+            pointer-events: none;
         }
 
         .submit-btn {
             width: 100%;
             padding: 16px;
             background-color: var(--accent-color);
-            color: white;
+            color: #111827;
             border: none;
             border-radius: 12px;
             font-size: 17px;
             font-weight: 600;
             cursor: pointer;
-            transition: all 0.2s ease;
+            transition: all 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
             margin-top: 10px;
+            font-family: 'Inter', sans-serif;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
         }
 
         .submit-btn:hover {
@@ -162,6 +235,31 @@
         .footer a:hover {
             color: var(--accent-color);
         }
+
+        /* Стили для темной темы с поддержкой медиа-запроса */
+        @media (prefers-color-scheme: dark) {
+            .submit-btn {
+                color: #111827;
+            }
+            
+            .submit-btn:hover {
+                background-color: #93C5FD;
+            }
+        }
+
+        /* Кастомные стили для улучшения внешнего вида */
+        .login-container::before {
+            content: '';
+            position: absolute;
+            top: -1px;
+            left: -1px;
+            right: -1px;
+            bottom: -1px;
+            background: linear-gradient(135deg, rgba(96, 165, 250, 0.1), rgba(52, 211, 153, 0.1));
+            border-radius: 19px;
+            z-index: -1;
+            opacity: 0.5;
+        }
     </style>
 </head>
 
@@ -169,25 +267,45 @@
     <div class="login-container">
         <div class="logo">
             <h1>Asgaroth Gate</h1>
-            <p>Авторизация</p>
+            <p>Авторизация в панели управления</p>
         </div>
 
         {% if error %}
-        <div class="error-message">{{ error }}</div>
+        <div class="error-message">
+            <i class="fas fa-exclamation-circle mr-2"></i>{{ error }}
+        </div>
         {% endif %}
 
         <form action="{{ url_for('login') }}" method="post">
             <div class="form-group">
                 <input type="text" name="username" class="form-input" placeholder="Имя пользователя" required autocomplete="username">
+                <span class="input-icon"><i class="fas fa-user"></i></span>
             </div>
             <div class="form-group">
                 <input type="password" name="password" class="form-input" placeholder="Пароль" required autocomplete="current-password">
+                <span class="input-icon"><i class="fas fa-lock"></i></span>
             </div>
-            <button type="submit" class="submit-btn">Войти</button>
+            <button type="submit" class="submit-btn">
+                <i class="fas fa-sign-in-alt mr-2"></i>Войти в систему
+            </button>
         </form>
+        
+        <div class="footer">
+            <p>© 2023 Asgaroth Gate Panel</p>
+            <a href="#" title="Поддержка">
+                <i class="fas fa-headset"></i>
+            </a>
+        </div>
     </div>
 
     <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const usernameInput = document.querySelector('input[name="username"]');
+            if (usernameInput) {
+                usernameInput.focus();
+            }
+        });
+
         document.addEventListener('keydown', function(event) {
             if (event.key === 'Enter') {
                 const form = document.querySelector('form[action]');
@@ -196,6 +314,17 @@
                     form.submit();
                 }
             }
+        });
+
+        const inputs = document.querySelectorAll('.form-input');
+        inputs.forEach(input => {
+            input.addEventListener('mouseenter', function() {
+                this.style.transform = 'translateY(-2px)';
+            });
+            
+            input.addEventListener('mouseleave', function() {
+                this.style.transform = 'translateY(0)';
+            });
         });
     </script>
 </body>
