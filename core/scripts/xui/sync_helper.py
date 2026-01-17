@@ -13,6 +13,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from xui.config import get_xui_sync_manager
 
+# Импортируем настройку логирования
+from xui.logging_config import setup_xui_logging
+setup_xui_logging()
+
 logger = logging.getLogger(__name__)
 
 

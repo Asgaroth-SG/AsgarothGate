@@ -10,6 +10,10 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 from dotenv import dotenv_values
 
+# Импортируем настройку логирования
+from xui.logging_config import setup_xui_logging
+setup_xui_logging()
+
 logger = logging.getLogger(__name__)
 
 # Путь к конфигурационному файлу X-UI
