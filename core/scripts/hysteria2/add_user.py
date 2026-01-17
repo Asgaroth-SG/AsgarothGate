@@ -83,6 +83,20 @@ def add_user(
 
         result = db.add_user(user_data)
         if result:
+            # Синхронизация с X-UI
+            try:
+                from xui.sync_helper import sync_user_create
+                sync_user_create(
+                    username=username_lower,
+                    expiry_days=expiration_days,
+                    traffic_limit_gb=traffic_gb,
+                    enable=not user_data.get("blocked", False),
+                    user_plan=user_data.get("plan", "standard")
+                )
+            except Exception as e:
+                # Не блокируем создание пользователя при ошибке синхронизации
+                print(f"Warning: X-UI sync failed: {e}", file=sys.stderr)
+            
             print(f"User {username} added successfully.")
             return 0
         else:

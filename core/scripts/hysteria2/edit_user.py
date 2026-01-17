@@ -90,6 +90,33 @@ def edit_user(
 
         elif not updates and not (new_username and new_username.lower() != username_lower):
              print("No changes specified.")
+        
+        # Синхронизация с X-UI
+        if updates or new_username:
+            try:
+                from xui.sync_helper import sync_user_update
+                # Определяем параметры для синхронизации
+                sync_expiry = updates.get('expiration_days') if 'expiration_days' in updates else None
+                sync_traffic = None
+                if 'max_download_bytes' in updates:
+                    sync_traffic = updates['max_download_bytes'] / 1073741824  # Конвертируем в GB
+                sync_enable = None
+                if 'blocked' in updates:
+                    sync_enable = not updates['blocked']
+                sync_plan = updates.get('plan') if 'plan' in updates else None
+                
+                # Синхронизируем с новым именем если было переименование
+                sync_username = new_username_lower if new_username else username_lower
+                sync_user_update(
+                    username=sync_username,
+                    expiry_days=sync_expiry,
+                    traffic_limit_gb=sync_traffic,
+                    enable=sync_enable,
+                    user_plan=sync_plan
+                )
+            except Exception as e:
+                # Не блокируем обновление пользователя при ошибке синхронизации
+                print(f"Warning: X-UI sync failed: {e}", file=sys.stderr)
 
     except Exception as e:
         print(f"An error occurred during update: {e}", file=sys.stderr)

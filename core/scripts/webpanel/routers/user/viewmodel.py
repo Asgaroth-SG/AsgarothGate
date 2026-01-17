@@ -17,11 +17,30 @@ class User(BaseModel):
     note: Optional[str] = None
     # Тариф пользователя: 'standard' или 'premium'
     plan: str = "standard"
+    # Статус синхронизации с X-UI: 'success', 'failed', 'not_synced', 'unknown'
+    xui_sync_status: Optional[str] = None
 
     @staticmethod
     def from_dict(username: str, user_data: dict):
         user_data = {'username': username, **user_data}
         user_data = User.__parse_user_data(user_data)
+        
+        # Получаем статус синхронизации X-UI из БД
+        try:
+            import sys
+            sys.path.insert(0, '/etc/hysteria/core/scripts')
+            from db.database import db
+            if db:
+                mapping = db.get_xui_mapping(username)
+                if mapping:
+                    user_data['xui_sync_status'] = mapping.get('sync_status', 'unknown')
+                else:
+                    user_data['xui_sync_status'] = 'not_synced'
+            else:
+                user_data['xui_sync_status'] = None
+        except Exception:
+            user_data['xui_sync_status'] = None
+        
         return User(**user_data)
 
     @staticmethod

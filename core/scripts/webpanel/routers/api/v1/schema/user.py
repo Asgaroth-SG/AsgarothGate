@@ -109,4 +109,5 @@ class UserUriResponse(BaseModel):
     ipv6: Optional[str] = None
     nodes: Optional[List[NodeUri]] = []
     normal_sub: Optional[str] = None
+    vless_nodes: Optional[List[NodeUri]] = []
     error: Optional[str] = None

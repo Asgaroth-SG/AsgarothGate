@@ -12,7 +12,18 @@
             <input type="checkbox" class="user-checkbox" value="{{ user.username }}">
         </td>
         <td>{{ loop.index + (offset if offset is defined else 0) }}</td>
-        <td data-username="{{ user.username }}"><strong>{{ user.username }}</strong></td>
+        <td data-username="{{ user.username }}">
+            <strong>{{ user.username }}</strong>
+            {% if user.xui_sync_status %}
+                {% if user.xui_sync_status == 'success' %}
+                    <i class="fas fa-check-circle text-success ml-1" title="Синхронизировано с 3X-UI" style="font-size: 0.8rem;"></i>
+                {% elif user.xui_sync_status == 'failed' %}
+                    <i class="fas fa-exclamation-circle text-danger ml-1" title="Ошибка синхронизации с 3X-UI" style="font-size: 0.8rem;"></i>
+                {% elif user.xui_sync_status == 'not_synced' %}
+                    <i class="fas fa-clock text-muted ml-1" title="Не синхронизировано с 3X-UI" style="font-size: 0.8rem;"></i>
+                {% endif %}
+            {% endif %}
+        </td>
 
         <!-- Тариф -->
         <td class="d-none d-md-table-cell">

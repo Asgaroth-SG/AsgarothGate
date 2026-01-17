@@ -7,6 +7,7 @@ from . import singbox
 from . import ip
 from . import misc
 from . import extra_config
+from . import xui
 
 router = APIRouter()
 
@@ -18,4 +19,5 @@ router.include_router(normalsub.router, prefix='/normalsub', tags=['API - Config
 router.include_router(singbox.router, prefix='/singbox', tags=['API - Config - Singbox'])
 router.include_router(ip.router, prefix='/ip', tags=['API - Config - IP'])
 router.include_router(extra_config.router, prefix='/extra-config', tags=['API - Config - Extra Config'])
+router.include_router(xui.router, prefix='/xui', tags=['API - Config - X-UI'])
 router.include_router(misc.router, tags=['API - Config - Misc'])

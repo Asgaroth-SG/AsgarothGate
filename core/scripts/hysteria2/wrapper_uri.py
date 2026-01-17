@@ -174,6 +174,32 @@ def process_users(target_usernames: List[str]) -> List[Dict[str, Any]]:
             user_output["normal_sub"] = (
                 f"https://{ns_domain}:{ns_port}/{ns_subpath}/sub/normal/{auth_password}#{username}"
             )
+        
+        # VLESS URIs из X-UI
+        try:
+            # Добавляем путь для импорта модулей xui
+            import sys
+            from pathlib import Path
+            xui_path = Path(__file__).parent.parent / "xui"
+            if xui_path.exists():
+                sys.path.insert(0, str(xui_path.parent))
+                from xui.config import get_xui_sync_manager
+                sync_manager = get_xui_sync_manager()
+                if sync_manager:
+                    vless_uris = sync_manager.get_user_vless_uris(username)
+                    if vless_uris:
+                        user_output["vless_nodes"] = vless_uris
+                    else:
+                        user_output["vless_nodes"] = []
+                else:
+                    user_output["vless_nodes"] = []
+            else:
+                user_output["vless_nodes"] = []
+        except Exception as e:
+            # Не блокируем выдачу URI при ошибке получения VLESS
+            user_output["vless_nodes"] = []
+            if hasattr(sys, 'stderr'):
+                print(f"Warning: Failed to get VLESS URIs for {username}: {e}", file=sys.stderr)
 
         results.append(user_output)
 

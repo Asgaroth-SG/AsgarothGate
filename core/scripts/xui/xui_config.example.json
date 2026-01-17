@@ -1,0 +1,47 @@
+{
+  "enabled": true,
+  "mode": "multi-xui",
+  "xui_servers": [
+    {
+      "host": "http://standard-server.example.com:54321",
+      "username": "admin",
+      "password": "your_password",
+      "base_path": "/",
+      "timeout": 10,
+      "max_retries": 3,
+      "plans": ["standard"],
+      "inbound_filter": {
+        "protocol": "vless",
+        "remark": "VLESS-Standard"
+      }
+    },
+    {
+      "host": "http://premium-server.example.com:54321",
+      "username": "admin",
+      "password": "your_password",
+      "base_path": "/",
+      "timeout": 10,
+      "max_retries": 3,
+      "plans": ["premium"],
+      "inbound_filter": {
+        "protocol": "vless",
+        "remark": "VLESS-Premium"
+      }
+    },
+    {
+      "host": "http://shared-server.example.com:54321",
+      "username": "admin",
+      "password": "your_password",
+      "base_path": "/",
+      "timeout": 10,
+      "max_retries": 3,
+      "plans": ["standard", "premium"],
+      "inbound_filter": {
+        "protocol": "vless"
+      }
+    }
+  ],
+  "inbound_filter": {
+    "protocol": "vless"
+  }
+}

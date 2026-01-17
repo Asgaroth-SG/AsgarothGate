@@ -36,7 +36,13 @@ $(document).ready(function () {
         statusWarp: contentSection.dataset.statusWarpUrl,
         installWarp: contentSection.dataset.installWarpUrl,
         uninstallWarp: contentSection.dataset.uninstallWarpUrl,
-        configureWarp: contentSection.dataset.configureWarpUrl
+        configureWarp: contentSection.dataset.configureWarpUrl,
+        xuiGetConfig: contentSection.dataset.xuiGetConfigUrl,
+        xuiUpdateConfig: contentSection.dataset.xuiUpdateConfigUrl,
+        xuiTestConnection: contentSection.dataset.xuiTestConnectionUrl,
+        xuiSyncStatus: contentSection.dataset.xuiSyncStatusUrl,
+        xuiSyncUser: contentSection.dataset.xuiSyncUserUrl,
+        xuiSyncAll: contentSection.dataset.xuiSyncAllUrl
     };
 
     initUI();
@@ -1246,4 +1252,379 @@ $(document).ready(function () {
             $(this).addClass('is-invalid');
         }
     });
+
+    // ========== X-UI Integration Management ==========
+    
+    // Загрузка конфигурации при открытии вкладки
+    $('#xui-tab').on('shown.bs.tab', function () {
+        loadXUIConfig();
+        loadXUISyncStatus();
+    });
+
+    // Загрузка конфигурации X-UI
+    function loadXUIConfig() {
+        $.ajax({
+            url: API_URLS.xuiGetConfig,
+            method: 'GET',
+            success: function (data) {
+                $('#xui_enabled').prop('checked', data.enabled);
+                $('#xui_mode').val(data.mode);
+                renderXUIServers(data.xui_servers || []);
+            },
+            error: function (xhr) {
+                console.error('Failed to load X-UI config:', xhr);
+                Swal.fire('Ошибка', 'Не удалось загрузить конфигурацию X-UI', 'error');
+            }
+        });
+    }
+
+    // Отображение серверов
+    function renderXUIServers(servers) {
+        const container = $('#xui_servers_container');
+        container.empty();
+        
+        if (servers.length === 0) {
+            container.append('<p class="text-muted">Нет настроенных серверов</p>');
+        }
+        
+        servers.forEach((server, index) => {
+            const serverHtml = createXUIServerHTML(server, index);
+            container.append(serverHtml);
+        });
+    }
+
+    // Создание HTML для сервера
+    function createXUIServerHTML(server, index) {
+        const plans = server.plans || ['standard', 'premium'];
+        const authType = server.auth_type || 'auto';
+        const hasToken = !!server.api_token;
+        const hasCredentials = !!(server.username && server.password);
+        
+        return `
+            <div class="card mb-3 xui-server-card" data-index="${index}">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h6 class="mb-0">Сервер ${index + 1}</h6>
+                    <button type="button" class="btn btn-sm btn-danger xui-remove-server-btn" data-index="${index}">
+                        <i class="fas fa-trash"></i> Удалить
+                    </button>
+                </div>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label>Адрес сервера</label>
+                        <input type="text" class="form-control xui-server-host" value="${escapeHtml(server.host || '')}" 
+                               placeholder="https://gateway.asgaroth.ru:5560">
+                    </div>
+                    <div class="form-group">
+                        <label>Базовый путь</label>
+                        <input type="text" class="form-control xui-server-base-path" value="${escapeHtml(server.base_path || '/vpn')}" 
+                               placeholder="/vpn">
+                    </div>
+                    <div class="form-group">
+                        <label>Тип авторизации</label>
+                        <select class="form-control xui-server-auth-type">
+                            <option value="auto" ${authType === 'auto' ? 'selected' : ''}>Автоопределение</option>
+                            <option value="token" ${authType === 'token' ? 'selected' : ''}>API Токен</option>
+                            <option value="login" ${authType === 'login' ? 'selected' : ''}>Login Endpoint</option>
+                            <option value="basic" ${authType === 'basic' ? 'selected' : ''}>Basic Auth</option>
+                        </select>
+                    </div>
+                    <div class="form-group xui-token-group" style="${authType === 'token' ? '' : 'display: none;'}">
+                        <label>API Токен</label>
+                        <input type="password" class="form-control xui-server-api-token" 
+                               value="${server.api_token && server.api_token !== '***' ? escapeHtml(server.api_token) : ''}" 
+                               placeholder="your_api_token">
+                    </div>
+                    <div class="form-group xui-credentials-group" style="${authType === 'login' || authType === 'basic' ? '' : 'display: none;'}">
+                        <label>Имя пользователя</label>
+                        <input type="text" class="form-control xui-server-username" 
+                               value="${escapeHtml(server.username || '')}" placeholder="admin">
+                    </div>
+                    <div class="form-group xui-credentials-group" style="${authType === 'login' || authType === 'basic' ? '' : 'display: none;'}">
+                        <label>Пароль</label>
+                        <input type="password" class="form-control xui-server-password" 
+                               value="${server.password && server.password !== '***' ? escapeHtml(server.password) : ''}" 
+                               placeholder="password">
+                    </div>
+                    <div class="form-group">
+                        <label>Планы</label>
+                        <div class="form-check">
+                            <input class="form-check-input xui-server-plan" type="checkbox" value="standard" 
+                                   ${plans.includes('standard') ? 'checked' : ''}>
+                            <label class="form-check-label">Standard</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input xui-server-plan" type="checkbox" value="premium" 
+                                   ${plans.includes('premium') ? 'checked' : ''}>
+                            <label class="form-check-label">Premium</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    // Добавление нового сервера
+    $('#xui_add_server_btn').on('click', function () {
+        const container = $('#xui_servers_container');
+        const index = container.find('.xui-server-card').length;
+        const newServer = {
+            host: 'https://gateway.asgaroth.ru:5560',
+            base_path: '/vpn',
+            auth_type: 'token',
+            plans: ['standard', 'premium']
+        };
+        container.append(createXUIServerHTML(newServer, index));
+        attachXUIServerEvents();
+    });
+
+    // Привязка событий к серверам
+    function attachXUIServerEvents() {
+        // Удаление сервера
+        $('.xui-remove-server-btn').off('click').on('click', function () {
+            const index = $(this).data('index');
+            $(this).closest('.xui-server-card').remove();
+            // Переиндексируем
+            $('#xui_servers_container .xui-server-card').each(function (idx) {
+                $(this).attr('data-index', idx);
+                $(this).find('.xui-remove-server-btn').attr('data-index', idx);
+                $(this).find('.card-header h6').text(`Сервер ${idx + 1}`);
+            });
+        });
+
+        // Переключение типа авторизации
+        $('.xui-server-auth-type').off('change').on('change', function () {
+            const card = $(this).closest('.xui-server-card');
+            const authType = $(this).val();
+            if (authType === 'token') {
+                card.find('.xui-token-group').show();
+                card.find('.xui-credentials-group').hide();
+            } else if (authType === 'login' || authType === 'basic') {
+                card.find('.xui-token-group').hide();
+                card.find('.xui-credentials-group').show();
+            } else {
+                card.find('.xui-token-group').show();
+                card.find('.xui-credentials-group').show();
+            }
+        });
+    }
+
+    // Сохранение конфигурации
+    $('#xui_config_form').on('submit', function (e) {
+        e.preventDefault();
+        
+        const enabled = $('#xui_enabled').is(':checked');
+        const mode = $('#xui_mode').val();
+        const servers = [];
+        
+        $('#xui_servers_container .xui-server-card').each(function () {
+            const plans = [];
+            $(this).find('.xui-server-plan:checked').each(function () {
+                plans.push($(this).val());
+            });
+            
+            const server = {
+                host: $(this).find('.xui-server-host').val().trim(),
+                base_path: $(this).find('.xui-server-base-path').val().trim() || '/',
+                auth_type: $(this).find('.xui-server-auth-type').val(),
+                plans: plans.length > 0 ? plans : ['standard', 'premium'],
+                timeout: 10,
+                max_retries: 3
+            };
+            
+            const authType = server.auth_type;
+            if (authType === 'token') {
+                server.api_token = $(this).find('.xui-server-api-token').val().trim();
+            } else if (authType === 'login' || authType === 'basic') {
+                server.username = $(this).find('.xui-server-username').val().trim();
+                server.password = $(this).find('.xui-server-password').val().trim();
+            } else {
+                // auto - пробуем оба
+                const token = $(this).find('.xui-server-api-token').val().trim();
+                const username = $(this).find('.xui-server-username').val().trim();
+                const password = $(this).find('.xui-server-password').val().trim();
+                if (token) server.api_token = token;
+                if (username && password) {
+                    server.username = username;
+                    server.password = password;
+                }
+            }
+            
+            servers.push(server);
+        });
+        
+        if (servers.length === 0) {
+            Swal.fire('Ошибка', 'Добавьте хотя бы один сервер', 'error');
+            return;
+        }
+        
+        const config = {
+            enabled: enabled,
+            mode: mode,
+            xui_servers: servers,
+            inbound_filter: {
+                protocol: 'vless'
+            }
+        };
+        
+        const btn = $(this).find('button[type="submit"]');
+        btn.prop('disabled', true);
+        btn.find('.spinner-border').show();
+        
+        $.ajax({
+            url: API_URLS.xuiUpdateConfig,
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(config),
+            success: function () {
+                Swal.fire('Успешно', 'Конфигурация X-UI сохранена', 'success');
+                loadXUIConfig();
+            },
+            error: function (xhr) {
+                const error = xhr.responseJSON?.detail || 'Не удалось сохранить конфигурацию';
+                Swal.fire('Ошибка', error, 'error');
+            },
+            complete: function () {
+                btn.prop('disabled', false);
+                btn.find('.spinner-border').hide();
+            }
+        });
+    });
+
+    // Тестирование подключения
+    $('#xui_test_connection_btn').on('click', function () {
+        const firstServer = $('#xui_servers_container .xui-server-card').first();
+        if (firstServer.length === 0) {
+            Swal.fire('Ошибка', 'Добавьте хотя бы один сервер', 'error');
+            return;
+        }
+        
+        const testData = {
+            host: firstServer.find('.xui-server-host').val().trim(),
+            base_path: firstServer.find('.xui-server-base-path').val().trim() || '/',
+            auth_type: firstServer.find('.xui-server-auth-type').val()
+        };
+        
+        const authType = testData.auth_type;
+        if (authType === 'token') {
+            testData.api_token = firstServer.find('.xui-server-api-token').val().trim();
+        } else if (authType === 'login' || authType === 'basic') {
+            testData.username = firstServer.find('.xui-server-username').val().trim();
+            testData.password = firstServer.find('.xui-server-password').val().trim();
+        }
+        
+        const btn = $(this);
+        btn.prop('disabled', true);
+        btn.find('.spinner-border').show();
+        $('#xui_test_result').hide();
+        
+        $.ajax({
+            url: API_URLS.xuiTestConnection,
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify(testData),
+            success: function (data) {
+                const resultDiv = $('#xui_test_result');
+                if (data.success) {
+                    resultDiv.removeClass('alert-danger').addClass('alert-success');
+                    resultDiv.html(`<strong>Успешно!</strong> ${data.message}<br>
+                        Найдено inbounds: ${data.inbounds_count || 0}`);
+                } else {
+                    resultDiv.removeClass('alert-success').addClass('alert-danger');
+                    resultDiv.html(`<strong>Ошибка:</strong> ${data.message}`);
+                }
+                resultDiv.show();
+            },
+            error: function (xhr) {
+                const error = xhr.responseJSON?.detail || 'Не удалось протестировать подключение';
+                $('#xui_test_result').removeClass('alert-success').addClass('alert-danger')
+                    .html(`<strong>Ошибка:</strong> ${error}`).show();
+            },
+            complete: function () {
+                btn.prop('disabled', false);
+                btn.find('.spinner-border').hide();
+            }
+        });
+    });
+
+    // Загрузка статуса синхронизации
+    function loadXUISyncStatus() {
+        $.ajax({
+            url: API_URLS.xuiSyncStatus,
+            method: 'GET',
+            success: function (data) {
+                const container = $('#xui_sync_status_container');
+                const successPercent = data.total_users > 0 
+                    ? Math.round((data.synced_users / data.total_users) * 100) 
+                    : 0;
+                
+                container.html(`
+                    <div class="row">
+                        <div class="col-md-4">
+                            <div class="info-box">
+                                <span class="info-box-icon bg-info"><i class="fas fa-users"></i></span>
+                                <div class="info-box-content">
+                                    <span class="info-box-text">Всего пользователей</span>
+                                    <span class="info-box-number">${data.total_users}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="info-box">
+                                <span class="info-box-icon bg-success"><i class="fas fa-check"></i></span>
+                                <div class="info-box-content">
+                                    <span class="info-box-text">Синхронизировано</span>
+                                    <span class="info-box-number">${data.synced_users}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-md-4">
+                            <div class="info-box">
+                                <span class="info-box-icon bg-danger"><i class="fas fa-times"></i></span>
+                                <div class="info-box-content">
+                                    <span class="info-box-text">Ошибки</span>
+                                    <span class="info-box-number">${data.failed_users}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="progress mt-3">
+                        <div class="progress-bar bg-success" role="progressbar" 
+                             style="width: ${successPercent}%">${successPercent}%</div>
+                    </div>
+                `);
+            },
+            error: function (xhr) {
+                $('#xui_sync_status_container').html(
+                    '<div class="alert alert-warning">Не удалось загрузить статус синхронизации</div>'
+                );
+            }
+        });
+    }
+
+    // Синхронизация всех пользователей
+    $('#xui_sync_all_btn').on('click', function () {
+        const btn = $(this);
+        btn.prop('disabled', true);
+        btn.find('.spinner-border').show();
+        
+        $.ajax({
+            url: API_URLS.xuiSyncAll,
+            method: 'POST',
+            success: function (data) {
+                Swal.fire('Успешно', data.detail || 'Синхронизация завершена', 'success');
+                loadXUISyncStatus();
+            },
+            error: function (xhr) {
+                const error = xhr.responseJSON?.detail || 'Не удалось синхронизировать пользователей';
+                Swal.fire('Ошибка', error, 'error');
+            },
+            complete: function () {
+                btn.prop('disabled', false);
+                btn.find('.spinner-border').hide();
+            }
+        });
+    });
+
+    // Инициализация событий при первой загрузке
+    attachXUIServerEvents();
 });

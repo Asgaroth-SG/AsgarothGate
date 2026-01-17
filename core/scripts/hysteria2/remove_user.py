@@ -13,6 +13,15 @@ def remove_users(usernames):
         return 1, "Error: No usernames provided for removal."
 
     try:
+        # Синхронизация с X-UI перед удалением
+        try:
+            from xui.sync_helper import sync_user_delete
+            for username in usernames:
+                sync_user_delete(username)
+        except Exception as e:
+            # Не блокируем удаление пользователя при ошибке синхронизации
+            print(f"Warning: X-UI sync failed: {e}", file=sys.stderr)
+        
         result = db.delete_users(usernames)
         
         if result.deleted_count > 0:
