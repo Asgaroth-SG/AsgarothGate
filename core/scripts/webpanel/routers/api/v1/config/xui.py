@@ -1,5 +1,6 @@
 import json
 import sys
+import logging
 from pathlib import Path
 from typing import Dict, Any, List
 from fastapi import APIRouter, HTTPException
@@ -12,6 +13,8 @@ from ..schema.config.xui import (
     XUISyncStatusResponse,
     XUISyncUserBody
 )
+
+logger = logging.getLogger(__name__)
 
 # Добавляем путь к модулям
 HYSTERIA_CORE_DIR = '/etc/hysteria/core/scripts'
@@ -73,14 +76,36 @@ async def get_xui_config_api():
     try:
         config = load_xui_config()
         
+        # Убеждаемся, что структура правильная
+        if 'xui_servers' not in config:
+            config['xui_servers'] = []
+        
+        # Очищаем серверы от лишних полей (например, inbound_filter внутри сервера)
+        cleaned_servers = []
+        for server in config.get('xui_servers', []):
+            cleaned_server = {
+                'host': server.get('host', ''),
+                'base_path': server.get('base_path', '/'),
+                'username': server.get('username', ''),
+                'password': server.get('password', ''),
+                'timeout': server.get('timeout', 10),
+                'max_retries': server.get('max_retries', 3),
+                'plans': server.get('plans', ['standard', 'premium'])
+            }
+            cleaned_servers.append(cleaned_server)
+        
+        config['xui_servers'] = cleaned_servers
+        
         # Скрываем пароли в ответе
         safe_config = config.copy()
         for server in safe_config.get('xui_servers', []):
-            if 'password' in server:
-                server['password'] = '***' if server.get('password') else None
+            if 'password' in server and server.get('password'):
+                server['password'] = '***'
         
         return XUIConfigResponse(**safe_config)
     except Exception as e:
+        import traceback
+        logger.error(f"Error loading X-UI config: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=500, detail=f'Error: {str(e)}')
 
 

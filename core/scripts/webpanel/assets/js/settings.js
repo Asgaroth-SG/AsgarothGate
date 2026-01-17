@@ -1260,6 +1260,12 @@ $(document).ready(function () {
         loadXUIConfig();
         loadXUISyncStatus();
     });
+    
+    // Также загружаем конфигурацию при первой загрузке страницы, если вкладка уже активна
+    if ($('#xui-tab').hasClass('active')) {
+        loadXUIConfig();
+        loadXUISyncStatus();
+    }
 
     // Загрузка конфигурации X-UI
     function loadXUIConfig() {
