@@ -171,16 +171,57 @@ class XUIClient:
             True если авторизация успешна
         """
         try:
-            # Создаем экземпляр AsyncApi
-            self.py3xui_api = AsyncApi(
-                host=self.base_url,
-                username=self.config.USERNAME,
-                password=self.config.PASSWORD,
-                logger=logger
-            )
+            # Формируем host с учетом base_path
+            # py3xui будет использовать этот host для всех запросов, включая авторизацию
+            # base_path указывается в настройках панели и используется как базовый путь без /login
+            api_host = self.base_url
+            if self.base_path and self.base_path != "/":
+                # Убираем ведущий и завершающий слэши из base_path
+                base = self.base_path.strip('/')
+                if base:
+                    # Если base_path указан, добавляем его к host
+                    # py3xui будет использовать этот host для всех запросов
+                    api_host = f"{self.base_url}/{base}"
             
-            # Выполняем вход через login()
+            logger.debug(f"Connecting to X-UI at {api_host} with base_path={self.base_path}")
+            
+            # Создаем экземпляр AsyncApi
+            # Передаем host с base_path, py3xui должен использовать его для авторизации
+            api_kwargs = {
+                'host': api_host,
+                'username': self.config.USERNAME,
+                'password': self.config.PASSWORD,
+                'logger': logger
+            }
+            
+            # Проверяем, поддерживает ли AsyncApi параметр base_path или path
+            # Если поддерживает, передаем base_path отдельно
+            try:
+                import inspect
+                sig = inspect.signature(AsyncApi.__init__)
+                params = list(sig.parameters.keys())
+                
+                if 'base_path' in params:
+                    api_kwargs['base_path'] = self.base_path
+                    # Если base_path передается отдельно, используем оригинальный host
+                    api_kwargs['host'] = self.base_url
+                elif 'path' in params:
+                    api_kwargs['path'] = self.base_path
+                    api_kwargs['host'] = self.base_url
+            except Exception:
+                # Если не удалось проверить сигнатуру, используем host с base_path
+                pass
+            
+            self.py3xui_api = AsyncApi(**api_kwargs)
+            
+            # Выполняем авторизацию через py3xui.login()
+            # py3xui должен использовать base_path для авторизации без добавления /login
+            logger.debug(f"Attempting py3xui.login() with host={api_host}")
             await self.py3xui_api.login()
+            
+            # Успешный логин
+            self._logged_in = True
+            self._last_login_time = datetime.now()
             
             # Создаем объект Connection
             self.connection = Connection(
@@ -189,9 +230,7 @@ class XUIClient:
                 config=self.config
             )
             
-            self._logged_in = True
-            self._last_login_time = datetime.now()
-            logger.info(f"Successfully authorized via py3xui on {self.base_url}")
+            logger.info(f"Successfully authorized via py3xui on {api_host}")
             return True
             
         except Exception as e:
