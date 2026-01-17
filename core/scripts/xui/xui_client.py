@@ -275,14 +275,34 @@ class XUIClient:
         
         try:
             # Используем метод из py3xui для получения inbounds
-            if hasattr(self.py3xui_api, 'list_inbounds'):
+            # py3xui использует api.inbound.get_list() для получения списка inbounds
+            if hasattr(self.py3xui_api, 'inbound') and hasattr(self.py3xui_api.inbound, 'get_list'):
+                inbounds = await self.py3xui_api.inbound.get_list()
+            elif hasattr(self.py3xui_api, 'list_inbounds'):
                 inbounds = await self.py3xui_api.list_inbounds()
             elif hasattr(self.py3xui_api, 'get_inbounds'):
                 inbounds = await self.py3xui_api.get_inbounds()
             else:
-                # Если метод не найден, используем прямой вызов API через py3xui
-                # Это зависит от реализации py3xui
-                raise NotImplementedError("py3xui API method for listing inbounds not found")
+                # Если метод не найден, пробуем прямой доступ к inbound
+                if hasattr(self.py3xui_api, 'inbound'):
+                    # Пробуем разные варианты методов
+                    inbound_api = self.py3xui_api.inbound
+                    if hasattr(inbound_api, 'get_list'):
+                        inbounds = await inbound_api.get_list()
+                    elif hasattr(inbound_api, 'list'):
+                        inbounds = await inbound_api.list()
+                    elif hasattr(inbound_api, 'get_all'):
+                        inbounds = await inbound_api.get_all()
+                    else:
+                        raise NotImplementedError(
+                            f"py3xui API method for listing inbounds not found. "
+                            f"Available methods in inbound: {dir(inbound_api)}"
+                        )
+                else:
+                    raise NotImplementedError(
+                        f"py3xui API method for listing inbounds not found. "
+                        f"Available methods: {[m for m in dir(self.py3xui_api) if not m.startswith('_')]}"
+                    )
             
             # Преобразуем в нужный формат
             result = []
