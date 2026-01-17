@@ -1283,8 +1283,9 @@ $(document).ready(function () {
         const container = $('#xui_servers_container');
         container.empty();
         
-        if (servers.length === 0) {
-            container.append('<p class="text-muted">Нет настроенных серверов</p>');
+        if (!servers || servers.length === 0) {
+            container.append('<p class="text-muted">Нет настроенных серверов. Нажмите "Добавить сервер" для настройки.</p>');
+            return;
         }
         
         servers.forEach((server, index) => {

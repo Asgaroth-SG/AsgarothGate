@@ -546,6 +546,93 @@
                                 </div>
                             </div>
 
+                            <!-- X-UI Integration Tab -->
+                            <div class='tab-pane fade' id='xui' role='tabpanel' aria-labelledby='xui-tab'>
+                                <div class="container-fluid p-3">
+                                    <h4><i class="fas fa-server"></i> Интеграция с 3X-UI</h4>
+                                    <p class="text-muted">Настройка автоматической синхронизации пользователей с панелью 3X-UI</p>
+                                    
+                                    <div class="alert alert-info">
+                                        <i class="fas fa-info-circle"></i> 
+                                        При создании/обновлении пользователей они автоматически синхронизируются с 3X-UI.
+                                        VLESS-клиенты создаются персонально для каждого пользователя.
+                                    </div>
+
+                                    <!-- Статус синхронизации -->
+                                    <div class="card mb-3">
+                                        <div class="card-header">
+                                            <h5 class="mb-0">Статус синхронизации</h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <div id="xui_sync_status_container">
+                                                <div class="text-center">
+                                                    <div class="spinner-border" role="status">
+                                                        <span class="sr-only">Загрузка...</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <div class="mt-3">
+                                                <button id="xui_sync_all_btn" type="button" class="btn btn-primary">
+                                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                                    Синхронизировать всех пользователей
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <!-- Конфигурация -->
+                                    <div class="card mb-3">
+                                        <div class="card-header">
+                                            <h5 class="mb-0">Конфигурация 3X-UI</h5>
+                                        </div>
+                                        <div class="card-body">
+                                            <form id="xui_config_form">
+                                                <div class="form-group">
+                                                    <div class="custom-control custom-switch">
+                                                        <input type="checkbox" class="custom-control-input" id="xui_enabled" checked>
+                                                        <label class="custom-control-label" for="xui_enabled">Включить синхронизацию</label>
+                                                    </div>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <label for="xui_mode">Режим работы</label>
+                                                    <select class="form-control" id="xui_mode">
+                                                        <option value="multi-xui">Multi-XUI (несколько серверов)</option>
+                                                        <option value="single-xui">Single-XUI (один сервер)</option>
+                                                    </select>
+                                                </div>
+
+                                                <div id="xui_servers_container">
+                                                    <p class="text-muted">Нет настроенных серверов. Нажмите "Добавить сервер" для настройки.</p>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <button type="button" class="btn btn-success" id="xui_add_server_btn">
+                                                        <i class="fas fa-plus"></i> Добавить сервер
+                                                    </button>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <button type="button" class="btn btn-info" id="xui_test_connection_btn">
+                                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                                        Тестировать подключение
+                                                    </button>
+                                                </div>
+
+                                                <div class="form-group">
+                                                    <button type="submit" class="btn btn-primary">
+                                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                                        Сохранить конфигурацию
+                                                    </button>
+                                                </div>
+                                            </form>
+                                        </div>
+                                    </div>
+
+                                    <!-- Результат теста подключения -->
+                                    <div id="xui_test_result" class="alert" style="display: none;"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -586,96 +673,6 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
                 <button type="button" class="btn btn-primary" id="save_edited_config_btn">Сохранить</button>
-            </div>
-
-                            <!-- X-UI Integration Tab -->
-                            <div class='tab-pane fade' id='xui' role='tabpanel' aria-labelledby='xui-tab'>
-                                <h4><i class="fas fa-server"></i> Интеграция с 3X-UI</h4>
-                                <p class="text-muted">Настройка автоматической синхронизации пользователей с панелью 3X-UI</p>
-                                
-                                <div class="alert alert-info">
-                                    <i class="fas fa-info-circle"></i> 
-                                    При создании/обновлении пользователей они автоматически синхронизируются с 3X-UI.
-                                    VLESS-клиенты создаются персонально для каждого пользователя.
-                                </div>
-
-                                <!-- Статус синхронизации -->
-                                <div class="card mb-3">
-                                    <div class="card-header">
-                                        <h5 class="mb-0">Статус синхронизации</h5>
-                                    </div>
-                                    <div class="card-body">
-                                        <div id="xui_sync_status_container">
-                                            <div class="text-center">
-                                                <div class="spinner-border" role="status">
-                                                    <span class="sr-only">Загрузка...</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <div class="mt-3">
-                                            <button id="xui_sync_all_btn" type="button" class="btn btn-primary">
-                                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
-                                                Синхронизировать всех пользователей
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <!-- Конфигурация -->
-                                <div class="card mb-3">
-                                    <div class="card-header">
-                                        <h5 class="mb-0">Конфигурация 3X-UI</h5>
-                                    </div>
-                                    <div class="card-body">
-                                        <form id="xui_config_form">
-                                            <div class="form-group">
-                                                <div class="custom-control custom-switch">
-                                                    <input type="checkbox" class="custom-control-input" id="xui_enabled" checked>
-                                                    <label class="custom-control-label" for="xui_enabled">Включить синхронизацию</label>
-                                                </div>
-                                            </div>
-
-                                            <div class="form-group">
-                                                <label for="xui_mode">Режим работы</label>
-                                                <select class="form-control" id="xui_mode">
-                                                    <option value="multi-xui">Multi-XUI (несколько серверов)</option>
-                                                    <option value="single-xui">Single-XUI (один сервер)</option>
-                                                </select>
-                                            </div>
-
-                                            <div id="xui_servers_container">
-                                                <!-- Серверы будут добавлены динамически -->
-                                            </div>
-
-                                            <div class="form-group">
-                                                <button type="button" class="btn btn-success" id="xui_add_server_btn">
-                                                    <i class="fas fa-plus"></i> Добавить сервер
-                                                </button>
-                                            </div>
-
-                                            <div class="form-group">
-                                                <button type="button" class="btn btn-info" id="xui_test_connection_btn">
-                                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
-                                                    Тестировать подключение
-                                                </button>
-                                            </div>
-
-                                            <div class="form-group">
-                                                <button type="submit" class="btn btn-primary">
-                                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
-                                                    Сохранить конфигурацию
-                                                </button>
-                                            </div>
-                                        </form>
-                                    </div>
-                                </div>
-
-                                <!-- Результат теста подключения -->
-                                <div id="xui_test_result" class="alert" style="display: none;"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
             </div>
         </div>
     </div>
