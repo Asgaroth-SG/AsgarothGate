@@ -245,12 +245,12 @@ setup_python_env() {
         exit 1
     fi
     
-    # Установка py3xui для интеграции с 3X-UI
-    log_info "Установка py3xui для интеграции с 3X-UI..."
-    if pip install py3xui &> /dev/null; then
-        log_success "py3xui установлен"
+    # Установка py3xui и nest-asyncio для интеграции с 3X-UI
+    log_info "Установка py3xui и nest-asyncio для интеграции с 3X-UI..."
+    if pip install py3xui nest-asyncio &> /dev/null; then
+        log_success "py3xui и nest-asyncio установлены"
     else
-        log_warning "Не удалось установить py3xui. Установите вручную: pip install py3xui"
+        log_warning "Не удалось установить py3xui/nest-asyncio. Установите вручную: pip install py3xui nest-asyncio"
     fi
 }
 

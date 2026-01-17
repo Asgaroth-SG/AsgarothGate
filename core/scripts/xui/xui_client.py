@@ -11,6 +11,14 @@ from urllib.parse import urlparse
 from datetime import datetime
 from dataclasses import dataclass
 
+# Импортируем nest_asyncio для работы в уже запущенном event loop
+try:
+    import nest_asyncio
+    nest_asyncio.apply()
+    NEST_ASYNCIO_AVAILABLE = True
+except ImportError:
+    NEST_ASYNCIO_AVAILABLE = False
+
 # Обязательный импорт py3xui
 try:
     from py3xui import AsyncApi
@@ -117,16 +125,43 @@ class XUIClient:
         self._last_login_time = None
         self._login_cache_duration = 3600  # 1 час
     
-    def _get_event_loop(self):
-        """Получает или создает event loop для синхронных вызовов"""
+    def _run_async_in_sync_context(self, coro):
+        """
+        Запускает корутину в синхронном или асинхронном контексте.
+        Работает как в обычном синхронном коде, так и в уже запущенном event loop (FastAPI).
+        """
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                raise RuntimeError("Event loop is closed")
+            # Пытаемся получить запущенный loop
+            loop = asyncio.get_running_loop()
+            # Если loop уже запущен (например, в FastAPI), используем nest_asyncio
+            if NEST_ASYNCIO_AVAILABLE:
+                # nest_asyncio позволяет использовать run_until_complete в уже запущенном loop
+                return loop.run_until_complete(coro)
+            else:
+                # Если nest_asyncio недоступен, запускаем в отдельном потоке
+                import concurrent.futures
+                import threading
+                
+                def run_in_thread():
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        return new_loop.run_until_complete(coro)
+                    finally:
+                        new_loop.close()
+                
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(run_in_thread)
+                    return future.result(timeout=30)  # Таймаут 30 секунд
         except RuntimeError:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        return loop
+            # Loop не запущен, можем использовать run_until_complete или asyncio.run
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_closed():
+                    return asyncio.run(coro)
+                return loop.run_until_complete(coro)
+            except RuntimeError:
+                return asyncio.run(coro)
     
     async def _login_async(self) -> bool:
         """
@@ -183,9 +218,8 @@ class XUIClient:
                 return True
         
         # Выполняем авторизацию через py3xui
-        loop = self._get_event_loop()
         try:
-            return loop.run_until_complete(self._login_async())
+            return self._run_async_in_sync_context(self._login_async())
         except XUIAuthError:
             raise
         except Exception as e:
@@ -248,8 +282,7 @@ class XUIClient:
             XUIAuthError: При ошибке аутентификации
         """
         self.ensure_logged_in()
-        loop = self._get_event_loop()
-        return loop.run_until_complete(self._list_inbounds_async())
+        return self._run_async_in_sync_context(self._list_inbounds_async())
     
     async def _add_client_async(
         self,
@@ -315,8 +348,7 @@ class XUIClient:
             XUIClientError: При ошибке
         """
         self.ensure_logged_in()
-        loop = self._get_event_loop()
-        return loop.run_until_complete(
+        return self._run_async_in_sync_context(
             self._add_client_async(inbound_id, uuid, expiry_time, traffic_limit, enable)
         )
     
@@ -383,8 +415,7 @@ class XUIClient:
             XUIClientError: При ошибке
         """
         self.ensure_logged_in()
-        loop = self._get_event_loop()
-        return loop.run_until_complete(
+        return self._run_async_in_sync_context(
             self._update_client_async(inbound_id, uuid, expiry_time, traffic_limit, enable)
         )
     
@@ -430,8 +461,7 @@ class XUIClient:
             XUIClientError: При ошибке
         """
         self.ensure_logged_in()
-        loop = self._get_event_loop()
-        return loop.run_until_complete(self._delete_client_async(inbound_id, uuid))
+        return self._run_async_in_sync_context(self._delete_client_async(inbound_id, uuid))
     
     async def _get_client_share_link_async(
         self,
@@ -473,15 +503,13 @@ class XUIClient:
             Share link или None если не удалось получить
         """
         self.ensure_logged_in()
-        loop = self._get_event_loop()
-        return loop.run_until_complete(self._get_client_share_link_async(inbound_id, uuid))
+        return self._run_async_in_sync_context(self._get_client_share_link_async(inbound_id, uuid))
     
     def close(self):
         """Закрывает соединение"""
         if self.py3xui_api and hasattr(self.py3xui_api, 'close'):
-            loop = self._get_event_loop()
             try:
-                loop.run_until_complete(self.py3xui_api.close())
+                self._run_async_in_sync_context(self.py3xui_api.close())
             except Exception as e:
                 logger.warning(f"Error closing API connection: {e}")
         
