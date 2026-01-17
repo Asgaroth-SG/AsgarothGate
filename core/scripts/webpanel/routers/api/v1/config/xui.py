@@ -135,10 +135,13 @@ async def update_xui_config_api(body: XUIConfigInputBody):
         
         save_xui_config(config_dict)
         
+        logger.info(f"X-UI configuration updated: enabled={config_dict.get('enabled')}, mode={config_dict.get('mode')}, servers={len(config_dict.get('xui_servers', []))}")
+        
         return DetailResponse(detail='X-UI configuration updated successfully.')
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error updating X-UI config: {e}")
         raise HTTPException(status_code=400, detail=f'Error: {str(e)}')
 
 
@@ -153,49 +156,57 @@ async def test_xui_connection_api(body: XUITestConnectionBody):
     Returns:
         XUITestConnectionResponse: Результат теста
     """
-    try:
-        from xui.xui_client import XUIClient, XUIClientError, XUIAuthError, XUIConnectionError
-        
-        # Проверяем наличие username и password (обязательны)
-        if not body.username or not body.password:
-            return XUITestConnectionResponse(
-                success=False,
-                message="Username and password are required"
-            )
-        
-        client = XUIClient(
-            host=body.host,
-            username=body.username,
-            password=body.password,
-            base_path=body.base_path,
-            timeout=10
-        )
-        
         try:
-            inbounds = client.list_inbounds()
-            return XUITestConnectionResponse(
-                success=True,
-                message=f"Successfully connected! Found {len(inbounds)} inbounds.",
-                inbounds_count=len(inbounds),
-                inbounds=inbounds[:10]  # Первые 10 для примера
+            from xui.xui_client import XUIClient, XUIClientError, XUIAuthError, XUIConnectionError
+            
+            logger.info(f"Testing X-UI connection to {body.host} with base_path={body.base_path}")
+            
+            # Проверяем наличие username и password (обязательны)
+            if not body.username or not body.password:
+                logger.warning("Test connection failed: username and password are required")
+                return XUITestConnectionResponse(
+                    success=False,
+                    message="Username and password are required"
+                )
+            
+            client = XUIClient(
+                host=body.host,
+                username=body.username,
+                password=body.password,
+                base_path=body.base_path,
+                timeout=10
             )
-        except XUIAuthError as e:
-            return XUITestConnectionResponse(
-                success=False,
-                message=f"Authentication failed: {str(e)}"
-            )
-        except XUIConnectionError as e:
-            return XUITestConnectionResponse(
-                success=False,
-                message=f"Connection failed: {str(e)}"
-            )
+            
+            try:
+                inbounds = client.list_inbounds()
+                logger.info(f"Test connection successful: found {len(inbounds)} inbounds")
+                return XUITestConnectionResponse(
+                    success=True,
+                    message=f"Successfully connected! Found {len(inbounds)} inbounds.",
+                    inbounds_count=len(inbounds),
+                    inbounds=inbounds[:10]  # Первые 10 для примера
+                )
+            except XUIAuthError as e:
+                logger.error(f"Test connection failed: Authentication error - {e}")
+                return XUITestConnectionResponse(
+                    success=False,
+                    message=f"Authentication failed: {str(e)}"
+                )
+            except XUIConnectionError as e:
+                logger.error(f"Test connection failed: Connection error - {e}")
+                return XUITestConnectionResponse(
+                    success=False,
+                    message=f"Connection failed: {str(e)}"
+                )
+            except Exception as e:
+                logger.error(f"Test connection failed: Unexpected error - {e}")
+                return XUITestConnectionResponse(
+                    success=False,
+                    message=f"Error: {str(e)}"
+                )
         except Exception as e:
-            return XUITestConnectionResponse(
-                success=False,
-                message=f"Error: {str(e)}"
-            )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f'Error: {str(e)}')
+            logger.error(f"Error in test connection API: {e}")
+            raise HTTPException(status_code=500, detail=f'Error: {str(e)}')
 
 
 @router.get('/sync-status', response_model=XUISyncStatusResponse, summary='Get X-UI Sync Status', name='get_xui_sync_status_api')
@@ -280,6 +291,8 @@ async def sync_user_xui_api(body: XUISyncUserBody):
         traffic_gb = int(traffic_bytes / (1024 ** 3)) if traffic_bytes > 0 else 0
         enable = not user_data.get('blocked', False)
         
+        logger.info(f"Syncing user {body.username} via API (plan: {plan}, expiry: {expiry_days} days, traffic: {traffic_gb} GB)")
+        
         success, error = sync_manager.sync_user_create(
             hysteria_username=body.username,
             expiry_days=expiry_days,
@@ -289,8 +302,10 @@ async def sync_user_xui_api(body: XUISyncUserBody):
         )
         
         if success:
+            logger.info(f"User {body.username} synced successfully via API")
             return DetailResponse(detail=f'User {body.username} synced successfully.')
         else:
+            logger.error(f"User {body.username} sync failed via API: {error}")
             raise HTTPException(
                 status_code=400,
                 detail=f'Sync failed: {error}'
@@ -298,6 +313,7 @@ async def sync_user_xui_api(body: XUISyncUserBody):
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error syncing user {body.username} via API: {e}")
         raise HTTPException(status_code=500, detail=f'Error: {str(e)}')
 
 
@@ -324,6 +340,7 @@ async def sync_all_users_xui_api():
             )
         
         all_users = db.get_all_users()
+        logger.info(f"Starting sync for all users via API: {len(all_users)} users")
         success_count = 0
         failed_count = 0
         errors = []
@@ -336,6 +353,8 @@ async def sync_all_users_xui_api():
             traffic_gb = int(traffic_bytes / (1024 ** 3)) if traffic_bytes > 0 else 0
             enable = not user.get('blocked', False)
             
+            logger.debug(f"Syncing user {username} (plan: {plan}, expiry: {expiry_days} days, traffic: {traffic_gb} GB)")
+            
             success, error = sync_manager.sync_user_create(
                 hysteria_username=username,
                 expiry_days=expiry_days,
@@ -346,16 +365,22 @@ async def sync_all_users_xui_api():
             
             if success:
                 success_count += 1
+                logger.debug(f"User {username} synced successfully")
             else:
                 failed_count += 1
-                errors.append(f"{username}: {error}")
+                error_msg = f"{username}: {error}"
+                errors.append(error_msg)
+                logger.warning(f"User {username} sync failed: {error}")
         
         message = f"Synced {success_count} users successfully."
         if failed_count > 0:
             message += f" {failed_count} users failed. Errors: {'; '.join(errors[:5])}"
         
+        logger.info(f"Sync all users completed: {success_count} success, {failed_count} failed")
+        
         return DetailResponse(detail=message)
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Error syncing all users via API: {e}")
         raise HTTPException(status_code=500, detail=f'Error: {str(e)}')

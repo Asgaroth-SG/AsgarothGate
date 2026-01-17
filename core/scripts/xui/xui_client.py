@@ -121,6 +121,8 @@ class XUIClient:
         # Инициализация py3xui API (но еще не авторизуемся)
         self.py3xui_api: Optional[AsyncApi] = None
         self.connection: Optional[Connection] = None
+        
+        logger.debug(f"XUIClient initialized for {self.base_url} with base_path={self.base_path}")
         self._logged_in = False
         self._last_login_time = None
         self._login_cache_duration = 3600  # 1 час
@@ -274,6 +276,20 @@ class XUIClient:
         await self._ensure_logged_in_async()
         
         try:
+            # Если base_path указан, нужно убедиться, что py3xui использует его для API запросов
+            # Проверяем, есть ли способ установить base_path для API запросов
+            api_base_url = self.base_url
+            if self.base_path and self.base_path != "/":
+                api_base_url = f"{self.base_url}{self.base_path}"
+            
+            # Пробуем установить базовый URL для API запросов, если py3xui это поддерживает
+            if hasattr(self.py3xui_api, 'base_url'):
+                self.py3xui_api.base_url = api_base_url
+            elif hasattr(self.py3xui_api, '_base_url'):
+                self.py3xui_api._base_url = api_base_url
+            elif hasattr(self.py3xui_api, 'session') and hasattr(self.py3xui_api.session, '_base_url'):
+                self.py3xui_api.session._base_url = api_base_url
+            
             # Используем метод из py3xui для получения inbounds
             # py3xui использует api.inbound.get_list() для получения списка inbounds
             if hasattr(self.py3xui_api, 'inbound') and hasattr(self.py3xui_api.inbound, 'get_list'):
@@ -294,15 +310,13 @@ class XUIClient:
                     elif hasattr(inbound_api, 'get_all'):
                         inbounds = await inbound_api.get_all()
                     else:
-                        raise NotImplementedError(
-                            f"py3xui API method for listing inbounds not found. "
-                            f"Available methods in inbound: {dir(inbound_api)}"
-                        )
+                        # Если методы не найдены, пробуем прямой HTTP запрос через сессию
+                        logger.warning("py3xui API methods not found, trying direct HTTP request")
+                        inbounds = await self._list_inbounds_direct_http()
                 else:
-                    raise NotImplementedError(
-                        f"py3xui API method for listing inbounds not found. "
-                        f"Available methods: {[m for m in dir(self.py3xui_api) if not m.startswith('_')]}"
-                    )
+                    # Если inbound API не найден, пробуем прямой HTTP запрос
+                    logger.warning("py3xui inbound API not found, trying direct HTTP request")
+                    inbounds = await self._list_inbounds_direct_http()
             
             # Преобразуем в нужный формат
             result = []
@@ -322,12 +336,75 @@ class XUIClient:
             
         except Exception as e:
             logger.error(f"Failed to list inbounds: {e}")
-            raise XUIClientError(f"Failed to list inbounds: {str(e)}")
+            # Если py3xui не сработал, пробуем прямой HTTP запрос
+            try:
+                logger.info("Falling back to direct HTTP request for listing inbounds")
+                inbounds = await self._list_inbounds_direct_http()
+                return inbounds
+            except Exception as http_error:
+                logger.error(f"Direct HTTP request also failed: {http_error}")
+                raise XUIClientError(f"Failed to list inbounds: {str(e)}")
+    
+    async def _list_inbounds_direct_http(self) -> List[Dict[str, Any]]:
+        """Получает список inbounds через прямой HTTP запрос с учетом base_path"""
+        import aiohttp
+        
+        # Формируем URL для API запроса с учетом base_path
+        api_url = self.base_url
+        if self.base_path and self.base_path != "/":
+            api_url = f"{self.base_url}{self.base_path}"
+        
+        # Пробуем разные варианты API endpoints
+        # 3X-UI обычно использует /api/inbound/list
+        api_endpoints = [
+            f"{api_url}/api/inbound/list",
+            f"{api_url}/api/inbounds",
+            f"{api_url}/inbound/list",
+            f"{self.base_url}/api/inbound/list",  # fallback без base_path
+        ]
+        
+        session = getattr(self.py3xui_api, 'session', None)
+        if not session:
+            raise XUIClientError("No active session for API requests")
+        
+        for endpoint in api_endpoints:
+            try:
+                logger.debug(f"Trying to get inbounds from {endpoint}")
+                async with session.get(endpoint) as response:
+                    response_text = await response.text()
+                    logger.debug(f"Response status: {response.status}, text: {response_text[:200]}")
+                    
+                    if response.status == 200:
+                        try:
+                            data = await response.json()
+                            # py3xui обычно возвращает объект с полем 'obj' или 'data'
+                            if isinstance(data, dict):
+                                inbounds = data.get('obj', data.get('data', data.get('inbounds', [])))
+                            elif isinstance(data, list):
+                                inbounds = data
+                            else:
+                                inbounds = []
+                            
+                            logger.info(f"Successfully retrieved {len(inbounds)} inbounds from {endpoint}")
+                            return inbounds
+                        except Exception as json_error:
+                            logger.debug(f"Failed to parse JSON response: {json_error}")
+                            continue
+                    else:
+                        logger.debug(f"Failed to get inbounds from {endpoint}: status {response.status}, text: {response_text[:200]}")
+            except Exception as e:
+                logger.debug(f"Error getting inbounds from {endpoint}: {e}")
+                continue
+        
+        raise XUIClientError(f"Failed to get inbounds from any endpoint. Tried: {api_endpoints}")
     
     async def _ensure_logged_in_async(self):
         """Убеждается, что клиент авторизован (асинхронно)"""
         if not self._logged_in or not self.py3xui_api:
+            logger.debug(f"Client not logged in async, attempting login to {self.base_url}")
             await self._login_async()
+        else:
+            logger.debug(f"Client already logged in async to {self.base_url}")
     
     def list_inbounds(self) -> List[Dict[str, Any]]:
         """
@@ -353,6 +430,8 @@ class XUIClient:
     ) -> bool:
         """Добавляет клиента в inbound (асинхронно)"""
         await self._ensure_logged_in_async()
+        
+        logger.info(f"Adding client {uuid} to inbound {inbound_id} (expiry: {expiry_time}, traffic: {traffic_limit}, enable: {enable})")
         
         try:
             # Используем метод из py3xui для добавления клиента
@@ -422,6 +501,8 @@ class XUIClient:
         """Обновляет клиента в inbound (асинхронно)"""
         await self._ensure_logged_in_async()
         
+        logger.info(f"Updating client {uuid} in inbound {inbound_id} (expiry: {expiry_time}, traffic: {traffic_limit}, enable: {enable})")
+        
         try:
             if hasattr(self.py3xui_api, 'update_client'):
                 await self.py3xui_api.update_client(
@@ -486,6 +567,8 @@ class XUIClient:
         """Удаляет клиента из inbound (асинхронно)"""
         await self._ensure_logged_in_async()
         
+        logger.info(f"Deleting client {uuid} from inbound {inbound_id}")
+        
         try:
             if hasattr(self.py3xui_api, 'delete_client'):
                 await self.py3xui_api.delete_client(inbound_id=inbound_id, uuid=uuid)
@@ -530,6 +613,8 @@ class XUIClient:
         """Получает share link для клиента (асинхронно)"""
         await self._ensure_logged_in_async()
         
+        logger.debug(f"Getting share link for client {uuid} in inbound {inbound_id}")
+        
         try:
             if hasattr(self.py3xui_api, 'get_client_share_link'):
                 link = await self.py3xui_api.get_client_share_link(inbound_id=inbound_id, uuid=uuid)
@@ -540,6 +625,7 @@ class XUIClient:
                 logger.warning("Share link method not found in py3xui")
                 return None
             
+            logger.debug(f"Successfully retrieved share link for client {uuid}")
             return link if isinstance(link, str) else str(link)
             
         except Exception as e:

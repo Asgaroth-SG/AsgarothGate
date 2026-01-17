@@ -81,11 +81,14 @@ class XUISyncManager:
         self.config = config
         self.clients: Dict[str, XUIClient] = {}
         
+        logger.info(f"Initializing XUISyncManager (enabled: {config.enabled}, mode: {config.mode}, servers: {len(config.xui_servers)})")
+        
         # Инициализируем клиенты для каждого сервера
         if config.enabled:
             for server in config.xui_servers:
                 host = server.get('host')
                 if not host:
+                    logger.warning("Server skipped: host is required")
                     continue
                 
                 # Проверяем наличие username и password (обязательны)
@@ -96,17 +99,23 @@ class XUISyncManager:
                     logger.warning(f"Server {host} skipped: username and password are required")
                     continue
                 
+                base_path = server.get('base_path', '/')
+                logger.info(f"Initializing X-UI client for {host} with base_path={base_path}")
+                
                 client = XUIClient(
                     host=host,
                     username=username,
                     password=password,
-                    base_path=server.get('base_path', '/'),
+                    base_path=base_path,
                     timeout=server.get('timeout', 10),
                     max_retries=server.get('max_retries', 3)
                 )
                 
                 # Используем host как ключ
                 self.clients[host] = client
+                logger.info(f"X-UI client initialized for {host}")
+        else:
+            logger.info("X-UI sync is disabled")
     
     def _get_inbound_ids(self, client: XUIClient, server_config: Optional[Dict] = None) -> List[int]:
         """
@@ -158,6 +167,7 @@ class XUISyncManager:
         Returns:
             Список кортежей (host, client, server_config)
         """
+        logger.debug(f"Getting servers for plan '{user_plan}'")
         user_plan = str(user_plan).lower().strip()
         if user_plan not in ('standard', 'premium'):
             user_plan = 'standard'
@@ -185,7 +195,9 @@ class XUISyncManager:
         # Используем детерминированный UUID на основе имени пользователя
         # Это позволяет восстанавливать маппинг при перезапуске
         namespace = uuid_lib.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
-        return str(uuid_lib.uuid5(namespace, hysteria_username.lower()))
+        uuid = str(uuid_lib.uuid5(namespace, hysteria_username.lower()))
+        logger.debug(f"Generated UUID {uuid} for user {hysteria_username}")
+        return uuid
     
     def _convert_expiry_days_to_timestamp(self, expiry_days: int) -> Optional[int]:
         """
@@ -354,17 +366,21 @@ class XUISyncManager:
         Returns:
             Tuple (success: bool, error_message: Optional[str])
         """
+        logger.info(f"Updating user {hysteria_username} in X-UI (expiry: {expiry_days}, traffic: {traffic_limit_gb}, enable: {enable}, plan: {user_plan})")
+        
         if not self.config.enabled:
+            logger.debug(f"X-UI sync is disabled, skipping update for {hysteria_username}")
             return True, None
         
         if not db:
+            logger.error("Database not available for user update")
             return False, "Database not available"
         
         # Получаем маппинг
         mapping = db.get_xui_mapping(hysteria_username)
         if not mapping:
             # Маппинга нет - создаем
-            logger.info(f"No mapping found for {hysteria_username}, creating...")
+            logger.info(f"No mapping found for {hysteria_username}, creating new mapping...")
             # Нужны базовые параметры пользователя
             user_data = db.get_user(hysteria_username)
             if not user_data:
@@ -492,8 +508,11 @@ class XUISyncManager:
         inbound_ids = mapping.get('inbound_ids', [])
         xui_host = mapping.get('xui_host')
         
+        logger.info(f"Deleting user {hysteria_username} from X-UI (UUID: {client_uuid}, host: {xui_host}, inbounds: {inbound_ids})")
+        
         if not client_uuid:
             # Удаляем маппинг даже если UUID нет
+            logger.warning(f"No client UUID found for user {hysteria_username}, removing mapping only")
             db.delete_xui_mapping(hysteria_username)
             return True, None
         
@@ -501,6 +520,7 @@ class XUISyncManager:
         
         # Удаляем с каждого сервера
         servers_to_update = [xui_host] if xui_host and self.config.mode == 'single-xui' else list(self.clients.keys())
+        logger.debug(f"Deleting from servers: {servers_to_update}")
         
         for host in servers_to_update:
             if host not in self.clients:
@@ -553,34 +573,44 @@ class XUISyncManager:
         Returns:
             Список словарей: [{"name": "Server1", "uri": "vless://..."}, ...]
         """
+        logger.debug(f"Getting VLESS URIs for user {hysteria_username}")
+        
         if not self.config.enabled:
+            logger.debug(f"X-UI sync is disabled, returning empty URIs for {hysteria_username}")
             return []
         
         if not db:
+            logger.warning("Database not available for getting URIs")
             return []
         
         # Получаем данные пользователя для определения плана
         user_data = db.get_user(hysteria_username)
         if not user_data:
+            logger.warning(f"User {hysteria_username} not found in database")
             return []
         
         user_plan = str(user_data.get('plan', 'standard')).lower().strip()
         if user_plan not in ('standard', 'premium'):
             user_plan = 'standard'
         
+        logger.debug(f"User {hysteria_username} plan: {user_plan}")
+        
         # Получаем маппинг
         mapping = db.get_xui_mapping(hysteria_username)
         if not mapping:
+            logger.debug(f"No X-UI mapping found for user {hysteria_username}")
             return []
         
         client_uuid = mapping.get('xui_client_uuid')
         if not client_uuid:
+            logger.warning(f"No client UUID in mapping for user {hysteria_username}")
             return []
         
         uris = []
         
         # Получаем серверы для плана пользователя
         servers_for_plan = self._get_servers_for_plan(user_plan)
+        logger.debug(f"Found {len(servers_for_plan)} servers for plan {user_plan}")
         
         # Получаем URIs с каждого сервера для плана
         for host, client, server_config in servers_for_plan:
