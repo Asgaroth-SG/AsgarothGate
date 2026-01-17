@@ -17,14 +17,9 @@ class XUIServerConfig(BaseModel):
         description="Фильтр inbounds для этого сервера"
     )
     
-    # Авторизация (один из способов)
-    api_token: Optional[str] = Field(None, description="API токен для авторизации")
-    username: Optional[str] = Field(None, description="Имя пользователя (для login/Basic Auth)")
-    password: Optional[str] = Field(None, description="Пароль (для login/Basic Auth)")
-    auth_type: Literal["auto", "token", "login", "basic"] = Field(
-        "auto",
-        description="Тип авторизации"
-    )
+    # Авторизация через username/password (обязательно)
+    username: str = Field(..., description="Имя пользователя")
+    password: str = Field(..., description="Пароль")
     
     @field_validator('host')
     @classmethod
@@ -64,10 +59,10 @@ class XUIConfigInputBody(BaseModel):
         if not v:
             raise ValueError('At least one X-UI server must be configured')
         for server in v:
-            # Проверяем, что указан способ авторизации
-            if not server.api_token and not (server.username and server.password):
+            # Проверяем, что указаны username и password
+            if not server.username or not server.password:
                 raise ValueError(
-                    f'Server {server.host}: Either api_token or username+password must be provided'
+                    f'Server {server.host}: Username and password are required'
                 )
         return v
 
@@ -84,10 +79,8 @@ class XUITestConnectionBody(BaseModel):
     """Тело запроса для тестирования подключения"""
     host: str
     base_path: str = "/"
-    api_token: Optional[str] = None
-    username: Optional[str] = None
-    password: Optional[str] = None
-    auth_type: Literal["auto", "token", "login", "basic"] = "auto"
+    username: str = Field(..., description="Имя пользователя")
+    password: str = Field(..., description="Пароль")
 
 
 class XUITestConnectionResponse(BaseModel):

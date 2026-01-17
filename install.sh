@@ -244,6 +244,14 @@ setup_python_env() {
         log_error "Не удалось установить зависимости Python"
         exit 1
     fi
+    
+    # Установка py3xui для интеграции с 3X-UI
+    log_info "Установка py3xui для интеграции с 3X-UI..."
+    if pip install py3xui &> /dev/null; then
+        log_success "py3xui установлен"
+    else
+        log_warning "Не удалось установить py3xui. Установите вручную: pip install py3xui"
+    fi
 }
 
 add_alias() {

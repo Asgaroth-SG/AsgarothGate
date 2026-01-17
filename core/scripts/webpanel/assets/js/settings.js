@@ -1297,9 +1297,6 @@ $(document).ready(function () {
     // Создание HTML для сервера
     function createXUIServerHTML(server, index) {
         const plans = server.plans || ['standard', 'premium'];
-        const authType = server.auth_type || 'auto';
-        const hasToken = !!server.api_token;
-        const hasCredentials = !!(server.username && server.password);
         
         return `
             <div class="card mb-3 xui-server-card" data-index="${index}">
@@ -1321,30 +1318,15 @@ $(document).ready(function () {
                                placeholder="/vpn">
                     </div>
                     <div class="form-group">
-                        <label>Тип авторизации</label>
-                        <select class="form-control xui-server-auth-type">
-                            <option value="auto" ${authType === 'auto' ? 'selected' : ''}>Автоопределение</option>
-                            <option value="token" ${authType === 'token' ? 'selected' : ''}>API Токен</option>
-                            <option value="login" ${authType === 'login' ? 'selected' : ''}>Login Endpoint</option>
-                            <option value="basic" ${authType === 'basic' ? 'selected' : ''}>Basic Auth</option>
-                        </select>
-                    </div>
-                    <div class="form-group xui-token-group" style="${authType === 'token' ? '' : 'display: none;'}">
-                        <label>API Токен</label>
-                        <input type="password" class="form-control xui-server-api-token" 
-                               value="${server.api_token && server.api_token !== '***' ? escapeHtml(server.api_token) : ''}" 
-                               placeholder="your_api_token">
-                    </div>
-                    <div class="form-group xui-credentials-group" style="${authType === 'login' || authType === 'basic' ? '' : 'display: none;'}">
                         <label>Имя пользователя</label>
                         <input type="text" class="form-control xui-server-username" 
-                               value="${escapeHtml(server.username || '')}" placeholder="admin">
+                               value="${escapeHtml(server.username || '')}" placeholder="admin" required>
                     </div>
-                    <div class="form-group xui-credentials-group" style="${authType === 'login' || authType === 'basic' ? '' : 'display: none;'}">
+                    <div class="form-group">
                         <label>Пароль</label>
                         <input type="password" class="form-control xui-server-password" 
                                value="${server.password && server.password !== '***' ? escapeHtml(server.password) : ''}" 
-                               placeholder="password">
+                               placeholder="password" required>
                     </div>
                     <div class="form-group">
                         <label>Планы</label>
@@ -1402,22 +1384,6 @@ $(document).ready(function () {
             }
         });
 
-        // Переключение типа авторизации (делегирование событий)
-        $(document).off('change', '.xui-server-auth-type').on('change', '.xui-server-auth-type', function () {
-            const card = $(this).closest('.xui-server-card');
-            const authType = $(this).val();
-            if (authType === 'token') {
-                card.find('.xui-token-group').show();
-                card.find('.xui-credentials-group').hide();
-            } else if (authType === 'login' || authType === 'basic') {
-                card.find('.xui-token-group').hide();
-                card.find('.xui-credentials-group').show();
-            } else {
-                // auto - показываем оба варианта
-                card.find('.xui-token-group').show();
-                card.find('.xui-credentials-group').show();
-            }
-        });
     }
 
     // Сохранение конфигурации
@@ -1434,32 +1400,23 @@ $(document).ready(function () {
                 plans.push($(this).val());
             });
             
+            const username = $(this).find('.xui-server-username').val().trim();
+            const password = $(this).find('.xui-server-password').val().trim();
+            
+            if (!username || !password) {
+                Swal.fire('Ошибка', 'Имя пользователя и пароль обязательны для каждого сервера', 'error');
+                return false;
+            }
+            
             const server = {
                 host: $(this).find('.xui-server-host').val().trim(),
                 base_path: $(this).find('.xui-server-base-path').val().trim() || '/',
-                auth_type: $(this).find('.xui-server-auth-type').val(),
+                username: username,
+                password: password,
                 plans: plans.length > 0 ? plans : ['standard', 'premium'],
                 timeout: 10,
                 max_retries: 3
             };
-            
-            const authType = server.auth_type;
-            if (authType === 'token') {
-                server.api_token = $(this).find('.xui-server-api-token').val().trim();
-            } else if (authType === 'login' || authType === 'basic') {
-                server.username = $(this).find('.xui-server-username').val().trim();
-                server.password = $(this).find('.xui-server-password').val().trim();
-            } else {
-                // auto - пробуем оба
-                const token = $(this).find('.xui-server-api-token').val().trim();
-                const username = $(this).find('.xui-server-username').val().trim();
-                const password = $(this).find('.xui-server-password').val().trim();
-                if (token) server.api_token = token;
-                if (username && password) {
-                    server.username = username;
-                    server.password = password;
-                }
-            }
             
             servers.push(server);
         });
@@ -1513,15 +1470,13 @@ $(document).ready(function () {
         const testData = {
             host: firstServer.find('.xui-server-host').val().trim(),
             base_path: firstServer.find('.xui-server-base-path').val().trim() || '/',
-            auth_type: firstServer.find('.xui-server-auth-type').val()
+            username: firstServer.find('.xui-server-username').val().trim(),
+            password: firstServer.find('.xui-server-password').val().trim()
         };
         
-        const authType = testData.auth_type;
-        if (authType === 'token') {
-            testData.api_token = firstServer.find('.xui-server-api-token').val().trim();
-        } else if (authType === 'login' || authType === 'basic') {
-            testData.username = firstServer.find('.xui-server-username').val().trim();
-            testData.password = firstServer.find('.xui-server-password').val().trim();
+        if (!testData.username || !testData.password) {
+            Swal.fire('Ошибка', 'Укажите имя пользователя и пароль для тестирования', 'error');
+            return;
         }
         
         const btn = $(this);

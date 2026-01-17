@@ -88,15 +88,21 @@ class XUISyncManager:
                 if not host:
                     continue
                 
+                # Проверяем наличие username и password (обязательны)
+                username = server.get('username')
+                password = server.get('password')
+                
+                if not username or not password:
+                    logger.warning(f"Server {host} skipped: username and password are required")
+                    continue
+                
                 client = XUIClient(
                     host=host,
-                    username=server.get('username'),
-                    password=server.get('password'),
+                    username=username,
+                    password=password,
                     base_path=server.get('base_path', '/'),
                     timeout=server.get('timeout', 10),
-                    max_retries=server.get('max_retries', 3),
-                    api_token=server.get('api_token'),
-                    auth_type=server.get('auth_type', 'auto')
+                    max_retries=server.get('max_retries', 3)
                 )
                 
                 # Используем host как ключ

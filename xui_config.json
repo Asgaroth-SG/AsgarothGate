@@ -5,11 +5,11 @@
     {
       "host": "https://gateway.asgaroth.ru:5560",
       "base_path": "/vpn",
+      "username": "admin",
+      "password": "your_password_here",
       "timeout": 10,
       "max_retries": 3,
       "plans": ["standard", "premium"],
-      "api_token": "your_api_token_here",
-      "auth_type": "token",
       "inbound_filter": {
         "protocol": "vless"
       }

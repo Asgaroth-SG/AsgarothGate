@@ -276,6 +276,13 @@ python3 -m venv "$HYSTERIA_VENV_DIR"
 source "$HYSTERIA_VENV_DIR/bin/activate"
 pip install --upgrade pip >/dev/null
 pip install -r requirements.txt >/dev/null
+# Установка py3xui для интеграции с 3X-UI
+info "Установка py3xui для интеграции с 3X-UI..."
+if pip install py3xui >/dev/null 2>&1; then
+    success "py3xui установлен."
+else
+    warn "Не удалось установить py3xui. Установите вручную: pip install py3xui"
+fi
 success "Среда Python готова."
 
 # ========== Миграция данных ==========

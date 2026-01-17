@@ -73,15 +73,11 @@ async def get_xui_config_api():
     try:
         config = load_xui_config()
         
-        # Скрываем пароли и токены в ответе
+        # Скрываем пароли в ответе
         safe_config = config.copy()
         for server in safe_config.get('xui_servers', []):
             if 'password' in server:
                 server['password'] = '***' if server.get('password') else None
-            if 'api_token' in server:
-                token = server.get('api_token')
-                if token:
-                    server['api_token'] = f"***{token[-4:]}" if len(token) > 4 else "***"
         
         return XUIConfigResponse(**safe_config)
     except Exception as e:
@@ -103,16 +99,14 @@ async def update_xui_config_api(body: XUIConfigInputBody):
         # Конвертируем Pydantic модель в dict
         config_dict = body.model_dump(exclude_none=True)
         
-        # Восстанавливаем скрытые пароли/токены если они не изменились
+        # Восстанавливаем скрытые пароли если они не изменились
         old_config = load_xui_config()
         for i, new_server in enumerate(config_dict.get('xui_servers', [])):
             if i < len(old_config.get('xui_servers', [])):
                 old_server = old_config['xui_servers'][i]
-                # Если пароль/токен скрыт (***), используем старый
+                # Если пароль скрыт (***), используем старый
                 if new_server.get('password') == '***' and old_server.get('password'):
                     new_server['password'] = old_server['password']
-                if new_server.get('api_token', '').startswith('***') and old_server.get('api_token'):
-                    new_server['api_token'] = old_server['api_token']
         
         save_xui_config(config_dict)
         
@@ -137,13 +131,18 @@ async def test_xui_connection_api(body: XUITestConnectionBody):
     try:
         from xui.xui_client import XUIClient, XUIClientError, XUIAuthError, XUIConnectionError
         
+        # Проверяем наличие username и password (обязательны)
+        if not body.username or not body.password:
+            return XUITestConnectionResponse(
+                success=False,
+                message="Username and password are required"
+            )
+        
         client = XUIClient(
             host=body.host,
-            base_path=body.base_path,
             username=body.username,
             password=body.password,
-            api_token=body.api_token,
-            auth_type=body.auth_type,
+            base_path=body.base_path,
             timeout=10
         )
         
