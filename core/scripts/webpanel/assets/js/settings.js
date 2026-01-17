@@ -10,6 +10,10 @@ $(document).ready(function () {
         getAllExtraConfigs: contentSection.dataset.getAllExtraConfigsUrl,
         addExtraConfig: contentSection.dataset.addExtraConfigUrl,
         deleteExtraConfig: contentSection.dataset.deleteExtraConfigUrl,
+        // НОВЫЕ URL
+        editExtraConfig: contentSection.dataset.editExtraConfigUrl,
+        moveExtraConfig: contentSection.dataset.moveExtraConfigUrl,
+        
         normalSubGetSubpath: contentSection.dataset.normalSubGetSubpathUrl,
         telegramGetInterval: contentSection.dataset.telegramGetIntervalUrl,
         getIpLimitConfig: contentSection.dataset.getIpLimitConfigUrl,
@@ -162,7 +166,7 @@ $(document).ready(function () {
             },
             success: function (response) {
                 if (window.showToast) {
-                    showToast("success", "Успешно!", successMessage);
+                    if (successMessage) showToast("success", "Успешно!", successMessage);
                     // Keep previous behaviour: auto-reload by default
                     if (showReload) {
                         setTimeout(() => location.reload(), 800);
@@ -170,15 +174,19 @@ $(document).ready(function () {
                         postSuccessCallback(response);
                     }
                 } else {
-                    Swal.fire("Успешно!", successMessage, "success").then(() => {
-                        if (showReload) {
-                            location.reload();
-                        } else {
-                            if (postSuccessCallback) {
-                                postSuccessCallback(response);
+                    if (successMessage) {
+                        Swal.fire("Успешно!", successMessage, "success").then(() => {
+                            if (showReload) {
+                                location.reload();
+                            } else {
+                                if (postSuccessCallback) {
+                                    postSuccessCallback(response);
+                                }
                             }
-                        }
-                    });
+                        });
+                    } else if (postSuccessCallback) {
+                        postSuccessCallback(response);
+                    }
                 }
             },
             error: function (xhr, status, error) {
@@ -419,25 +427,40 @@ $(document).ready(function () {
             $("#extra_configs_table").show();
             $("#no_extra_configs_message").hide();
 
-            configs.forEach(config => {
+            configs.forEach((config, index) => {
                 const rawPlan = (config.plan || config.type || "standard").toString().toLowerCase();
                 const isPremium = rawPlan === "premium";
                 const planLabel = isPremium ? "Premium" : "Standard";
                 const planClass = isPremium ? "badge badge-premium" : "badge badge-standard";
-
                 const uriVal = (config.uri || "").toString();
-                const shortUri = uriVal.length > 50 ? uriVal.substring(0, 50) + '...' : uriVal;
+                const shortUri = uriVal.length > 30 ? uriVal.substring(0, 30) + '...' : uriVal;
+
+                // Кнопки сортировки (скрываем верхнюю для первого, нижнюю для последнего)
+                const upBtnStyle = index === 0 ? 'visibility: hidden;' : '';
+                const downBtnStyle = index === configs.length - 1 ? 'visibility: hidden;' : '';
 
                 const row = `<tr>
-                                <td>${escapeHtml(config.name)}</td>
-                                <td><span class="${planClass}">${planLabel}</span></td>
-                                <td title="${escapeHtml(uriVal)}">${escapeHtml(shortUri)}</td>
-                                <td>
-                                    <button class="btn btn-xs btn-danger delete-extra-config-btn" data-name="${escapeHtml(config.name)}">
-                                        <i class="fas fa-trash"></i> Удалить
-                                    </button>
-                                </td>
-                            </tr>`;
+                    <td>${escapeHtml(config.name)}</td>
+                    <td><span class="${planClass}">${planLabel}</span></td>
+                    <td title="${escapeHtml(uriVal)}" style="font-family: monospace; font-size: 0.85rem;">${escapeHtml(shortUri)}</td>
+                    <td class="text-nowrap">
+                        <button class="btn btn-xs btn-default move-config-btn" data-name="${escapeHtml(config.name)}" data-dir="up" style="${upBtnStyle}" title="Вверх">
+                            <i class="fas fa-arrow-up"></i>
+                        </button>
+                        <button class="btn btn-xs btn-default move-config-btn" data-name="${escapeHtml(config.name)}" data-dir="down" style="${downBtnStyle}" title="Вниз">
+                            <i class="fas fa-arrow-down"></i>
+                        </button>
+                        <button class="btn btn-xs btn-info edit-config-btn ml-1" 
+                            data-name="${escapeHtml(config.name)}" 
+                            data-plan="${escapeHtml(rawPlan)}" 
+                            data-uri="${escapeHtml(uriVal)}">
+                            <i class="fas fa-pen"></i>
+                        </button>
+                        <button class="btn btn-xs btn-danger delete-extra-config-btn ml-1" data-name="${escapeHtml(config.name)}">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </td>
+                </tr>`;
                 tableBody.append(row);
             });
         } else {
@@ -1020,6 +1043,68 @@ $(document).ready(function () {
             );
         });
     });
+    
+    // --- ОБНОВЛЕННЫЕ ОБРАБОТЧИКИ СОБЫТИЙ ДЛЯ EXTRA CONFIG ---
+
+    // Кнопка "Редактировать"
+    $("#extra_configs_table").on("click", ".edit-config-btn", function () {
+        const name = $(this).data("name");
+        const plan = $(this).data("plan");
+        const uri = $(this).data("uri");
+
+        $("#edit_config_old_name").val(name);
+        $("#edit_config_name").val(name);
+        $("#edit_config_plan").val(plan);
+        $("#edit_config_uri").val(uri);
+
+        $("#editExtraConfigModal").modal('show');
+    });
+
+    // Кнопка "Сохранить" в модальном окне редактирования
+    $("#save_edited_config_btn").on("click", function () {
+        const oldName = $("#edit_config_old_name").val();
+        const newName = $("#edit_config_name").val().trim();
+        const plan = $("#edit_config_plan").val();
+        const uri = $("#edit_config_uri").val().trim();
+
+        if (!newName || !uri) {
+            Swal.fire("Ошибка", "Заполните все поля", "error");
+            return;
+        }
+
+        sendRequest(
+            API_URLS.editExtraConfig,
+            "POST",
+            { old_name: oldName, new_name: newName, uri: uri, plan: plan },
+            "Конфигурация успешно обновлена!",
+            "#save_edited_config_btn",
+            false,
+            function() {
+                $("#editExtraConfigModal").modal('hide');
+                fetchExtraConfigs();
+            }
+        );
+    });
+
+    // Кнопки "Вверх" / "Вниз"
+    $("#extra_configs_table").on("click", ".move-config-btn", function () {
+        const name = $(this).data("name");
+        const direction = $(this).data("dir");
+
+        sendRequest(
+            API_URLS.moveExtraConfig,
+            "POST",
+            { name: name, direction: direction },
+            null, 
+            null,
+            false, 
+            function() {
+                fetchExtraConfigs(); // Просто обновляем таблицу без перезагрузки страницы
+            }
+        );
+    });
+
+    // --- КОНЕЦ НОВЫХ ОБРАБОТЧИКОВ ---
 
     $("#telegram_start").on("click", startTelegram);
     $("#telegram_stop").on("click", stopTelegram);

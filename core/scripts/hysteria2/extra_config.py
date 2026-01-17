@@ -25,7 +25,6 @@ def read_configs():
                 return []
             data = json.loads(content)
             if isinstance(data, list):
-                # Обратная совместимость: если plan нет — считаем standard
                 normalized = []
                 for item in data:
                     if not isinstance(item, dict):
@@ -76,6 +75,68 @@ def add_config(name, uri, plan: str = "standard"):
     print(f"Successfully added configuration '{name}' ({plan}).")
 
 
+def edit_config(old_name, new_name, uri, plan: str = "standard"):
+    if not any(uri.startswith(protocol) for protocol in VALID_PROTOCOLS):
+        print(f"Error: Invalid URI. Must start with one of {', '.join(VALID_PROTOCOLS)}", file=sys.stderr)
+        sys.exit(1)
+
+    plan = normalize_plan(plan)
+    if plan not in VALID_PLANS:
+        print("Error: plan must be either 'standard' or 'premium'", file=sys.stderr)
+        sys.exit(1)
+
+    configs = read_configs()
+    
+    target_index = next((i for i, c in enumerate(configs) if c.get('name') == old_name), -1)
+
+    if target_index == -1:
+        print(f"Error: No configuration found with the name '{old_name}'.", file=sys.stderr)
+        sys.exit(1)
+
+    if new_name != old_name:
+        if any(c.get('name') == new_name for c in configs):
+            print(f"Error: A configuration with the name '{new_name}' already exists.", file=sys.stderr)
+            sys.exit(1)
+
+    configs[target_index] = {
+        "name": new_name,
+        "uri": uri,
+        "plan": plan
+    }
+
+    write_configs(configs)
+    print(f"Successfully updated configuration '{old_name}' -> '{new_name}'.")
+
+
+def move_config(name, direction):
+    if direction not in ("up", "down"):
+        print("Error: direction must be 'up' or 'down'", file=sys.stderr)
+        sys.exit(1)
+
+    configs = read_configs()
+
+    index = next((i for i, c in enumerate(configs) if c.get('name') == name), -1)
+
+    if index == -1:
+        print(f"Error: No configuration found with the name '{name}'.", file=sys.stderr)
+        sys.exit(1)
+
+    if direction == "up":
+        if index > 0:
+            configs[index], configs[index - 1] = configs[index - 1], configs[index]
+            write_configs(configs)
+            print(f"Successfully moved '{name}' up.")
+        else:
+            print(f"Configuration '{name}' is already at the top.")
+    elif direction == "down":
+        if index < len(configs) - 1:
+            configs[index], configs[index + 1] = configs[index + 1], configs[index]
+            write_configs(configs)
+            print(f"Successfully moved '{name}' down.")
+        else:
+            print(f"Configuration '{name}' is already at the bottom.")
+
+
 def delete_config(name):
     configs = read_configs()
 
@@ -121,6 +182,22 @@ def main():
         help="Access level: standard or premium (default: standard)."
     )
 
+    parser_edit = subparsers.add_parser("edit", help="Edit an existing proxy configuration.")
+    parser_edit.add_argument("--old-name", type=str, required=True, help="The current name of the configuration.")
+    parser_edit.add_argument("--new-name", type=str, required=True, help="The new name (can be same as old).")
+    parser_edit.add_argument("--uri", type=str, required=True, help="The new proxy URI.")
+    parser_edit.add_argument(
+        "--plan",
+        type=str,
+        default="standard",
+        choices=list(VALID_PLANS),
+        help="Access level: standard or premium."
+    )
+
+    parser_move = subparsers.add_parser("move", help="Move configuration up or down in the list.")
+    parser_move.add_argument("--name", type=str, required=True, help="The name of the configuration to move.")
+    parser_move.add_argument("--direction", type=str, required=True, choices=["up", "down"], help="Direction to move.")
+
     parser_delete = subparsers.add_parser("delete", help="Delete a proxy configuration.")
     parser_delete.add_argument("--name", type=str, required=True, help="The name of the configuration to delete.")
 
@@ -137,6 +214,10 @@ def main():
 
     if args.command == "add":
         add_config(args.name, args.uri, args.plan)
+    elif args.command == "edit":
+        edit_config(args.old_name, args.new_name, args.uri, args.plan)
+    elif args.command == "move":
+        move_config(args.name, args.direction)
     elif args.command == "delete":
         delete_config(args.name)
     elif args.command == "list":

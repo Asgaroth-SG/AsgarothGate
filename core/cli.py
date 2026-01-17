@@ -8,7 +8,7 @@ import json
 
 def pretty_print(data: typing.Any):
     if isinstance(data, dict) or isinstance(data, list):
-        print(json.dumps(data, indent=4))
+        print(json.dumps(data, indent=4, ensure_ascii=False))
         return
 
     print(data)
@@ -133,9 +133,10 @@ def get_user(username: str):
 @click.option('--unlimited', is_flag=True, default=False, help='Exempt user from IP limit checks.')
 @click.option('--note', '-n', required=False, help='An optional note for the user', type=str)
 @click.option('--max-ips', '-mi', required=False, default=0, help='Max IP limit (0 = global)', type=int)
-def add_user(username: str, traffic_limit: int, expiration_days: int, password: str, creation_date: str, unlimited: bool, note: str, max_ips: int):
+@click.option('--plan', type=click.Choice(['standard', 'premium'], case_sensitive=False), default='standard', help='User plan (standard/premium)')
+def add_user(username: str, traffic_limit: int, expiration_days: int, password: str, creation_date: str, unlimited: bool, note: str, max_ips: int, plan: str):
     try:
-        cli_api.add_user(username, traffic_limit, expiration_days, password, creation_date, unlimited, note, max_ips)
+        cli_api.add_user(username, traffic_limit, expiration_days, password, creation_date, unlimited, note, max_ips, plan)
         click.echo(f"Пользователь '{username}' успешно добавлен.")
     except Exception as e:
         click.echo(f'{e}', err=True)
@@ -148,10 +149,11 @@ def add_user(username: str, traffic_limit: int, expiration_days: int, password: 
 @click.option('--start-number', '-s', default=1, help='Starting number for username suffix.', type=int)
 @click.option('--unlimited', is_flag=True, default=False, help='Flag to mark users as unlimited (exempt from IP limits).')
 @click.option('--max-ips', '-mi', required=False, default=0, help='Max IP limit (0 = global)', type=int) 
-def bulk_user_add(traffic_gb: float, expiration_days: int, count: int, prefix: str, start_number: int, unlimited: bool, max_ips: int):
+@click.option('--plan', type=click.Choice(['standard', 'premium'], case_sensitive=False), default='standard', help='User plan (standard/premium)')
+def bulk_user_add(traffic_gb: float, expiration_days: int, count: int, prefix: str, start_number: int, unlimited: bool, max_ips: int, plan: str):
     """Adds multiple users in bulk."""
     try:
-        cli_api.bulk_user_add(traffic_gb, expiration_days, count, prefix, start_number, unlimited, max_ips)
+        cli_api.bulk_user_add(traffic_gb, expiration_days, count, prefix, start_number, unlimited, max_ips, plan)
         click.echo(f"Успешно инициировано создание {count} пользователей с префиксом '{prefix}'.")
     except Exception as e:
         click.echo(f'Ошибка при массовом добавлении пользователей: {e}', err=True)
@@ -167,9 +169,14 @@ def bulk_user_add(traffic_gb: float, expiration_days: int, count: int, prefix: s
 @click.option('--blocked/--unblocked', 'blocked', '-b', default=None, help='Block or unblock the user.')
 @click.option('--unlimited-ip/--limited-ip', 'unlimited_ip', default=None, help='Set user to be exempt from or subject to IP limits.')
 @click.option('--note', '-n', required=False, help='New note for the user.', type=str)
-def edit_user(username: str, new_username: str, new_password: str, new_traffic_limit: int, new_expiration_days: int, renew_password: bool, renew_creation_date: bool, blocked: bool | None, unlimited_ip: bool | None, note: str | None):
+@click.option('--plan', type=click.Choice(['standard', 'premium'], case_sensitive=False), required=False, help='New plan for the user')
+def edit_user(username: str, new_username: str, new_password: str, new_traffic_limit: int, new_expiration_days: int, renew_password: bool, renew_creation_date: bool, blocked: bool | None, unlimited_ip: bool | None, note: str | None, plan: str | None):
     try:
-        cli_api.kick_users_by_name(username)
+        try:
+             cli_api.kick_users_by_name([username])
+        except:
+             pass 
+
         cli_api.traffic_status(display_output=False)
         cli_api.edit_user(
             username=username, 
@@ -181,7 +188,9 @@ def edit_user(username: str, new_username: str, new_password: str, new_traffic_l
             renew_creation_date=renew_creation_date, 
             blocked=blocked, 
             unlimited_ip=unlimited_ip, 
-            note=note
+            note=note,
+            max_ips=None,
+            new_plan=plan
         )
         click.echo(f"Пользователь '{username}' успешно обновлен.")
     except Exception as e:
@@ -208,7 +217,10 @@ def remove_user(usernames: tuple[str]):
         
     try:
         usernames_list = list(usernames)
-        cli_api.kick_users_by_name(usernames_list)
+        try:
+             cli_api.kick_users_by_name(usernames_list)
+        except:
+             pass
         cli_api.traffic_status(display_output=False)
         cli_api.remove_users(usernames_list)
         click.echo(f"Пользователи '{', '.join(usernames)}' успешно удалены.")
@@ -225,6 +237,7 @@ def kick_user(usernames: tuple[str]):
         
     try:
         cli_api.kick_users_by_name(list(usernames))
+        click.echo(f"Пользователи {', '.join(usernames)} были отключены.")
     except Exception as e:
         click.echo(f'{e}', err=True)
 
@@ -370,7 +383,7 @@ def add_node(name, ip, port, sni, pinsha256, obfs, insecure, node_type):
             port=port,
             obfs=obfs,
             insecure=insecure,
-            node_type=node_type,   # <<< ВАЖНО
+            node_type=node_type,
         )
         click.echo(output.strip())
     except Exception as e:
@@ -446,10 +459,37 @@ def extra_config():
 @extra_config.command('add')
 @click.option('--name', required=True, help='A unique name for the configuration.')
 @click.option('--uri', required=True, help='The proxy URI (vmess, vless, ss, trojan).')
-def add_extra_config(name: str, uri: str):
+@click.option('--plan', type=click.Choice(['standard', 'premium'], case_sensitive=False), default='standard', help='Plan type.')
+def add_extra_config(name: str, uri: str, plan: str):
     """Add a new extra proxy configuration."""
     try:
-        output = cli_api.add_extra_config(name, uri)
+        output = cli_api.add_extra_config(name, uri, plan)
+        click.echo(output)
+    except Exception as e:
+        click.echo(f'{e}', err=True)
+
+
+@extra_config.command('edit')
+@click.option('--old-name', required=True, help='The current name of the configuration.')
+@click.option('--new-name', required=True, help='The new name (can be same as old).')
+@click.option('--uri', required=True, help='The new proxy URI.')
+@click.option('--plan', type=click.Choice(['standard', 'premium'], case_sensitive=False), default='standard', help='Plan type.')
+def edit_extra_config(old_name: str, new_name: str, uri: str, plan: str):
+    """Edit an existing extra proxy configuration."""
+    try:
+        output = cli_api.edit_extra_config(old_name, new_name, uri, plan)
+        click.echo(output)
+    except Exception as e:
+        click.echo(f'{e}', err=True)
+
+
+@extra_config.command('move')
+@click.option('--name', required=True, help='The name of the configuration to move.')
+@click.option('--direction', required=True, type=click.Choice(['up', 'down'], case_sensitive=False), help='Direction to move.')
+def move_extra_config(name: str, direction: str):
+    """Move a configuration up or down in the list."""
+    try:
+        output = cli_api.move_extra_config(name, direction)
         click.echo(output)
     except Exception as e:
         click.echo(f'{e}', err=True)
@@ -633,8 +673,8 @@ def normalsub(action: str, domain: str, port: int, subpath: str):
 @click.option('--admin-password', '-ap', required=False, help='Admin password for WebPanel', type=str)
 @click.option('--expiration-minutes', '-e', required=False, help='Expiration minutes for WebPanel session', type=int, default=20)
 @click.option('--debug', '-g', is_flag=True, help='Enable debug mode for WebPanel', default=False)
-@click.option('--decoy-path', '-dp', required=False, type=click.Path(exists=True, file_okay=False, dir_okay=True, readable=True), help='Optional path to serve as a decoy site (only for start action)') # Add decoy_path option
-def webpanel(action: str, domain: str, port: int, admin_username: str, admin_password: str, expiration_minutes: int, debug: bool, decoy_path: str | None): # Add decoy_path parameter
+@click.option('--decoy-path', '-dp', required=False, type=click.Path(exists=True, file_okay=False, dir_okay=True, readable=True), help='Optional path to serve as a decoy site (only for start action)') 
+def webpanel(action: str, domain: str, port: int, admin_username: str, admin_password: str, expiration_minutes: int, debug: bool, decoy_path: str | None): 
     """Manages the Hysteria Web Panel service."""
     try:
         if action == 'start':

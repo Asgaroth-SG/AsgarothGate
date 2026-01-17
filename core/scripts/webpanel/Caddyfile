@@ -1,0 +1,55 @@
+{
+    admin off
+    auto_https disable_redirects
+    servers {
+        protocols h1 h2
+    }
+}
+
+sso.asgaroth.ru:443 {
+
+    # gRPC
+    @grpc {
+        header Content-Type application/grpc*
+    }
+    handle @grpc {
+        reverse_proxy h2c://127.0.0.1:20001
+    }
+
+    # ✅ XHTTP
+    route /xhttp/9f3a1cfba29df6b437aed633b158d0e9/* {
+        reverse_proxy 127.0.0.1:20000
+    }
+
+    # ✅ Hysteria (HTTP часть/панель)
+    route /e3936dd9478e3ea0cf0ca5380a7d52bc/* {
+        reverse_proxy http://127.0.0.1:28260
+    }
+
+    # ✅ Всё остальное
+    @otherPaths {
+        not path /e3936dd9478e3ea0cf0ca5380a7d52bc/* /xhttp/9f3a1cfba29df6b437aed633b158d0e9/*
+    }
+    handle @otherPaths {
+        root * /home/asgaroth/www/cloud.asgaroth.ru
+        file_server
+    }
+}
+
+sso.asgaroth.ru:8080 {
+    route /ON4jl1Yl5PXYhZyOBwZ6x8NaDJgawyXq/* {
+        reverse_proxy http://127.0.0.1:28261 {
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Port {server_port}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Блокируем всё остальное на домене подписок
+    @blocked {
+        not path /ON4jl1Yl5PXYhZyOBwZ6x8NaDJgawyXq/*
+    }
+    abort @blocked
+}
+

@@ -634,6 +634,44 @@ def add_extra_config(name: str, uri: str, plan: str = "standard") -> str:
     return run_cmd(cmd)
 
 
+def edit_extra_config(old_name: str, new_name: str, uri: str, plan: str = "standard") -> str:
+    """
+    Edits an existing extra proxy configuration.
+    """
+    plan_norm = (plan or "standard").strip().lower()
+    if plan_norm not in ("standard", "premium"):
+        raise InvalidInputError("plan must be either 'standard' or 'premium'")
+
+    cmd = [
+        'python3',
+        Command.EXTRA_CONFIG_SCRIPT.value,
+        'edit',
+        '--old-name', old_name,
+        '--new-name', new_name,
+        '--uri', uri,
+        '--plan', plan_norm,
+    ]
+    return run_cmd(cmd)
+
+
+def move_extra_config(name: str, direction: str) -> str:
+    """
+    Moves a config up or down in the list.
+    direction: 'up' or 'down'
+    """
+    if direction not in ("up", "down"):
+         raise InvalidInputError("direction must be 'up' or 'down'")
+
+    cmd = [
+        'python3',
+        Command.EXTRA_CONFIG_SCRIPT.value,
+        'move',
+        '--name', name,
+        '--direction', direction
+    ]
+    return run_cmd(cmd)
+
+
 def delete_extra_config(name: str) -> str:
     """Deletes an extra proxy configuration."""
     return run_cmd(['python3', Command.EXTRA_CONFIG_SCRIPT.value, 'delete', '--name', name])
