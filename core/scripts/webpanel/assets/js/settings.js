@@ -1364,8 +1364,8 @@ $(document).ready(function () {
         `;
     }
 
-    // Добавление нового сервера
-    $('#xui_add_server_btn').on('click', function () {
+    // Добавление нового сервера (используем делегирование событий)
+    $(document).on('click', '#xui_add_server_btn', function () {
         const container = $('#xui_servers_container');
         const index = container.find('.xui-server-card').length;
         const newServer = {
@@ -1374,26 +1374,36 @@ $(document).ready(function () {
             auth_type: 'token',
             plans: ['standard', 'premium']
         };
-        container.append(createXUIServerHTML(newServer, index));
+        const serverHtml = createXUIServerHTML(newServer, index);
+        container.append(serverHtml);
         attachXUIServerEvents();
+        
+        // Удаляем сообщение "Нет настроенных серверов" если оно есть
+        container.find('p.text-muted').remove();
     });
 
-    // Привязка событий к серверам
+    // Привязка событий к серверам (используем делегирование для динамически добавляемых элементов)
     function attachXUIServerEvents() {
-        // Удаление сервера
-        $('.xui-remove-server-btn').off('click').on('click', function () {
-            const index = $(this).data('index');
-            $(this).closest('.xui-server-card').remove();
-            // Переиндексируем
+        // Удаление сервера (делегирование событий)
+        $(document).off('click', '.xui-remove-server-btn').on('click', '.xui-remove-server-btn', function () {
+            const card = $(this).closest('.xui-server-card');
+            card.remove();
+            
+            // Переиндексируем оставшиеся серверы
             $('#xui_servers_container .xui-server-card').each(function (idx) {
                 $(this).attr('data-index', idx);
                 $(this).find('.xui-remove-server-btn').attr('data-index', idx);
                 $(this).find('.card-header h6').text(`Сервер ${idx + 1}`);
             });
+            
+            // Если серверов не осталось, показываем сообщение
+            if ($('#xui_servers_container .xui-server-card').length === 0) {
+                $('#xui_servers_container').append('<p class="text-muted">Нет настроенных серверов. Нажмите "Добавить сервер" для настройки.</p>');
+            }
         });
 
-        // Переключение типа авторизации
-        $('.xui-server-auth-type').off('change').on('change', function () {
+        // Переключение типа авторизации (делегирование событий)
+        $(document).off('change', '.xui-server-auth-type').on('change', '.xui-server-auth-type', function () {
             const card = $(this).closest('.xui-server-card');
             const authType = $(this).val();
             if (authType === 'token') {
@@ -1403,6 +1413,7 @@ $(document).ready(function () {
                 card.find('.xui-token-group').hide();
                 card.find('.xui-credentials-group').show();
             } else {
+                // auto - показываем оба варианта
                 card.find('.xui-token-group').show();
                 card.find('.xui-credentials-group').show();
             }
@@ -1626,6 +1637,25 @@ $(document).ready(function () {
         });
     });
 
-    // Инициализация событий при первой загрузке
+    // Инициализация событий при первой загрузке (для уже существующих элементов)
     attachXUIServerEvents();
+    
+    // Также привязываем обработчик кнопки добавления сервера напрямую (на случай если элемент уже в DOM)
+    $('#xui_add_server_btn').on('click', function (e) {
+        e.preventDefault();
+        const container = $('#xui_servers_container');
+        const index = container.find('.xui-server-card').length;
+        const newServer = {
+            host: 'https://gateway.asgaroth.ru:5560',
+            base_path: '/vpn',
+            auth_type: 'token',
+            plans: ['standard', 'premium']
+        };
+        const serverHtml = createXUIServerHTML(newServer, index);
+        container.append(serverHtml);
+        attachXUIServerEvents();
+        
+        // Удаляем сообщение "Нет настроенных серверов" если оно есть
+        container.find('p.text-muted').remove();
+    });
 });

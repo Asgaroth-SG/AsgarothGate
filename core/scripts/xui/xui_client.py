@@ -2,16 +2,43 @@
 """
 X-UI/3X-UI API Client
 Поддерживает работу с X-UI панелью через HTTP API.
+Может использовать py3xui библиотеку для авторизации через login().
 """
 
 import requests
 import time
 import logging
+import asyncio
 from typing import Dict, List, Optional, Any
 from urllib.parse import urljoin, urlparse
 from datetime import datetime, timedelta
+from dataclasses import dataclass
+
+# Пытаемся импортировать py3xui
+try:
+    from py3xui import AsyncApi
+    PY3XUI_AVAILABLE = True
+except ImportError:
+    AsyncApi = None
+    PY3XUI_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class XUIConfig:
+    """Конфигурация для подключения к X-UI"""
+    USERNAME: str
+    PASSWORD: str
+    TOKEN: Optional[str] = None
+
+
+@dataclass
+class Connection:
+    """Авторизованное соединение с сервером X-UI"""
+    host: str
+    api: Any  # AsyncApi из py3xui (если используется)
+    config: XUIConfig
 
 
 class XUIClientError(Exception):
@@ -34,10 +61,13 @@ class XUIClient:
     Клиент для работы с X-UI/3X-UI API.
     
     Поддерживает:
-    - Логин через cookie-сессию
+    - Логин через cookie-сессию (через py3xui или напрямую)
     - Получение списка inbounds
     - Добавление/обновление/удаление клиентов
     - Получение share links
+    
+    Если доступна библиотека py3xui, использует AsyncApi с методом login().
+    Иначе использует прямые HTTP запросы через requests.
     """
     
     def __init__(
@@ -50,7 +80,8 @@ class XUIClient:
         max_retries: int = 3,
         retry_delay: float = 1.0,
         api_token: Optional[str] = None,
-        auth_type: str = "auto"
+        auth_type: str = "auto",
+        use_py3xui: bool = True  # Использовать py3xui если доступен
     ):
         """
         Инициализация клиента.
@@ -66,7 +97,10 @@ class XUIClient:
             api_token: API токен для авторизации без логина (если используется)
             auth_type: Тип авторизации - "auto" (автоопределение), "login" (через login endpoint), 
                       "token" (через API токен), "basic" (Basic Auth)
+            use_py3xui: Использовать py3xui библиотеку если доступна (по умолчанию True)
         """
+        # Определяем, использовать ли py3xui
+        self.use_py3xui = use_py3xui and PY3XUI_AVAILABLE and (username and password) and auth_type in ("login", "auto")
         # Нормализуем host (добавляем http:// если нет)
         parsed = urlparse(host)
         if not parsed.scheme:
@@ -217,9 +251,62 @@ class XUIClient:
         
         raise XUIConnectionError(f"Failed after {self.max_retries} attempts")
     
+    def _get_event_loop(self):
+        """Получает или создает event loop для синхронных вызовов"""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                raise RuntimeError("Event loop is closed")
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        return loop
+    
+    async def _login_py3xui_async(self) -> bool:
+        """
+        Асинхронная авторизация через py3xui.
+        
+        Returns:
+            True если авторизация успешна
+        """
+        if not PY3XUI_AVAILABLE or not self.config:
+            return False
+        
+        try:
+            # Создаем экземпляр AsyncApi
+            self.py3xui_api = AsyncApi(
+                host=self.base_url,
+                username=self.config.USERNAME,
+                password=self.config.PASSWORD,
+                logger=logger
+            )
+            
+            # Выполняем вход через login()
+            await self.py3xui_api.login()
+            
+            # Создаем объект Connection
+            self.connection = Connection(
+                host=self.base_url,
+                api=self.py3xui_api,
+                config=self.config
+            )
+            
+            self._logged_in = True
+            self._last_login_time = datetime.now()
+            logger.info(f"Successfully authorized via py3xui on {self.base_url}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"py3xui authorization error on {self.base_url}: {e}")
+            self.py3xui_api = None
+            self.connection = None
+            raise XUIAuthError(f"Failed to login via py3xui: {str(e)}")
+    
     def login(self) -> bool:
         """
         Выполняет логин в X-UI панель (если требуется).
+        
+        Использует py3xui если доступен, иначе использует прямые HTTP запросы.
         
         Returns:
             True если авторизован
@@ -248,6 +335,16 @@ class XUIClient:
                 return True  # Используем токен
             raise XUIAuthError("Username/password or API token required for authentication")
         
+        # Пытаемся использовать py3xui если доступен
+        if self.use_py3xui and PY3XUI_AVAILABLE:
+            try:
+                loop = self._get_event_loop()
+                return loop.run_until_complete(self._login_py3xui_async())
+            except Exception as e:
+                logger.warning(f"py3xui login failed, falling back to direct HTTP: {e}")
+                # Продолжаем с прямым HTTP запросом
+        
+        # Fallback: прямой HTTP запрос через requests
         try:
             response = self._request(
                 method='POST',
@@ -263,7 +360,7 @@ class XUIClient:
             if response.get('success', False):
                 self._logged_in = True
                 self._last_login_time = datetime.now()
-                logger.info("Successfully logged in to X-UI")
+                logger.info("Successfully logged in to X-UI via direct HTTP")
                 return True
             else:
                 raise XUIAuthError(f"Login failed: {response.get('msg', 'Unknown error')}")
