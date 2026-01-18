@@ -156,57 +156,57 @@ async def test_xui_connection_api(body: XUITestConnectionBody):
     Returns:
         XUITestConnectionResponse: Результат теста
     """
-        try:
-            from xui.xui_client import XUIClient, XUIClientError, XUIAuthError, XUIConnectionError
-            
-            logger.info(f"Testing X-UI connection to {body.host} with base_path={body.base_path}")
-            
-            # Проверяем наличие username и password (обязательны)
-            if not body.username or not body.password:
-                logger.warning("Test connection failed: username and password are required")
-                return XUITestConnectionResponse(
-                    success=False,
-                    message="Username and password are required"
-                )
-            
-            client = XUIClient(
-                host=body.host,
-                username=body.username,
-                password=body.password,
-                base_path=body.base_path,
-                timeout=10
+    try:
+        from xui.xui_client import XUIClient, XUIClientError, XUIAuthError, XUIConnectionError
+        
+        logger.info(f"Testing X-UI connection to {body.host} with base_path={body.base_path}")
+        
+        # Проверяем наличие username и password (обязательны)
+        if not body.username or not body.password:
+            logger.warning("Test connection failed: username and password are required")
+            return XUITestConnectionResponse(
+                success=False,
+                message="Username and password are required"
             )
-            
-            try:
-                inbounds = client.list_inbounds()
-                logger.info(f"Test connection successful: found {len(inbounds)} inbounds")
-                return XUITestConnectionResponse(
-                    success=True,
-                    message=f"Successfully connected! Found {len(inbounds)} inbounds.",
-                    inbounds_count=len(inbounds),
-                    inbounds=inbounds[:10]  # Первые 10 для примера
-                )
-            except XUIAuthError as e:
-                logger.error(f"Test connection failed: Authentication error - {e}")
-                return XUITestConnectionResponse(
-                    success=False,
-                    message=f"Authentication failed: {str(e)}"
-                )
-            except XUIConnectionError as e:
-                logger.error(f"Test connection failed: Connection error - {e}")
-                return XUITestConnectionResponse(
-                    success=False,
-                    message=f"Connection failed: {str(e)}"
-                )
-            except Exception as e:
-                logger.error(f"Test connection failed: Unexpected error - {e}")
-                return XUITestConnectionResponse(
-                    success=False,
-                    message=f"Error: {str(e)}"
-                )
+        
+        client = XUIClient(
+            host=body.host,
+            username=body.username,
+            password=body.password,
+            base_path=body.base_path,
+            timeout=10
+        )
+        
+        try:
+            inbounds = client.list_inbounds()
+            logger.info(f"Test connection successful: found {len(inbounds)} inbounds")
+            return XUITestConnectionResponse(
+                success=True,
+                message=f"Successfully connected! Found {len(inbounds)} inbounds.",
+                inbounds_count=len(inbounds),
+                inbounds=inbounds[:10]  # Первые 10 для примера
+            )
+        except XUIAuthError as e:
+            logger.error(f"Test connection failed: Authentication error - {e}")
+            return XUITestConnectionResponse(
+                success=False,
+                message=f"Authentication failed: {str(e)}"
+            )
+        except XUIConnectionError as e:
+            logger.error(f"Test connection failed: Connection error - {e}")
+            return XUITestConnectionResponse(
+                success=False,
+                message=f"Connection failed: {str(e)}"
+            )
         except Exception as e:
-            logger.error(f"Error in test connection API: {e}")
-            raise HTTPException(status_code=500, detail=f'Error: {str(e)}')
+            logger.error(f"Test connection failed: Unexpected error - {e}")
+            return XUITestConnectionResponse(
+                success=False,
+                message=f"Error: {str(e)}"
+            )
+    except Exception as e:
+        logger.error(f"Error in test connection API: {e}")
+        raise HTTPException(status_code=500, detail=f'Error: {str(e)}')
 
 
 @router.get('/sync-status', response_model=XUISyncStatusResponse, summary='Get X-UI Sync Status', name='get_xui_sync_status_api')
