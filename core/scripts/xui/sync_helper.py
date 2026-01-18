@@ -13,11 +13,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from xui.config import get_xui_sync_manager
 
-# Импортируем настройку логирования
-from xui.logging_config import setup_xui_logging
-setup_xui_logging()
-
 logger = logging.getLogger(__name__)
+
+# Импортируем настройку логирования (с обработкой ошибок)
+try:
+    from xui.logging_config import setup_xui_logging
+    setup_xui_logging()
+except (ImportError, Exception) as e:
+    # Если не удалось импортировать, используем базовое логирование
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
 
 
 def sync_user_create(username: str, expiry_days: int, traffic_limit_gb: int, enable: bool = True, user_plan: str = "standard") -> bool:

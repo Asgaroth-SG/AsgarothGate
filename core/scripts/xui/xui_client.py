@@ -30,11 +30,18 @@ except ImportError:
         "py3xui library is required. Install it with: pip install py3xui"
     )
 
-# Импортируем настройку логирования
-from xui.logging_config import setup_xui_logging
-setup_xui_logging()
-
 logger = logging.getLogger(__name__)
+
+# Импортируем настройку логирования (с обработкой ошибок)
+try:
+    from xui.logging_config import setup_xui_logging
+    setup_xui_logging()
+except (ImportError, Exception) as e:
+    # Если не удалось импортировать, используем базовое логирование
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
 
 
 @dataclass

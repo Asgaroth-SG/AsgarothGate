@@ -24,8 +24,14 @@ def setup_xui_logging():
         return
     
     # Создаем директорию для логов если не существует
-    log_dir = XUI_LOG_FILE.parent
-    log_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        log_dir = XUI_LOG_FILE.parent
+        log_dir.mkdir(parents=True, exist_ok=True)
+    except (PermissionError, OSError) as e:
+        # Если нет прав на создание директории, используем только консольное логирование
+        logging.warning(f"Failed to create log directory {log_dir}: {e}. Using console logging only.")
+        _logging_configured = True
+        return
     
     # Создаем handler для файла
     try:
@@ -68,10 +74,11 @@ def setup_xui_logging():
         
         _logging_configured = True
         
+    except (PermissionError, OSError) as e:
+        # Если нет прав на запись в файл, используем только консольное логирование
+        logging.warning(f"Failed to setup X-UI file logging to {XUI_LOG_FILE}: {e}. Using console logging only.")
+        _logging_configured = True
     except Exception as e:
         # Если не удалось настроить файловое логирование, используем только консоль
         logging.warning(f"Failed to setup X-UI file logging: {e}")
-
-
-# Автоматически настраиваем логирование при импорте модуля
-setup_xui_logging()
+        _logging_configured = True

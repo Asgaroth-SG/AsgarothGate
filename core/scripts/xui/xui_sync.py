@@ -16,11 +16,18 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from db.database import db
 from xui.xui_client import XUIClient, XUIClientError, XUIAuthError, XUIConnectionError
 
-# Импортируем настройку логирования
-from xui.logging_config import setup_xui_logging
-setup_xui_logging()
-
 logger = logging.getLogger(__name__)
+
+# Импортируем настройку логирования (с обработкой ошибок)
+try:
+    from xui.logging_config import setup_xui_logging
+    setup_xui_logging()
+except (ImportError, Exception) as e:
+    # Если не удалось импортировать, используем базовое логирование
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
 
 
 class XUISyncError(Exception):
