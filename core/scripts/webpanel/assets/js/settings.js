@@ -1672,7 +1672,7 @@ $(document).ready(function () {
                         : '<span class="badge badge-secondary">Неизвестно</span>';
                     
                     container.html(`
-                        <p class="mb-1"><strong>Время:</strong> ${timeStr}</p>
+                        <p class="mb-1"><strong>Последний запуск:</strong> ${timeStr}</p>
                         <p class="mb-1"><strong>Статус:</strong> ${statusBadge}</p>
                         ${data.last_sync_stats ? `
                             <p class="mb-0"><strong>Статистика:</strong> 
