@@ -497,7 +497,27 @@ class SubscriptionManager:
 
         extra_uris = self._get_extra_uris_for_user(user_plan)
 
-        all_processed_uris = processed_uris + extra_uris
+        # Получаем VLESS URIs из 3X-UI для пользователя
+        xui_vless_uris = []
+        try:
+            # Импортируем модуль синхронизации X-UI
+            from pathlib import Path
+            xui_path = Path(__file__).parent.parent / "xui"
+            if xui_path.exists():
+                sys.path.insert(0, str(xui_path.parent))
+                from xui.config import get_xui_sync_manager
+                
+                sync_manager = get_xui_sync_manager()
+                if sync_manager:
+                    vless_nodes = sync_manager.get_user_vless_uris(username)
+                    if vless_nodes:
+                        # Извлекаем только URI строки из словарей
+                        xui_vless_uris = [node.get("uri", "") for node in vless_nodes if node.get("uri")]
+        except Exception as e:
+            # Не блокируем выдачу подписки при ошибке получения VLESS URIs
+            print(f"Warning: Failed to get X-UI VLESS URIs for {username}: {e}", file=sys.stderr)
+
+        all_processed_uris = processed_uris + extra_uris + xui_vless_uris
 
         if not all_processed_uris:
             return "No URI available"
