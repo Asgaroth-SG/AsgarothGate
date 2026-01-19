@@ -214,7 +214,7 @@ FILES=(
     "$HYSTERIA_INSTALL_DIR/core/scripts/normalsub/Caddyfile.normalsub"
     "$HYSTERIA_INSTALL_DIR/core/scripts/webpanel/.env"
     "$HYSTERIA_INSTALL_DIR/core/scripts/webpanel/Caddyfile"
-    "/etc/hysteria/xui_config.json"
+    "$HYSTERIA_INSTALL_DIR/xui_config.json"
 )
 
 info "Резервное копирование конфигурационных файлов в: $TEMP_DIR"
@@ -242,12 +242,20 @@ info "Восстановление конфигурационных файлов
 for FILE in "${FILES[@]}"; do
     BACKUP="$TEMP_DIR/$FILE"
     if [[ -f "$BACKUP" ]]; then
+        # Создаем директорию если не существует
+        mkdir -p "$(dirname "$FILE")"
         cp -p "$BACKUP" "$FILE"
         success "Восстановлен: $FILE"
     else
         warn "Отсутствует файл резервной копии: $BACKUP"
     fi
 done
+
+# Устанавливаем права доступа для xui_config.json (если файл существует)
+if [[ -f "$HYSTERIA_INSTALL_DIR/xui_config.json" ]]; then
+    chmod 600 "$HYSTERIA_INSTALL_DIR/xui_config.json"
+    success "Права доступа для xui_config.json установлены."
+fi
 
 # ========== Обновление конфигурации ==========
 info "Обновление конфигурации Hysteria для HTTP аутентификации..."
