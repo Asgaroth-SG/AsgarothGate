@@ -214,6 +214,7 @@ FILES=(
     "$HYSTERIA_INSTALL_DIR/core/scripts/normalsub/Caddyfile.normalsub"
     "$HYSTERIA_INSTALL_DIR/core/scripts/webpanel/.env"
     "$HYSTERIA_INSTALL_DIR/core/scripts/webpanel/Caddyfile"
+    "/etc/hysteria/xui_config.json"
 )
 
 info "Резервное копирование конфигурационных файлов в: $TEMP_DIR"

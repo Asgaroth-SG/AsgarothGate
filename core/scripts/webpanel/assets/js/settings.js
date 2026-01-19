@@ -1,5 +1,10 @@
 $(document).ready(function () {
     const contentSection = document.querySelector('.content');
+    
+    if (!contentSection) {
+        console.error('Settings: .content element not found');
+        return;
+    }
 
     const API_URLS = {
         serverServicesStatus: contentSection.dataset.serverServicesStatusUrl,
@@ -84,6 +89,37 @@ $(document).ready(function () {
             return '';
         }
         return String(text).replace(/[&<>"']/g, function (m) { return map[m]; });
+    }
+
+    // Вспомогательная функция для извлечения сообщения об ошибке из AJAX ответа
+    function extractErrorMessage(xhr, defaultMessage) {
+        if (!xhr.responseJSON || !xhr.responseJSON.detail) {
+            return defaultMessage;
+        }
+        
+        const detail = xhr.responseJSON.detail;
+        if (typeof detail === 'string') {
+            return detail;
+        } else if (Array.isArray(detail)) {
+            return detail.map(err => {
+                if (typeof err === 'string') {
+                    return err;
+                } else if (err.msg) {
+                    return err.msg;
+                } else {
+                    return JSON.stringify(err);
+                }
+            }).join('; ');
+        } else {
+            // Если это объект, пытаемся извлечь понятное сообщение
+            if (detail.message) {
+                return detail.message;
+            } else if (detail.error) {
+                return detail.error;
+            } else {
+                return JSON.stringify(detail);
+            }
+        }
     }
 
     function isValidURI(uri) {
@@ -1255,362 +1291,963 @@ $(document).ready(function () {
 
     // ========== X-UI Integration Management ==========
     
+    // Состояния операций (защита от race-condition)
+    const xuiOperationStates = {
+        testServer: {}, // {serverIndex: {inProgress: bool, requestId: number}}
+        saveConfig: { inProgress: false, requestId: null },
+        syncNow: { inProgress: false, requestId: null },
+        loadLogs: { inProgress: false, requestId: null },
+        saveServer: { inProgress: false, requestId: null }
+    };
+
     // Загрузка конфигурации при открытии вкладки
     $('#xui-tab').on('shown.bs.tab', function () {
+        // Принудительно загружаем конфигурацию при каждом открытии вкладки
         loadXUIConfig();
-        loadXUISyncStatus();
+        loadXUILastSync();
+    });
+    
+    // Также загружаем при первом открытии страницы, если вкладка уже активна
+    if ($('#xui-tab').hasClass('active')) {
+        loadXUIConfig();
+        loadXUILastSync();
+    }
+    
+    // Дополнительно слушаем событие показа вкладки через Bootstrap
+    $('#xui-tab').on('click', function() {
+        // Небольшая задержка для гарантии, что вкладка действительно показана
+        setTimeout(function() {
+            if ($('#xui-tab').hasClass('active')) {
+                loadXUIConfig();
+                loadXUILastSync();
+            }
+        }, 100);
     });
 
-    // Загрузка конфигурации X-UI
+    // Переключение типа авторизации в модалке сервера
+    $(document).on('change', 'input[name="xui_server_auth_type"]', function () {
+        const authType = $(this).val();
+        if (authType === 'token') {
+            $('#xui_server_username_password_group').hide();
+            $('#xui_server_token_group').show();
+            $('#xui_server_username, #xui_server_password').removeAttr('required');
+            $('#xui_server_token').attr('required', 'required');
+        } else {
+            $('#xui_server_username_password_group').show();
+            $('#xui_server_token_group').hide();
+            $('#xui_server_token').removeAttr('required');
+            $('#xui_server_username, #xui_server_password').attr('required', 'required');
+        }
+    });
+
+
+    // Переключение видимости логов
+    $('#xui_toggle_logs_btn').on('click', function () {
+        const $content = $('#xui_logs_content');
+        const $icon = $(this).find('i');
+        if ($content.is(':visible')) {
+            $content.slideUp(250);
+            $icon.removeClass('fa-chevron-up').addClass('fa-chevron-down');
+            $(this).html('<i class="fas fa-chevron-down"></i> Показать');
+        } else {
+            $content.slideDown(250);
+            $icon.removeClass('fa-chevron-down').addClass('fa-chevron-up');
+            $(this).html('<i class="fas fa-chevron-up"></i> Скрыть');
+        }
+    });
+
+    // Проверка валидности серверов для синхронизации
+    function hasValidXUIServers(servers) {
+        if (!servers || servers.length === 0) {
+            return false;
+        }
+        
+        for (const server of servers) {
+            if (!server.enabled && server.enabled !== undefined) {
+                continue;
+            }
+            
+            const host = (server.host || '').trim();
+            if (!host) {
+                continue;
+            }
+            
+            const authType = server.auth_type || 'username';
+            const password = (server.password || '').trim();
+            
+            if (authType === 'token') {
+                if (password) {
+                    return true;
+                }
+            } else {
+                const username = (server.username || '').trim();
+                if (username && password) {
+                    return true;
+                }
+            }
+        }
+        
+        return false;
+    }
+
+    // Обновление состояния кнопки синхронизации
+    function updateSyncButtonState(servers, enabled) {
+        const btn = $('#xui_sync_now_btn');
+        const isValid = enabled && hasValidXUIServers(servers);
+        
+        btn.prop('disabled', !isValid);
+        
+        if (!isValid) {
+            if (!enabled) {
+                btn.attr('title', 'Включите синхронизацию');
+            } else if (!servers || servers.length === 0) {
+                btn.attr('title', 'Добавьте хотя бы один сервер');
+            } else {
+                btn.attr('title', 'Настройте хотя бы один включенный сервер с валидными данными');
+            }
+        } else {
+            btn.removeAttr('title');
+        }
+    }
+
+    // Загрузка конфигурации X-UI и отображение плиток серверов
     function loadXUIConfig() {
         $.ajax({
             url: API_URLS.xuiGetConfig,
             method: 'GET',
+            cache: false, // Отключаем кеширование для получения актуальных данных
             success: function (data) {
-                $('#xui_enabled').prop('checked', data.enabled);
-                $('#xui_mode').val(data.mode);
-                renderXUIServers(data.xui_servers || []);
+                const servers = data.xui_servers || [];
+                // Отображаем плитки серверов
+                renderXUIServers(servers);
+
+                // Заполняем форму синхронизации
+                const enabled = data.enabled || false;
+                $('#xui_enabled').prop('checked', enabled);
+                
+                // Обновляем состояние кнопки синхронизации
+                updateSyncButtonState(servers, enabled);
+                
+                // Устанавливаем интервал синхронизации
+                $('#xui_sync_interval').val(data.sync_interval || 60);
             },
             error: function (xhr) {
                 console.error('Failed to load X-UI config:', xhr);
-                Swal.fire('Ошибка', 'Не удалось загрузить конфигурацию X-UI', 'error');
+                const error = extractErrorMessage(xhr, 'Не удалось загрузить конфигурацию X-UI');
+                if (window.showToast) {
+                    showToast('error', 'Ошибка', error, { timer: 5000 });
+                } else {
+                    Swal.fire('Ошибка', error, 'error');
+                }
             }
         });
     }
 
-    // Отображение серверов
+    // Отображение плиток серверов
     function renderXUIServers(servers) {
-        const container = $('#xui_servers_container');
-        container.empty();
-        
+        const grid = $('#xui_servers_grid');
+        const noServers = $('#xui_no_servers');
+        grid.empty();
+
         if (!servers || servers.length === 0) {
-            container.append('<p class="text-muted">Нет настроенных серверов. Нажмите "Добавить сервер" для настройки.</p>');
+            grid.hide();
+            noServers.show();
+            return;
+        }
+
+        grid.show();
+        noServers.hide();
+
+        servers.forEach((server, index) => {
+            const tile = createXUIServerTile(server, index);
+            grid.append(tile);
+        });
+        
+        // Инициализируем tooltips для новых кнопок (Bootstrap tooltip)
+        // Используем делегирование для tooltip, чтобы избежать конфликтов с кликами
+        setTimeout(function() {
+            try {
+                // Инициализируем только новые tooltip, не трогая существующие
+                $('#xui_servers_grid [data-toggle="tooltip"]').each(function() {
+                    try {
+                        if (!$(this).data('bs.tooltip')) {
+                            $(this).tooltip({
+                                trigger: 'hover',
+                                container: 'body'
+                            });
+                        }
+                    } catch (e) {
+                        console.warn('Failed to initialize tooltip:', e);
+                    }
+                });
+            } catch (e) {
+                console.warn('Failed to initialize tooltips:', e);
+            }
+        }, 100);
+        
+        // Автоматически проверяем статус всех серверов при загрузке
+        checkAllServersStatus(servers);
+    }
+    
+    // Автоматическая проверка статуса всех серверов
+    function checkAllServersStatus(servers) {
+        if (!servers || servers.length === 0) {
             return;
         }
         
+        // Проверяем каждый включенный сервер
         servers.forEach((server, index) => {
-            const serverHtml = createXUIServerHTML(server, index);
-            container.append(serverHtml);
+            // Проверяем только включенные серверы
+            if (server.enabled === false) {
+                return;
+            }
+            
+            // Небольшая задержка между запросами, чтобы не перегружать сервер
+            setTimeout(function() {
+                checkServerStatus(index, false); // false = не показывать уведомления
+            }, index * 200); // 200ms задержка между каждым запросом
+        });
+    }
+    
+    // Проверка статуса одного сервера (с опцией показа уведомлений)
+    function checkServerStatus(index, showNotification = true) {
+        const state = xuiOperationStates.testServer;
+        
+        if (!state[index]) {
+            state[index] = { inProgress: false, requestId: null };
+        }
+        
+        // Если уже выполняется проверка, пропускаем
+        if (state[index].inProgress) {
+            return;
+        }
+        
+        state[index].inProgress = true;
+        state[index].requestId = Date.now();
+        const currentRequestId = state[index].requestId;
+        
+        const tile = $(`.xui-server-tile[data-server-index="${index}"]`);
+        if (!tile.length) {
+            state[index].inProgress = false;
+            return;
+        }
+        
+        const btn = tile.find('.xui-test-server-btn');
+        const statusBadge = tile.find('.badge').first();
+        
+        // Показываем индикатор загрузки только если это не автоматическая проверка
+        if (showNotification) {
+            btn.prop('disabled', true);
+            btn.find('.spinner-border').show();
+            btn.find('.xui-test-icon').hide();
+        } else {
+            // При автоматической проверке просто показываем индикатор в badge
+            statusBadge.html('<i class="fas fa-spinner fa-spin"></i>');
+        }
+        
+        // Формируем URL для проверки здоровья
+        const baseUrl = API_URLS.xuiGetConfig.substring(0, API_URLS.xuiGetConfig.lastIndexOf('/api/v1/config/xui'));
+        const healthUrl = `${baseUrl}/api/v1/config/xui/server/${index}/health`;
+        
+        $.ajax({
+            url: healthUrl,
+            method: 'POST',
+            cache: false,
+            success: function (data) {
+                if (state[index].requestId !== currentRequestId) return;
+                
+                if (data.healthy) {
+                    statusBadge.removeClass('badge-danger badge-secondary').addClass('badge-success').text('Online');
+                    if (statusTextContainer.length && !statusTextContainer.find('.badge').length) {
+                        statusTextContainer.html(`<span class="badge badge-secondary">${escapeHtml(data.message)}</span>`);
+                    } else if (statusTextContainer.length) {
+                        statusTextContainer.find('.badge').text(escapeHtml(data.message));
+                    }
+                } else {
+                    statusBadge.removeClass('badge-success badge-secondary').addClass('badge-danger').text('Offline');
+                    if (statusTextContainer.length && !statusTextContainer.find('.badge').length) {
+                        statusTextContainer.html(`<span class="badge badge-secondary">${escapeHtml(data.message)}</span>`);
+                    } else if (statusTextContainer.length) {
+                        statusTextContainer.find('.badge').text(escapeHtml(data.message));
+                    }
+                }
+                
+                // Показываем уведомление только если это ручная проверка
+                if (showNotification && window.showToast) {
+                    showToast(data.healthy ? 'success' : 'error', 
+                        data.healthy ? 'Успешно' : 'Ошибка', 
+                        data.message, 
+                        { timer: data.healthy ? 3000 : 5000 });
+                }
+            },
+            error: function (xhr) {
+                if (state[index].requestId !== currentRequestId) return;
+                const error = extractErrorMessage(xhr, 'Не удалось проверить сервер');
+                const statusBadge = tile.find('.badge').first();
+                const statusTextContainer = tile.find('.card-text').last();
+                statusBadge.removeClass('badge-success badge-secondary').addClass('badge-danger').text('Error');
+                if (statusTextContainer.length) {
+                    if (!statusTextContainer.find('.badge').length) {
+                        statusTextContainer.html(`<span class="badge badge-secondary">${escapeHtml(error)}</span>`);
+                    } else {
+                        statusTextContainer.find('.badge').text(escapeHtml(error));
+                    }
+                }
+                
+                // Показываем уведомление только если это ручная проверка
+                if (showNotification && window.showToast) {
+                    showToast('error', 'Ошибка', error, { timer: 5000 });
+                }
+            },
+            complete: function () {
+                if (state[index].requestId === currentRequestId) {
+                    state[index].inProgress = false;
+                    state[index].requestId = null;
+                    if (showNotification) {
+                        btn.prop('disabled', false);
+                        btn.find('.spinner-border').hide();
+                        btn.find('.xui-test-icon').show();
+                    }
+                }
+            }
         });
     }
 
-    // Создание HTML для сервера
-    function createXUIServerHTML(server, index) {
-        const plans = server.plans || ['standard', 'premium'];
-        
-        return `
-            <div class="card mb-3 xui-server-card" data-index="${index}">
-                <div class="card-header d-flex justify-content-between align-items-center">
-                    <h6 class="mb-0">Сервер ${index + 1}</h6>
-                    <button type="button" class="btn btn-sm btn-danger xui-remove-server-btn" data-index="${index}">
-                        <i class="fas fa-trash"></i> Удалить
-                    </button>
-                </div>
-                <div class="card-body">
-                    <div class="form-group">
-                        <label>Адрес сервера</label>
-                        <input type="text" class="form-control xui-server-host" value="${escapeHtml(server.host || '')}" 
-                               placeholder="https://gateway.asgaroth.ru:5560">
-                    </div>
-                    <div class="form-group">
-                        <label>Базовый путь</label>
-                        <input type="text" class="form-control xui-server-base-path" value="${escapeHtml(server.base_path || '/vpn')}" 
-                               placeholder="/vpn">
-                    </div>
-                    <div class="form-group">
-                        <label>Имя пользователя</label>
-                        <input type="text" class="form-control xui-server-username" 
-                               value="${escapeHtml(server.username || '')}" placeholder="admin" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Пароль</label>
-                        <input type="password" class="form-control xui-server-password" 
-                               value="${server.password && server.password !== '***' ? escapeHtml(server.password) : ''}" 
-                               placeholder="password" required>
-                    </div>
-                    <div class="form-group">
-                        <label>Планы</label>
-                        <div class="form-check">
-                            <input class="form-check-input xui-server-plan" type="checkbox" value="standard" 
-                                   ${plans.includes('standard') ? 'checked' : ''}>
-                            <label class="form-check-label">Standard</label>
+    // Создание плитки сервера
+    function createXUIServerTile(server, index) {
+        const name = escapeHtml(server.name || server.host || `Сервер ${index + 1}`);
+        const host = escapeHtml(server.host || '');
+        const status = server.status || 'unknown';
+        const statusText = server.status_text || '';
+        const statusClass = status === 'online' ? 'success' : status === 'offline' ? 'danger' : 'secondary';
+        const statusLabel = status === 'online' ? 'Online' : status === 'offline' ? 'Offline' : 'Unknown';
+        const enabled = server.enabled !== false;
+
+        return $(`
+            <div class="col-md-6 col-lg-4 mb-3">
+                <div class="card xui-server-tile ${enabled ? '' : 'bg-light'}" data-server-index="${index}">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start mb-2">
+                            <h6 class="card-title mb-0">${name}</h6>
+                            <span class="badge badge-${statusClass}">${statusLabel}</span>
                         </div>
-                        <div class="form-check">
-                            <input class="form-check-input xui-server-plan" type="checkbox" value="premium" 
-                                   ${plans.includes('premium') ? 'checked' : ''}>
-                            <label class="form-check-label">Premium</label>
+                        <p class="card-text text-muted small mb-2">${host}</p>
+                        ${statusText ? `<p class="card-text small mb-2"><span class="badge badge-secondary">${escapeHtml(statusText)}</span></p>` : ''}
+                        <div class="d-flex justify-content-end" style="gap: 0.25rem;">
+                            <button type="button" class="btn btn-xs btn-info xui-test-server-btn" data-index="${index}" 
+                                    ${!enabled ? 'disabled' : ''} data-toggle="tooltip" data-placement="top" title="Тест" aria-label="Тест">
+                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                <i class="fas fa-plug xui-test-icon"></i>
+                            </button>
+                            <button type="button" class="btn btn-xs btn-primary xui-edit-server-btn" data-index="${index}" 
+                                    data-toggle="tooltip" data-placement="top" title="Редактировать" aria-label="Редактировать">
+                                <i class="fas fa-pen"></i>
+                            </button>
+                            <button type="button" class="btn btn-xs btn-danger xui-delete-server-btn" data-index="${index}" 
+                                    data-toggle="tooltip" data-placement="top" title="Удалить" aria-label="Удалить">
+                                <i class="fas fa-trash"></i>
+                            </button>
                         </div>
                     </div>
                 </div>
             </div>
-        `;
+        `);
     }
 
-    // Добавление нового сервера (используем делегирование событий)
-    $(document).on('click', '#xui_add_server_btn', function () {
-        const container = $('#xui_servers_container');
-        const index = container.find('.xui-server-card').length;
-        const newServer = {
-            host: 'https://gateway.asgaroth.ru:5560',
-            base_path: '/vpn',
-            auth_type: 'token',
-            plans: ['standard', 'premium']
-        };
-        const serverHtml = createXUIServerHTML(newServer, index);
-        container.append(serverHtml);
-        attachXUIServerEvents();
-        
-        // Удаляем сообщение "Нет настроенных серверов" если оно есть
-        container.find('p.text-muted').remove();
-    });
-
-    // Привязка событий к серверам (используем делегирование для динамически добавляемых элементов)
-    function attachXUIServerEvents() {
-        // Удаление сервера (делегирование событий)
-        $(document).off('click', '.xui-remove-server-btn').on('click', '.xui-remove-server-btn', function () {
-            const card = $(this).closest('.xui-server-card');
-            card.remove();
-            
-            // Переиндексируем оставшиеся серверы
-            $('#xui_servers_container .xui-server-card').each(function (idx) {
-                $(this).attr('data-index', idx);
-                $(this).find('.xui-remove-server-btn').attr('data-index', idx);
-                $(this).find('.card-header h6').text(`Сервер ${idx + 1}`);
-            });
-            
-            // Если серверов не осталось, показываем сообщение
-            if ($('#xui_servers_container .xui-server-card').length === 0) {
-                $('#xui_servers_container').append('<p class="text-muted">Нет настроенных серверов. Нажмите "Добавить сервер" для настройки.</p>');
-            }
-        });
-
-    }
-
-    // Сохранение конфигурации
-    $('#xui_config_form').on('submit', function (e) {
-        e.preventDefault();
-        
-        const enabled = $('#xui_enabled').is(':checked');
-        const mode = $('#xui_mode').val();
-        const servers = [];
-        
-        $('#xui_servers_container .xui-server-card').each(function () {
-            const plans = [];
-            $(this).find('.xui-server-plan:checked').each(function () {
-                plans.push($(this).val());
-            });
-            
-            const username = $(this).find('.xui-server-username').val().trim();
-            const password = $(this).find('.xui-server-password').val().trim();
-            
-            if (!username || !password) {
-                Swal.fire('Ошибка', 'Имя пользователя и пароль обязательны для каждого сервера', 'error');
-                return false;
-            }
-            
-            const server = {
-                host: $(this).find('.xui-server-host').val().trim(),
-                base_path: $(this).find('.xui-server-base-path').val().trim() || '/',
-                username: username,
-                password: password,
-                plans: plans.length > 0 ? plans : ['standard', 'premium'],
-                timeout: 10,
-                max_retries: 3
-            };
-            
-            servers.push(server);
-        });
-        
-        if (servers.length === 0) {
-            Swal.fire('Ошибка', 'Добавьте хотя бы один сервер', 'error');
-            return;
-        }
-        
-        const config = {
-            enabled: enabled,
-            mode: mode,
-            xui_servers: servers,
-            inbound_filter: {
-                protocol: 'vless'
-            }
-        };
-        
-        const btn = $(this).find('button[type="submit"]');
-        btn.prop('disabled', true);
-        btn.find('.spinner-border').show();
-        
-        $.ajax({
-            url: API_URLS.xuiUpdateConfig,
-            method: 'POST',
-            contentType: 'application/json',
-            data: JSON.stringify(config),
-            success: function () {
-                Swal.fire('Успешно', 'Конфигурация X-UI сохранена', 'success');
-                loadXUIConfig();
-            },
-            error: function (xhr) {
-                const error = xhr.responseJSON?.detail || 'Не удалось сохранить конфигурацию';
-                Swal.fire('Ошибка', error, 'error');
-            },
-            complete: function () {
-                btn.prop('disabled', false);
-                btn.find('.spinner-border').hide();
-            }
-        });
-    });
-
-    // Тестирование подключения
-    $('#xui_test_connection_btn').on('click', function () {
-        const firstServer = $('#xui_servers_container .xui-server-card').first();
-        if (firstServer.length === 0) {
-            Swal.fire('Ошибка', 'Добавьте хотя бы один сервер', 'error');
-            return;
-        }
-        
-        const testData = {
-            host: firstServer.find('.xui-server-host').val().trim(),
-            base_path: firstServer.find('.xui-server-base-path').val().trim() || '/',
-            username: firstServer.find('.xui-server-username').val().trim(),
-            password: firstServer.find('.xui-server-password').val().trim()
-        };
-        
-        if (!testData.username || !testData.password) {
-            Swal.fire('Ошибка', 'Укажите имя пользователя и пароль для тестирования', 'error');
-            return;
-        }
-        
-        const btn = $(this);
-        btn.prop('disabled', true);
-        btn.find('.spinner-border').show();
-        $('#xui_test_result').hide();
-        
-        $.ajax({
-            url: API_URLS.xuiTestConnection,
-            method: 'POST',
-            contentType: 'application/json',
-            data: JSON.stringify(testData),
-            success: function (data) {
-                const resultDiv = $('#xui_test_result');
-                if (data.success) {
-                    resultDiv.removeClass('alert-danger').addClass('alert-success');
-                    resultDiv.html(`<strong>Успешно!</strong> ${data.message}<br>
-                        Найдено inbounds: ${data.inbounds_count || 0}`);
-                } else {
-                    resultDiv.removeClass('alert-success').addClass('alert-danger');
-                    resultDiv.html(`<strong>Ошибка:</strong> ${data.message}`);
-                }
-                resultDiv.show();
-            },
-            error: function (xhr) {
-                const error = xhr.responseJSON?.detail || 'Не удалось протестировать подключение';
-                $('#xui_test_result').removeClass('alert-success').addClass('alert-danger')
-                    .html(`<strong>Ошибка:</strong> ${error}`).show();
-            },
-            complete: function () {
-                btn.prop('disabled', false);
-                btn.find('.spinner-border').hide();
-            }
-        });
-    });
-
-    // Загрузка статуса синхронизации
-    function loadXUISyncStatus() {
+    // Загрузка информации о последнем запуске синхронизации
+    function loadXUILastSync() {
         $.ajax({
             url: API_URLS.xuiSyncStatus,
             method: 'GET',
+            cache: false, // Отключаем кеширование
             success: function (data) {
-                const container = $('#xui_sync_status_container');
-                const successPercent = data.total_users > 0 
-                    ? Math.round((data.synced_users / data.total_users) * 100) 
-                    : 0;
-                
-                container.html(`
-                    <div class="row">
-                        <div class="col-md-4">
-                            <div class="info-box">
-                                <span class="info-box-icon bg-info"><i class="fas fa-users"></i></span>
-                                <div class="info-box-content">
-                                    <span class="info-box-text">Всего пользователей</span>
-                                    <span class="info-box-number">${data.total_users}</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="info-box">
-                                <span class="info-box-icon bg-success"><i class="fas fa-check"></i></span>
-                                <div class="info-box-content">
-                                    <span class="info-box-text">Синхронизировано</span>
-                                    <span class="info-box-number">${data.synced_users}</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="col-md-4">
-                            <div class="info-box">
-                                <span class="info-box-icon bg-danger"><i class="fas fa-times"></i></span>
-                                <div class="info-box-content">
-                                    <span class="info-box-text">Ошибки</span>
-                                    <span class="info-box-number">${data.failed_users}</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="progress mt-3">
-                        <div class="progress-bar bg-success" role="progressbar" 
-                             style="width: ${successPercent}%">${successPercent}%</div>
-                    </div>
-                `);
+                const container = $('#xui_last_sync_info');
+                if (data.last_sync_time) {
+                    const syncTime = new Date(data.last_sync_time);
+                    const timeStr = syncTime.toLocaleString('ru-RU');
+                    const statusBadge = data.last_sync_status === 'success' 
+                        ? '<span class="badge badge-success">Успешно</span>'
+                        : data.last_sync_status === 'failed'
+                        ? '<span class="badge badge-danger">Ошибка</span>'
+                        : '<span class="badge badge-secondary">Неизвестно</span>';
+                    
+                    container.html(`
+                        <p class="mb-1"><strong>Время:</strong> ${timeStr}</p>
+                        <p class="mb-1"><strong>Статус:</strong> ${statusBadge}</p>
+                        ${data.last_sync_stats ? `
+                            <p class="mb-0"><strong>Статистика:</strong> 
+                                Синхронизировано: ${data.last_sync_stats.synced || 0}, 
+                                Ошибок: ${data.last_sync_stats.failed || 0}
+                            </p>
+                        ` : ''}
+                    `);
+                } else {
+                    container.html('<p class="text-muted mb-0">Синхронизация еще не выполнялась</p>');
+                }
             },
             error: function (xhr) {
-                $('#xui_sync_status_container').html(
-                    '<div class="alert alert-warning">Не удалось загрузить статус синхронизации</div>'
-                );
+                $('#xui_last_sync_info').html('<p class="text-muted mb-0">Не удалось загрузить информацию</p>');
             }
         });
     }
 
-    // Синхронизация всех пользователей
-    $('#xui_sync_all_btn').on('click', function () {
+    // Добавление нового сервера
+    $('#xui_add_server_btn').on('click', function () {
+        $('#xui_server_index').val(-1);
+        $('#xuiServerModalLabel').text('Добавить сервер');
+        $('#xui_server_form')[0].reset();
+        $('#xui_server_auth_username').prop('checked', true);
+        $('#xui_server_username_password_group').show();
+        $('#xui_server_token_group').hide();
+        $('#xui_server_plan_standard, #xui_server_plan_premium').prop('checked', true);
+        $('#xui_server_enabled').prop('checked', true);
+        $('#xui_server_base_path').val('/');
+        $('#xui_server_timeout').val(10);
+        $('#xui_server_retries').val(3);
+        $('#xui_server_verify_tls').prop('checked', true);
+        $('#xuiServerModal').modal('show');
+    });
+
+    // Редактирование сервера
+    $(document).on('click', '.xui-edit-server-btn', function () {
+        const btn = $(this);
+        const index = parseInt(btn.data('index'));
+        $.ajax({
+            url: API_URLS.xuiGetConfig,
+            method: 'GET',
+            cache: false, // Отключаем кеширование для получения актуальных данных
+            success: function (data) {
+                const server = data.xui_servers[index];
+                if (!server) return;
+
+                $('#xui_server_index').val(index);
+                $('#xuiServerModalLabel').text('Редактировать сервер');
+                $('#xui_server_name').val(server.name || '');
+                $('#xui_server_host').val(server.host || '');
+                $('#xui_server_base_path').val(server.base_path || '/');
+                $('#xui_server_timeout').val(server.timeout || 10);
+                $('#xui_server_retries').val(server.max_retries || 3);
+                $('#xui_server_verify_tls').prop('checked', server.verify_tls !== false);
+                $('#xui_server_enabled').prop('checked', server.enabled !== false);
+
+                const authType = server.auth_type || 'username';
+                if (authType === 'token') {
+                    $('#xui_server_auth_token').prop('checked', true);
+                    $('#xui_server_username_password_group').hide();
+                    $('#xui_server_token_group').show();
+                    $('#xui_server_token').val(''); // Не показываем токен
+                } else {
+                    $('#xui_server_auth_username').prop('checked', true);
+                    $('#xui_server_username_password_group').show();
+                    $('#xui_server_token_group').hide();
+                    $('#xui_server_username').val(server.username || '');
+                    $('#xui_server_password').val(''); // Не показываем пароль
+                }
+
+                const plans = server.plans || ['standard', 'premium'];
+                $('#xui_server_plan_standard').prop('checked', plans.includes('standard'));
+                $('#xui_server_plan_premium').prop('checked', plans.includes('premium'));
+
+                $('#xuiServerModal').modal('show');
+            }
+        });
+    });
+
+    // Сохранение сервера (из модалки)
+    $('#xui_save_server_btn').on('click', function () {
+        const state = xuiOperationStates.saveServer;
+        if (state.inProgress) {
+            if (window.showToast) {
+                showToast('warning', 'Внимание', 'Сохранение уже выполняется', { timer: 3000 });
+            }
+            return;
+        }
+
+        // Валидация
+        const name = $('#xui_server_name').val().trim();
+        const host = $('#xui_server_host').val().trim();
+        const authType = $('input[name="xui_server_auth_type"]:checked').val();
+        let username = '', password = '';
+
+        if (!name) {
+            if (window.showToast) {
+                showToast('error', 'Ошибка', 'Укажите имя сервера', { timer: 4000 });
+            }
+            return;
+        }
+
+        if (!host) {
+            if (window.showToast) {
+                showToast('error', 'Ошибка', 'Укажите адрес сервера', { timer: 4000 });
+            }
+            return;
+        }
+
+        if (authType === 'token') {
+            password = $('#xui_server_token').val().trim();
+            if (!password) {
+                if (window.showToast) {
+                    showToast('error', 'Ошибка', 'Укажите token', { timer: 4000 });
+                }
+                return;
+            }
+            username = 'admin';
+        } else {
+            username = $('#xui_server_username').val().trim();
+            password = $('#xui_server_password').val().trim();
+            if (!username || !password) {
+                if (window.showToast) {
+                    showToast('error', 'Ошибка', 'Укажите имя пользователя и пароль', { timer: 4000 });
+                }
+                return;
+            }
+        }
+
+        const plans = [];
+        if ($('#xui_server_plan_standard').is(':checked')) plans.push('standard');
+        if ($('#xui_server_plan_premium').is(':checked')) plans.push('premium');
+        if (plans.length === 0) {
+            if (window.showToast) {
+                showToast('error', 'Ошибка', 'Выберите хотя бы один план', { timer: 4000 });
+            }
+            return;
+        }
+
+        state.inProgress = true;
+        state.requestId = Date.now();
+        const currentRequestId = state.requestId;
+
         const btn = $(this);
         btn.prop('disabled', true);
         btn.find('.spinner-border').show();
+
+        // Загружаем текущую конфигурацию
+        $.ajax({
+            url: API_URLS.xuiGetConfig,
+            method: 'GET',
+            cache: false, // Отключаем кеширование для получения актуальных данных
+            success: function (data) {
+                const serverIndex = parseInt($('#xui_server_index').val());
+                const newServer = {
+                    name: name,
+                    host: host,
+                    base_path: $('#xui_server_base_path').val().trim() || '/',
+                    auth_type: authType,
+                    username: authType === 'username' ? username : null,
+                    password: password,
+                    timeout: parseInt($('#xui_server_timeout').val()) || 10,
+                    max_retries: parseInt($('#xui_server_retries').val()) || 3,
+                    verify_tls: $('#xui_server_verify_tls').is(':checked'),
+                    plans: plans,
+                    enabled: $('#xui_server_enabled').is(':checked')
+                };
+
+                // Обновляем или добавляем сервер
+                if (serverIndex >= 0 && serverIndex < data.xui_servers.length) {
+                    // Редактирование: сохраняем пароль если он не изменился (***)
+                    const oldServer = data.xui_servers[serverIndex];
+                    if (password === '' && oldServer.password && oldServer.password !== '***') {
+                        newServer.password = oldServer.password;
+                    }
+                    data.xui_servers[serverIndex] = newServer;
+                } else {
+                    // Добавление нового
+                    data.xui_servers.push(newServer);
+                }
+                
+                // Убеждаемся, что sync_interval присутствует в конфиге
+                if (!data.sync_interval || data.sync_interval < 1) {
+                    data.sync_interval = 60;
+                }
+
+                // Сохраняем конфигурацию
+                $.ajax({
+                    url: API_URLS.xuiUpdateConfig,
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(data),
+                    success: function () {
+                        if (state.requestId !== currentRequestId) return;
+                        $('#xuiServerModal').modal('hide');
+                            if (window.showToast) {
+                                showToast('success', 'Успешно', 'Сервер сохранен', { timer: 3000 });
+                            }
+                            loadXUIConfig();
+                            // Обновляем состояние кнопки синхронизации после сохранения
+                            setTimeout(function() {
+                                $.ajax({
+                                    url: API_URLS.xuiGetConfig,
+                                    method: 'GET',
+                                    success: function (data) {
+                                        updateSyncButtonState(data.xui_servers || [], $('#xui_enabled').is(':checked'));
+                                    }
+                                });
+                            }, 100);
+                    },
+                    error: function (xhr) {
+                        if (state.requestId !== currentRequestId) return;
+                        const error = extractErrorMessage(xhr, 'Не удалось сохранить сервер');
+                        if (window.showToast) {
+                            showToast('error', 'Ошибка', error, { timer: 5000 });
+                        }
+                    },
+                    complete: function () {
+                        if (state.requestId === currentRequestId) {
+                            state.inProgress = false;
+                            state.requestId = null;
+                            btn.prop('disabled', false);
+                            btn.find('.spinner-border').hide();
+                        }
+                    }
+                });
+            },
+            error: function () {
+                if (state.requestId === currentRequestId) {
+                    state.inProgress = false;
+                    state.requestId = null;
+                    btn.prop('disabled', false);
+                    btn.find('.spinner-border').hide();
+                }
+                if (window.showToast) {
+                    showToast('error', 'Ошибка', 'Не удалось загрузить конфигурацию', { timer: 5000 });
+                }
+            }
+        });
+    });
+
+    // Удаление сервера
+    $(document).on('click', '.xui-delete-server-btn', function () {
+        const btn = $(this);
+        const index = parseInt(btn.data('index'));
+        $.ajax({
+            url: API_URLS.xuiGetConfig,
+            method: 'GET',
+            cache: false, // Отключаем кеширование для получения актуальных данных
+            success: function (data) {
+                const server = data.xui_servers[index];
+                if (!server) return;
+
+                const serverName = server.name || server.host || `Сервер ${index + 1}`;
+                confirmAction(`удалить сервер '${serverName}'`, function () {
+                    data.xui_servers.splice(index, 1);
+                    $.ajax({
+                        url: API_URLS.xuiUpdateConfig,
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify(data),
+                        success: function () {
+                            if (window.showToast) {
+                                showToast('success', 'Успешно', 'Сервер удален', { timer: 3000 });
+                            }
+                            loadXUIConfig();
+                            // Обновляем состояние кнопки синхронизации после удаления
+                            setTimeout(function() {
+                                $.ajax({
+                                    url: API_URLS.xuiGetConfig,
+                                    method: 'GET',
+                                    success: function (data) {
+                                        updateSyncButtonState(data.xui_servers || [], $('#xui_enabled').is(':checked'));
+                                    }
+                                });
+                            }, 100);
+                        },
+                        error: function (xhr) {
+                            const error = extractErrorMessage(xhr, 'Не удалось удалить сервер');
+                            if (window.showToast) {
+                                showToast('error', 'Ошибка', error, { timer: 5000 });
+                            }
+                        }
+                    });
+                });
+            }
+        });
+    });
+
+    // Тестирование сервера (из плитки)
+    $(document).on('click', '.xui-test-server-btn', function () {
+        const btn = $(this);
+        const index = parseInt(btn.data('index'));
         
+        // Используем общую функцию проверки статуса с уведомлениями
+        checkServerStatus(index, true);
+    });
+
+
+    // Сохранение конфигурации синхронизации
+    $('#xui_save_sync_btn').on('click', function () {
+        saveXUISyncConfig();
+    });
+
+    function saveXUISyncConfig() {
+        const state = xuiOperationStates.saveConfig;
+        if (state.inProgress) {
+            if (window.showToast) {
+                showToast('warning', 'Внимание', 'Сохранение уже выполняется', { timer: 3000 });
+            }
+            return;
+        }
+
+        // Собираем данные из формы синхронизации
+        const enabled = $('#xui_enabled').is(':checked');
+        const syncInterval = parseInt($('#xui_sync_interval').val());
+
+        if (!syncInterval || syncInterval < 1) {
+            if (window.showToast) {
+                showToast('error', 'Ошибка', 'Укажите корректный интервал (минимум 1 минута)', { timer: 4000 });
+            }
+            return;
+        }
+
+        state.inProgress = true;
+        state.requestId = Date.now();
+        const currentRequestId = state.requestId;
+
+        const btn = $('#xui_save_sync_btn');
+        btn.prop('disabled', true);
+        btn.find('.spinner-border').show();
+
+        // Загружаем текущую конфигурацию и обновляем только настройки синхронизации
+        $.ajax({
+            url: API_URLS.xuiGetConfig,
+            method: 'GET',
+            cache: false, // Отключаем кеширование для получения актуальных данных
+            success: function (data) {
+                const config = {
+                    enabled: enabled,
+                    mode: data.mode || 'multi-xui',
+                    xui_servers: data.xui_servers || [],
+                    inbound_filter: data.inbound_filter || { protocol: 'vless' },
+                    sync_interval: syncInterval || 60
+                };
+
+                $.ajax({
+                    url: API_URLS.xuiUpdateConfig,
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(config),
+                    success: function () {
+                        if (state.requestId !== currentRequestId) return;
+                        
+                        if (window.showToast) {
+                            showToast('success', 'Успешно', 'Конфигурация сохранена', { timer: 3000 });
+                        }
+                        loadXUIConfig();
+                        // Обновляем состояние кнопки синхронизации после сохранения настроек
+                        setTimeout(function() {
+                            $.ajax({
+                                url: API_URLS.xuiGetConfig,
+                                method: 'GET',
+                                success: function (data) {
+                                    updateSyncButtonState(data.xui_servers || [], $('#xui_enabled').is(':checked'));
+                                }
+                            });
+                        }, 100);
+                    },
+                    error: function (xhr) {
+                        if (state.requestId !== currentRequestId) return;
+                        
+                        const error = extractErrorMessage(xhr, 'Не удалось сохранить конфигурацию');
+                        if (window.showToast) {
+                            showToast('error', 'Ошибка', error, { timer: 5000 });
+                        } else {
+                            Swal.fire('Ошибка', error, 'error');
+                        }
+                    },
+                    complete: function () {
+                        if (state.requestId === currentRequestId) {
+                            state.inProgress = false;
+                            state.requestId = null;
+                            btn.prop('disabled', false);
+                            btn.find('.spinner-border').hide();
+                        }
+                    }
+                });
+            },
+            error: function () {
+                if (state.requestId === currentRequestId) {
+                    state.inProgress = false;
+                    state.requestId = null;
+                    btn.prop('disabled', false);
+                    btn.find('.spinner-border').hide();
+                }
+                if (window.showToast) {
+                    showToast('error', 'Ошибка', 'Не удалось загрузить конфигурацию', { timer: 5000 });
+                }
+            }
+        });
+    }
+
+    // Обновление состояния кнопки при изменении настроек
+    $('#xui_enabled').on('change', function () {
+        $.ajax({
+            url: API_URLS.xuiGetConfig,
+            method: 'GET',
+            cache: false, // Отключаем кеширование для получения актуальных данных
+            success: function (data) {
+                updateSyncButtonState(data.xui_servers || [], $('#xui_enabled').is(':checked'));
+            }
+        });
+    });
+
+    // Запуск синхронизации сейчас
+    $('#xui_sync_now_btn').on('click', function () {
+        const state = xuiOperationStates.syncNow;
+        if (state.inProgress) {
+            if (window.showToast) {
+                showToast('warning', 'Внимание', 'Синхронизация уже выполняется', { timer: 3000 });
+            }
+            return;
+        }
+
+        // Проверяем валидность конфигурации перед запуском
+        $.ajax({
+            url: API_URLS.xuiGetConfig,
+            method: 'GET',
+            cache: false, // Отключаем кеширование для получения актуальных данных
+            success: function (data) {
+                const enabled = $('#xui_enabled').is(':checked');
+                const servers = data.xui_servers || [];
+                
+                if (!enabled) {
+                    if (window.showToast) {
+                        showToast('warning', 'Внимание', 'Включите синхронизацию перед запуском', { timer: 4000 });
+                    }
+                    return;
+                }
+                
+                if (!hasValidXUIServers(servers)) {
+                    if (window.showToast) {
+                        showToast('error', 'Ошибка', 'Настройте хотя бы один включенный сервер с валидными данными', { timer: 5000 });
+                    }
+                    return;
+                }
+                
+                // Запускаем синхронизацию
+                runSyncNow();
+            },
+            error: function () {
+                if (window.showToast) {
+                    showToast('error', 'Ошибка', 'Не удалось проверить конфигурацию', { timer: 5000 });
+                }
+            }
+        });
+    });
+
+    function runSyncNow() {
+        const state = xuiOperationStates.syncNow;
+        state.inProgress = true;
+        state.requestId = Date.now();
+        const currentRequestId = state.requestId;
+
+        const btn = $('#xui_sync_now_btn');
+        btn.prop('disabled', true);
+        btn.find('.spinner-border').show();
+
         $.ajax({
             url: API_URLS.xuiSyncAll,
             method: 'POST',
             success: function (data) {
-                Swal.fire('Успешно', data.detail || 'Синхронизация завершена', 'success');
-                loadXUISyncStatus();
+                if (state.requestId !== currentRequestId) return;
+                
+                if (window.showToast) {
+                    showToast('success', 'Успешно', data.detail || 'Синхронизация завершена', { timer: 4000 });
+                }
+                loadXUILastSync();
             },
             error: function (xhr) {
-                const error = xhr.responseJSON?.detail || 'Не удалось синхронизировать пользователей';
-                Swal.fire('Ошибка', error, 'error');
+                if (state.requestId !== currentRequestId) return;
+                
+                let error = 'Не удалось синхронизировать пользователей';
+                if (xhr.responseJSON && xhr.responseJSON.detail) {
+                    const detail = xhr.responseJSON.detail;
+                    if (typeof detail === 'string') {
+                        error = detail;
+                    } else if (Array.isArray(detail)) {
+                        error = detail.map(err => typeof err === 'string' ? err : JSON.stringify(err)).join('; ');
+                    } else {
+                        error = JSON.stringify(detail);
+                    }
+                }
+                if (window.showToast) {
+                    showToast('error', 'Ошибка', error, { timer: 5000 });
+                } else {
+                    Swal.fire('Ошибка', error, 'error');
+                }
             },
             complete: function () {
-                btn.prop('disabled', false);
-                btn.find('.spinner-border').hide();
+                if (state.requestId === currentRequestId) {
+                    state.inProgress = false;
+                    state.requestId = null;
+                    // Восстанавливаем состояние кнопки на основе текущей конфигурации
+                    $.ajax({
+                        url: API_URLS.xuiGetConfig,
+                        method: 'GET',
+                        success: function (data) {
+                            updateSyncButtonState(data.xui_servers || [], $('#xui_enabled').is(':checked'));
+                        }
+                    });
+                    btn.find('.spinner-border').hide();
+                }
             }
         });
+    }
+
+    // Загрузка логов
+    $('#xui_load_logs_btn').on('click', function () {
+        const state = xuiOperationStates.loadLogs;
+        if (state.inProgress) {
+            if (window.showToast) {
+                showToast('warning', 'Внимание', 'Логи уже загружаются', { timer: 3000 });
+            }
+            return;
+        }
+
+        state.inProgress = true;
+        state.requestId = Date.now();
+        const currentRequestId = state.requestId;
+
+        const btn = $(this);
+        const lines = parseInt($('#xui_log_lines').val()) || 50;
+        btn.prop('disabled', true);
+        btn.find('.spinner-border').show();
+
+        // Заглушка - в реальности нужен API endpoint для логов
+        setTimeout(function () {
+            if (state.requestId !== currentRequestId) return;
+            
+            $('#xui_logs_display').val('Логи синхронизации\n\n[API endpoint для логов не реализован]');
+            state.inProgress = false;
+            state.requestId = null;
+            btn.prop('disabled', false);
+            btn.find('.spinner-border').hide();
+        }, 500);
     });
 
-    // Инициализация событий при первой загрузке (для уже существующих элементов)
-    attachXUIServerEvents();
-    
-    // Также привязываем обработчик кнопки добавления сервера напрямую (на случай если элемент уже в DOM)
-    $('#xui_add_server_btn').on('click', function (e) {
-        e.preventDefault();
-        const container = $('#xui_servers_container');
-        const index = container.find('.xui-server-card').length;
-        const newServer = {
-            host: 'https://gateway.asgaroth.ru:5560',
-            base_path: '/vpn',
-            auth_type: 'token',
-            plans: ['standard', 'premium']
-        };
-        const serverHtml = createXUIServerHTML(newServer, index);
-        container.append(serverHtml);
-        attachXUIServerEvents();
-        
-        // Удаляем сообщение "Нет настроенных серверов" если оно есть
-        container.find('p.text-muted').remove();
+    // Копирование логов
+    $('#xui_copy_logs_btn').on('click', function () {
+        const logsText = $('#xui_logs_display').val();
+        if (!logsText) {
+            if (window.showToast) {
+                showToast('warning', 'Внимание', 'Сначала загрузите логи', { timer: 3000 });
+            }
+            return;
+        }
+
+        navigator.clipboard.writeText(logsText).then(function () {
+            if (window.showToast) {
+                showToast('success', 'Успешно', 'Логи скопированы в буфер обмена', { timer: 2000 });
+            }
+        }).catch(function () {
+            // Fallback для старых браузеров
+            const textarea = document.createElement('textarea');
+            textarea.value = logsText;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            if (window.showToast) {
+                showToast('success', 'Успешно', 'Логи скопированы в буфер обмена', { timer: 2000 });
+            }
+        });
     });
 });

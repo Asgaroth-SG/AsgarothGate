@@ -117,7 +117,7 @@ def get_xui_sync_manager():
     Создает и возвращает менеджер синхронизации X-UI.
     
     Returns:
-        XUISyncManager или None если синхронизация отключена
+        XUISyncManager или None если синхронизация отключена или нет валидных серверов
     """
     try:
         import sys
@@ -129,11 +129,45 @@ def get_xui_sync_manager():
         from xui.xui_sync import XUISyncConfig, XUISyncManager
         
         config_dict = load_xui_config()
-        config = XUISyncConfig(config_dict)
         
-        if not config.enabled:
+        # Проверяем, что синхронизация включена
+        if not config_dict.get('enabled', False):
             return None
         
+        # Проверяем наличие хотя бы одного валидного сервера
+        servers = config_dict.get('xui_servers', [])
+        if not servers:
+            logger.warning("X-UI sync enabled but no servers configured")
+            return None
+        
+        # Проверяем, что есть хотя бы один включенный сервер с валидными данными
+        has_valid_server = False
+        for server in servers:
+            if not server.get('enabled', True):
+                continue
+            
+            host = server.get('host', '').strip()
+            if not host:
+                continue
+            
+            auth_type = server.get('auth_type', 'username')
+            password = server.get('password', '').strip()
+            
+            if auth_type == 'token':
+                if password:
+                    has_valid_server = True
+                    break
+            else:
+                username = server.get('username', '').strip()
+                if username and password:
+                    has_valid_server = True
+                    break
+        
+        if not has_valid_server:
+            logger.warning("X-UI sync enabled but no valid enabled servers found")
+            return None
+        
+        config = XUISyncConfig(config_dict)
         return XUISyncManager(config)
     
     except Exception as e:

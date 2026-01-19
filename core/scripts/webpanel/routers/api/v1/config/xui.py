@@ -10,7 +10,8 @@ from ..schema.config.xui import (
     XUITestConnectionBody,
     XUITestConnectionResponse,
     XUISyncStatusResponse,
-    XUISyncUserBody
+    XUISyncUserBody,
+    XUIServerHealthResponse
 )
 
 # Добавляем путь к модулям
@@ -23,7 +24,7 @@ XUI_CONFIG_PATH = Path("/etc/hysteria/xui_config.json")
 
 
 def load_xui_config() -> Dict[str, Any]:
-    """Загружает конфигурацию X-UI из файла"""
+    """Загружает конфигурацию X-UI из файла с миграцией для обратной совместимости"""
     if not XUI_CONFIG_PATH.exists():
         return {
             "enabled": False,
@@ -34,7 +35,70 @@ def load_xui_config() -> Dict[str, Any]:
     
     try:
         with open(XUI_CONFIG_PATH, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            config = json.load(f)
+        
+        # Миграция: если старый формат (один сервер без массива или без name)
+        xui_servers = config.get('xui_servers', [])
+        if xui_servers:
+            migrated = False
+            for i, server in enumerate(xui_servers):
+                # Если нет поля name - добавляем его
+                if 'name' not in server:
+                    host = server.get('host', '')
+                    if host:
+                        # Извлекаем имя из host (убираем протокол и порт)
+                        name = host.split('://')[-1].split(':')[0].split('/')[0]
+                        server['name'] = name or f'Сервер {i + 1}'
+                    else:
+                        server['name'] = f'Сервер {i + 1}'
+                    migrated = True
+                # Если нет auth_type - определяем по наличию username
+                if 'auth_type' not in server:
+                    if server.get('username'):
+                        server['auth_type'] = 'username'
+                    else:
+                        server['auth_type'] = 'token'
+                    migrated = True
+                # Если нет verify_tls - добавляем True
+                if 'verify_tls' not in server:
+                    server['verify_tls'] = True
+                    migrated = True
+                # Если нет enabled - добавляем True
+                if 'enabled' not in server:
+                    server['enabled'] = True
+                    migrated = True
+                # Если нет plans - добавляем стандартные
+                if 'plans' not in server or not server.get('plans'):
+                    server['plans'] = ['standard', 'premium']
+                    migrated = True
+            
+            # Сохраняем мигрированный конфиг
+            if migrated:
+                save_xui_config(config)
+        
+        # Миграция: удаляем устаревшие поля (cron и стратегия конфликтов)
+        if 'sync_period_type' in config or 'sync_cron' in config or 'conflict_strategy' in config:
+            migrated = False
+            # Удаляем cron-связанные поля
+            if 'sync_period_type' in config:
+                del config['sync_period_type']
+                migrated = True
+            if 'sync_cron' in config:
+                del config['sync_cron']
+                migrated = True
+            # Удаляем стратегию конфликтов
+            if 'conflict_strategy' in config:
+                del config['conflict_strategy']
+                migrated = True
+            # Если sync_interval не установлен, устанавливаем значение по умолчанию
+            if 'sync_interval' not in config or not config.get('sync_interval'):
+                config['sync_interval'] = 60
+                migrated = True
+            
+            if migrated:
+                save_xui_config(config)
+        
+        return config
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -104,9 +168,14 @@ async def update_xui_config_api(body: XUIConfigInputBody):
         for i, new_server in enumerate(config_dict.get('xui_servers', [])):
             if i < len(old_config.get('xui_servers', [])):
                 old_server = old_config['xui_servers'][i]
-                # Если пароль скрыт (***), используем старый
-                if new_server.get('password') == '***' and old_server.get('password'):
+                # Если пароль скрыт (***) или пустой, используем старый
+                new_password = new_server.get('password', '')
+                if (new_password == '***' or new_password == '') and old_server.get('password') and old_server.get('password') != '***':
                     new_server['password'] = old_server['password']
+        
+        # Устанавливаем значение по умолчанию для sync_interval, если не указано
+        if 'sync_interval' not in config_dict or not config_dict.get('sync_interval'):
+            config_dict['sync_interval'] = old_config.get('sync_interval', 60)
         
         save_xui_config(config_dict)
         
@@ -115,6 +184,95 @@ async def update_xui_config_api(body: XUIConfigInputBody):
         raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=f'Error: {str(e)}')
+
+
+@router.post('/server/{server_index}/health', response_model=XUIServerHealthResponse, summary='Check X-UI Server Health', name='check_xui_server_health_api')
+async def check_xui_server_health_api(server_index: int):
+    """
+    Проверяет здоровье конкретного сервера X-UI.
+    
+    Args:
+        server_index: Индекс сервера в списке (начиная с 0)
+    
+    Returns:
+        XUIServerHealthResponse: Статус здоровья сервера
+    
+    ВАЖНО: Пароли НЕ логируются в целях безопасности.
+    """
+    try:
+        config = load_xui_config()
+        servers = config.get('xui_servers', [])
+        
+        if server_index < 0 or server_index >= len(servers):
+            raise HTTPException(status_code=404, detail=f"Server index {server_index} not found")
+        
+        server = servers[server_index]
+        if not server.get('enabled', True):
+            return XUIServerHealthResponse(
+                healthy=False,
+                message="Server is disabled"
+            )
+        
+        from xui.xui_client import XUIClient, XUIAuthError, XUIConnectionError
+        import logging
+        
+        logger = logging.getLogger(__name__)
+        
+        # Определяем username и password в зависимости от auth_type
+        auth_type = server.get('auth_type', 'username')
+        if auth_type == 'token':
+            username = 'admin'  # Заглушка для py3xui
+            password = server.get('password', '')
+        else:
+            username = server.get('username', '')
+            password = server.get('password', '')
+        
+        if not password:
+            return XUIServerHealthResponse(
+                healthy=False,
+                message="Password/token not configured"
+            )
+        
+        server_name = server.get('name', server.get('host', 'Unknown'))
+        # ВАЖНО: НЕ логируем пароль! Только имя сервера
+        logger.info(f"Checking health of server {server_name}")
+        
+        client = XUIClient(
+            host=server.get('host'),
+            username=username,
+            password=password,
+            base_path=server.get('base_path', '/'),
+            timeout=server.get('timeout', 10)
+        )
+        
+        try:
+            healthy, message = client.check_health()
+            if healthy:
+                inbounds = client.list_inbounds()
+                return XUIServerHealthResponse(
+                    healthy=True,
+                    message=message,
+                    inbounds_count=len(inbounds)
+                )
+            else:
+                return XUIServerHealthResponse(
+                    healthy=False,
+                    message=message
+                )
+        except Exception as e:
+            # НЕ логируем детали с паролем
+            logger.warning(f"Health check failed for server {server_name}")
+            return XUIServerHealthResponse(
+                healthy=False,
+                message=f"Error: {str(e)}"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Unexpected error in health check: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f'Error: {str(e)}')
 
 
 @router.post('/test-connection', response_model=XUITestConnectionResponse, summary='Test X-UI Connection', name='test_xui_connection_api')
@@ -127,9 +285,14 @@ async def test_xui_connection_api(body: XUITestConnectionBody):
     
     Returns:
         XUITestConnectionResponse: Результат теста
+    
+    ВАЖНО: Пароли НЕ логируются в целях безопасности.
     """
     try:
         from xui.xui_client import XUIClient, XUIClientError, XUIAuthError, XUIConnectionError
+        import logging
+        
+        logger = logging.getLogger(__name__)
         
         # Проверяем наличие username и password (обязательны)
         if not body.username or not body.password:
@@ -137,6 +300,9 @@ async def test_xui_connection_api(body: XUITestConnectionBody):
                 success=False,
                 message="Username and password are required"
             )
+        
+        # ВАЖНО: НЕ логируем пароль! Только host и username
+        logger.info(f"Testing X-UI connection to {body.host} with username {body.username}")
         
         client = XUIClient(
             host=body.host,
@@ -148,6 +314,7 @@ async def test_xui_connection_api(body: XUITestConnectionBody):
         
         try:
             inbounds = client.list_inbounds()
+            logger.info(f"Successfully connected to {body.host}, found {len(inbounds)} inbounds")
             return XUITestConnectionResponse(
                 success=True,
                 message=f"Successfully connected! Found {len(inbounds)} inbounds.",
@@ -155,21 +322,28 @@ async def test_xui_connection_api(body: XUITestConnectionBody):
                 inbounds=inbounds[:10]  # Первые 10 для примера
             )
         except XUIAuthError as e:
+            # НЕ логируем детали ошибки с паролем
+            logger.warning(f"Authentication failed for {body.host} with username {body.username}")
             return XUITestConnectionResponse(
                 success=False,
                 message=f"Authentication failed: {str(e)}"
             )
         except XUIConnectionError as e:
+            logger.warning(f"Connection failed to {body.host}: {str(e)}")
             return XUITestConnectionResponse(
                 success=False,
                 message=f"Connection failed: {str(e)}"
             )
         except Exception as e:
+            logger.error(f"Error testing connection to {body.host}: {str(e)}", exc_info=True)
             return XUITestConnectionResponse(
                 success=False,
                 message=f"Error: {str(e)}"
             )
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Unexpected error in test_connection: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f'Error: {str(e)}')
 
 
@@ -183,6 +357,7 @@ async def get_xui_sync_status_api():
     """
     try:
         from db.database import db
+        from datetime import datetime
         
         if not db:
             raise HTTPException(status_code=500, detail="Database not available")
@@ -210,11 +385,31 @@ async def get_xui_sync_status_api():
             else:
                 sync_statuses[username] = 'not_synced'
         
+        # Получаем информацию о последнем запуске синхронизации
+        # (заглушка - в реальности нужно хранить это в БД или конфиге)
+        last_sync_time = None
+        last_sync_status = None
+        last_sync_stats = None
+        
+        # Пытаемся получить из конфига или БД
+        try:
+            config = load_xui_config()
+            if 'last_sync' in config:
+                last_sync = config['last_sync']
+                last_sync_time = last_sync.get('time')
+                last_sync_status = last_sync.get('status')
+                last_sync_stats = last_sync.get('stats')
+        except:
+            pass
+        
         return XUISyncStatusResponse(
             total_users=len(all_users),
             synced_users=synced_count,
             failed_users=failed_count,
-            sync_statuses=sync_statuses
+            sync_statuses=sync_statuses,
+            last_sync_time=last_sync_time,
+            last_sync_status=last_sync_status,
+            last_sync_stats=last_sync_stats
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f'Error: {str(e)}')
@@ -242,11 +437,51 @@ async def sync_user_xui_api(body: XUISyncUserBody):
         if not user_data:
             raise HTTPException(status_code=404, detail=f"User {body.username} not found")
         
+        # Проверяем конфигурацию перед созданием менеджера
+        config = load_xui_config()
+        if not config.get('enabled', False):
+            raise HTTPException(
+                status_code=400,
+                detail="X-UI sync is not enabled. Enable it in settings first."
+            )
+        
+        servers = config.get('xui_servers', [])
+        if not servers:
+            raise HTTPException(
+                status_code=400,
+                detail="No X-UI servers configured. Add at least one server first."
+            )
+        
+        # Проверяем наличие валидных серверов
+        has_valid_server = False
+        for server in servers:
+            if not server.get('enabled', True):
+                continue
+            host = server.get('host', '').strip()
+            if not host:
+                continue
+            auth_type = server.get('auth_type', 'username')
+            password = server.get('password', '').strip()
+            if auth_type == 'token' and password:
+                has_valid_server = True
+                break
+            elif auth_type == 'username':
+                username = server.get('username', '').strip()
+                if username and password:
+                    has_valid_server = True
+                    break
+        
+        if not has_valid_server:
+            raise HTTPException(
+                status_code=400,
+                detail="No valid enabled X-UI servers found. Configure at least one server with valid credentials."
+            )
+        
         sync_manager = get_xui_sync_manager()
         if not sync_manager:
             raise HTTPException(
-                status_code=400,
-                detail="X-UI sync is not enabled. Please configure it first."
+                status_code=500,
+                detail="Failed to initialize X-UI sync manager. Check server logs for details."
             )
         
         plan = user_data.get('plan', 'standard')
@@ -287,15 +522,56 @@ async def sync_all_users_xui_api():
     try:
         from xui.config import get_xui_sync_manager
         from db.database import db
+        from datetime import datetime
         
         if not db:
             raise HTTPException(status_code=500, detail="Database not available")
         
+        # Проверяем конфигурацию перед созданием менеджера
+        config = load_xui_config()
+        if not config.get('enabled', False):
+            raise HTTPException(
+                status_code=400,
+                detail="X-UI sync is not enabled. Enable it in settings first."
+            )
+        
+        servers = config.get('xui_servers', [])
+        if not servers:
+            raise HTTPException(
+                status_code=400,
+                detail="No X-UI servers configured. Add at least one server first."
+            )
+        
+        # Проверяем наличие валидных серверов
+        has_valid_server = False
+        for server in servers:
+            if not server.get('enabled', True):
+                continue
+            host = server.get('host', '').strip()
+            if not host:
+                continue
+            auth_type = server.get('auth_type', 'username')
+            password = server.get('password', '').strip()
+            if auth_type == 'token' and password:
+                has_valid_server = True
+                break
+            elif auth_type == 'username':
+                username = server.get('username', '').strip()
+                if username and password:
+                    has_valid_server = True
+                    break
+        
+        if not has_valid_server:
+            raise HTTPException(
+                status_code=400,
+                detail="No valid enabled X-UI servers found. Configure at least one server with valid credentials."
+            )
+        
         sync_manager = get_xui_sync_manager()
         if not sync_manager:
             raise HTTPException(
-                status_code=400,
-                detail="X-UI sync is not enabled. Please configure it first."
+                status_code=500,
+                detail="Failed to initialize X-UI sync manager. Check server logs for details."
             )
         
         all_users = db.get_all_users()
@@ -324,6 +600,24 @@ async def sync_all_users_xui_api():
             else:
                 failed_count += 1
                 errors.append(f"{username}: {error}")
+        
+        # Сохраняем информацию о последнем запуске
+        try:
+            config = load_xui_config()
+            config['last_sync'] = {
+                'time': datetime.now().isoformat(),
+                'status': 'success' if failed_count == 0 else 'failed',
+                'stats': {
+                    'synced': success_count,
+                    'failed': failed_count
+                }
+            }
+            save_xui_config(config)
+        except Exception as e:
+            # Не критично, просто логируем
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Failed to save last sync info: {e}")
         
         message = f"Synced {success_count} users successfully."
         if failed_count > 0:

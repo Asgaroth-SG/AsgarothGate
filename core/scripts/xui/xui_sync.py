@@ -88,13 +88,20 @@ class XUISyncManager:
                 if not host:
                     continue
                 
-                # Проверяем наличие username и password (обязательны)
+                # Проверяем авторизацию в зависимости от auth_type
+                auth_type = server.get('auth_type', 'username')
                 username = server.get('username')
                 password = server.get('password')
                 
-                if not username or not password:
-                    logger.warning(f"Server {host} skipped: username and password are required")
-                    continue
+                if auth_type == 'token':
+                    if not password:
+                        logger.warning(f"Server {host} skipped: token is required when auth_type=token")
+                        continue
+                    username = 'admin'  # Заглушка для py3xui
+                else:
+                    if not username or not password:
+                        logger.warning(f"Server {host} skipped: username and password are required when auth_type=username")
+                        continue
                 
                 client = XUIClient(
                     host=host,
@@ -247,9 +254,9 @@ class XUISyncManager:
         # Проверяем, есть ли уже маппинг
         existing_mapping = db.get_xui_mapping(hysteria_username)
         if existing_mapping:
-            # Пользователь уже синхронизирован, но нужно проверить, синхронизирован ли он во все inbounds
-            # Используем sync_user_update для обновления/добавления в новые inbounds
-            logger.info(f"User {hysteria_username} already has X-UI mapping, updating...")
+            # Пользователь уже синхронизирован - используем upsert для безопасного обновления
+            logger.info(f"User {hysteria_username} already has X-UI mapping, using upsert...")
+            # Используем sync_user_update, который внутри использует upsert_client
             return self.sync_user_update(
                 hysteria_username=hysteria_username,
                 expiry_days=expiry_days,
@@ -294,12 +301,13 @@ class XUISyncManager:
                 
                 logger.info(f"Found {len(inbound_ids)} inbounds on server {host}: {inbound_ids}")
                 
-                # Добавляем клиента в каждый inbound
+                # Добавляем клиента в каждый inbound используя upsert для безопасной обработки существующих клиентов
                 # В 3X-UI email должен быть уникальным глобально, используем формат username_inbound_id
                 for inbound_id in inbound_ids:
                     try:
-                        logger.debug(f"Adding client {client_uuid} to inbound {inbound_id} on {host} with email {hysteria_username}_{inbound_id}")
-                        client.add_client(
+                        logger.debug(f"Upserting client {client_uuid} to inbound {inbound_id} on {host} with email {hysteria_username}_{inbound_id}")
+                        # Используем upsert_client вместо add_client для безопасной обработки существующих клиентов
+                        is_updated, action = client.upsert_client(
                             inbound_id=inbound_id,
                             uuid=client_uuid,
                             expiry_time=expiry_timestamp,
@@ -309,15 +317,15 @@ class XUISyncManager:
                         )
                         all_inbound_ids.append(inbound_id)
                         logger.info(
-                            f"Successfully added client {client_uuid} (email: {hysteria_username}_{inbound_id}) to inbound {inbound_id} "
+                            f"Successfully {action} client {client_uuid} (email: {hysteria_username}_{inbound_id}) in inbound {inbound_id} "
                             f"on server {host}"
                         )
                     except XUIClientError as e:
-                        error_msg = f"Failed to add client to inbound {inbound_id} on {host}: {e}"
+                        error_msg = f"Failed to upsert client to inbound {inbound_id} on {host}: {e}"
                         logger.error(error_msg, exc_info=True)
                         errors.append(error_msg)
                     except Exception as e:
-                        error_msg = f"Unexpected error adding client to inbound {inbound_id} on {host}: {e}"
+                        error_msg = f"Unexpected error upserting client to inbound {inbound_id} on {host}: {e}"
                         logger.error(error_msg, exc_info=True)
                         errors.append(error_msg)
                 
@@ -446,9 +454,10 @@ class XUISyncManager:
             
             for inbound_id in server_inbound_ids:
                 try:
-                    client.update_client(
+                    # Используем upsert_client для правильной обработки существующих клиентов
+                    is_updated, action = client.upsert_client(
                         inbound_id=inbound_id,
-                        uuid=client_uuid,  # Исправлено: параметр должен быть uuid, а не client_uuid
+                        uuid=client_uuid,
                         expiry_time=expiry_timestamp,
                         traffic_limit=traffic_bytes,
                         enable=enable,
@@ -456,11 +465,11 @@ class XUISyncManager:
                     )
                     updated_inbound_ids.add(inbound_id)  # Добавляем в список обновленных
                     logger.info(
-                        f"Updated client {client_uuid} (email: {hysteria_username}_{inbound_id}) in inbound {inbound_id} "
+                        f"{action.capitalize()} client {client_uuid} (email: {hysteria_username}_{inbound_id}) in inbound {inbound_id} "
                         f"on server {host}"
                     )
                 except XUIClientError as e:
-                    error_msg = f"Failed to update client in inbound {inbound_id} on {host}: {e}"
+                    error_msg = f"Failed to upsert client in inbound {inbound_id} on {host}: {e}"
                     logger.error(error_msg)
                     errors.append(error_msg)
                 except (XUIAuthError, XUIConnectionError) as e:

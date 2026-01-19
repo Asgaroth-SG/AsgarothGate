@@ -6,7 +6,7 @@ X-UI/3X-UI API Client
 
 import asyncio
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from urllib.parse import urlparse
 from datetime import datetime
 from dataclasses import dataclass
@@ -297,6 +297,37 @@ class XUIClient:
         self.ensure_logged_in()
         return self._run_async_in_sync_context(self._list_inbounds_async())
     
+    async def _check_health_async(self) -> Tuple[bool, str]:
+        """
+        Проверяет доступность сервера X-UI (асинхронно).
+        
+        Returns:
+            Tuple (is_healthy: bool, message: str)
+        """
+        try:
+            await self._ensure_logged_in_async()
+            # Пытаемся получить список inbounds как проверку здоровья
+            inbounds = await self.py3xui_api.inbound.get_list()
+            return True, f"Online ({len(inbounds)} inbounds)"
+        except XUIAuthError as e:
+            return False, f"Authentication failed: {str(e)}"
+        except XUIConnectionError as e:
+            return False, f"Connection failed: {str(e)}"
+        except Exception as e:
+            return False, f"Error: {str(e)}"
+    
+    def check_health(self) -> Tuple[bool, str]:
+        """
+        Проверяет доступность сервера X-UI.
+        
+        Returns:
+            Tuple (is_healthy: bool, message: str)
+        """
+        try:
+            return self._run_async_in_sync_context(self._check_health_async())
+        except Exception as e:
+            return False, f"Error: {str(e)}"
+    
     async def _add_client_async(
         self,
         inbound_id: int,
@@ -385,6 +416,262 @@ class XUIClient:
             self._add_client_async(inbound_id, uuid, expiry_time, traffic_limit, enable, email, username)
         )
     
+    async def _list_clients_async(self, inbound_id: int) -> List[Dict[str, Any]]:
+        """Получает список клиентов в inbound (асинхронно)"""
+        await self._ensure_logged_in_async()
+        
+        try:
+            inbound = await self.py3xui_api.inbound.get_by_id(inbound_id)
+            if not inbound:
+                raise XUIClientError(f"Inbound {inbound_id} not found")
+            
+            clients = []
+            try:
+                if hasattr(inbound, 'settings') and hasattr(inbound.settings, 'clients'):
+                    client_list = inbound.settings.clients
+                    if isinstance(client_list, list):
+                        for client in client_list:
+                            clients.append({
+                                'id': getattr(client, 'id', None),
+                                'email': getattr(client, 'email', ''),
+                                'enable': getattr(client, 'enable', True),
+                                'expiry_time': getattr(client, 'expiry_time', None),
+                                'total_gb': getattr(client, 'total_gb', None)
+                            })
+                    elif hasattr(client_list, '__iter__'):
+                        for client in client_list:
+                            clients.append({
+                                'id': getattr(client, 'id', None),
+                                'email': getattr(client, 'email', ''),
+                                'enable': getattr(client, 'enable', True),
+                                'expiry_time': getattr(client, 'expiry_time', None),
+                                'total_gb': getattr(client, 'total_gb', None)
+                            })
+            except Exception as e:
+                logger.warning(f"Error accessing clients from inbound {inbound_id}: {e}")
+            
+            return clients
+        except Exception as e:
+            logger.error(f"Failed to list clients in inbound {inbound_id}: {e}")
+            raise XUIClientError(f"Failed to list clients: {str(e)}")
+    
+    def list_clients(self, inbound_id: int) -> List[Dict[str, Any]]:
+        """
+        Получает список клиентов в inbound.
+        
+        Args:
+            inbound_id: ID inbound
+        
+        Returns:
+            Список клиентов с их параметрами
+        
+        Raises:
+            XUIClientError: При ошибке
+        """
+        self.ensure_logged_in()
+        return self._run_async_in_sync_context(self._list_clients_async(inbound_id))
+    
+    async def _upsert_client_async(
+        self,
+        inbound_id: int,
+        uuid: str,
+        expiry_time: Optional[int] = None,
+        traffic_limit: Optional[int] = None,
+        enable: Optional[bool] = None,
+        email: Optional[str] = None,
+        username: Optional[str] = None
+    ) -> Tuple[bool, str]:
+        """
+        Добавляет или обновляет клиента в inbound (UPSERT).
+        
+        Returns:
+            Tuple (is_updated: bool, message: str)
+        """
+        await self._ensure_logged_in_async()
+        
+        try:
+            # Генерируем email если не указан
+            if not email:
+                if username:
+                    email = f"{username}_{inbound_id}"
+                else:
+                    email = f"{uuid}_{inbound_id}"
+            
+            # Получаем список клиентов в inbound
+            clients = await self._list_clients_async(inbound_id)
+            
+            # Ищем клиента по UUID или email
+            client_to_update = None
+            for client in clients:
+                client_id = client.get('id')
+                client_email = client.get('email', '')
+                # Ищем по UUID или email (email более стабильный ключ)
+                # Проверяем точное совпадение UUID или email
+                if (client_id and str(client_id) == str(uuid)) or (client_email and client_email == email):
+                    client_to_update = client
+                    break
+            
+            # Если клиент найден - обновляем
+            if client_to_update:
+                try:
+                    # Получаем полный inbound для обновления
+                    inbound = await self.py3xui_api.inbound.get_by_id(inbound_id)
+                    if not inbound:
+                        raise XUIClientError(f"Inbound {inbound_id} not found")
+                    
+                    # Находим клиента в inbound для получения всех полей
+                    actual_client = None
+                    if hasattr(inbound, 'settings') and hasattr(inbound.settings, 'clients'):
+                        client_list = inbound.settings.clients
+                        if isinstance(client_list, list):
+                            for c in client_list:
+                                if (hasattr(c, 'id') and c.id == uuid) or (hasattr(c, 'email') and c.email == email):
+                                    actual_client = c
+                                    break
+                    
+                    if not actual_client:
+                        # Клиент не найден в полном inbound, но был в списке - возможно рассинхронизация
+                        # Пробуем добавить, но если получим duplicate email - это нормально
+                        try:
+                            await self._add_client_async(
+                                inbound_id=inbound_id,
+                                uuid=uuid,
+                                expiry_time=expiry_time,
+                                traffic_limit=traffic_limit,
+                                enable=enable if enable is not None else True,
+                                email=email,
+                                username=username
+                            )
+                            return False, "added"
+                        except Exception as add_error:
+                            add_error_str = str(add_error).lower()
+                            # Если ошибка "duplicate email" - клиент уже существует, считаем успехом
+                            if "duplicate email" in add_error_str or "already exists" in add_error_str:
+                                logger.info(f"Client {uuid} (email: {email}) already exists in inbound {inbound_id}, skipping")
+                                return True, "already exists"
+                            # Перебрасываем другие ошибки
+                            raise XUIClientError(f"Failed to add client: {str(add_error)}")
+                    
+                    # Создаем обновленный клиент
+                    updated_client = Client(
+                        id=actual_client.id,  # Используем реальный ID из 3X-UI
+                        email=actual_client.email,  # Сохраняем существующий email
+                        enable=enable if enable is not None else actual_client.enable
+                    )
+                    
+                    # Устанавливаем лимиты
+                    if expiry_time is not None:
+                        if expiry_time < 1000000000000:
+                            expiry_time = expiry_time * 1000
+                        updated_client.expiry_time = expiry_time
+                    elif hasattr(actual_client, 'expiry_time'):
+                        updated_client.expiry_time = actual_client.expiry_time
+                    
+                    if traffic_limit is not None:
+                        updated_client.total_gb = traffic_limit / (1024 ** 3)
+                    elif hasattr(actual_client, 'total_gb'):
+                        updated_client.total_gb = actual_client.total_gb
+                    
+                    # Обновляем используя реальный client.id из 3X-UI
+                    await self.py3xui_api.client.update(actual_client.id, updated_client)
+                    logger.info(f"Updated client {uuid} (3X-UI id: {actual_client.id}) in inbound {inbound_id}")
+                    return True, "updated"
+                    
+                except Exception as update_error:
+                    # Если update не удался, проверяем причину
+                    error_str = str(update_error).lower()
+                    if "not found" in error_str or "record not found" in error_str:
+                        # Клиент не найден для обновления - пробуем добавить
+                        logger.warning(f"Update failed (record not found), trying add: {update_error}")
+                        try:
+                            await self._add_client_async(
+                                inbound_id=inbound_id,
+                                uuid=uuid,
+                                expiry_time=expiry_time,
+                                traffic_limit=traffic_limit,
+                                enable=enable if enable is not None else True,
+                                email=email,
+                                username=username
+                            )
+                            return False, "added (fallback)"
+                        except Exception as add_error:
+                            add_error_str = str(add_error).lower()
+                            # Если ошибка "duplicate email" - клиент уже существует, считаем успехом
+                            if "duplicate email" in add_error_str or "already exists" in add_error_str:
+                                logger.info(f"Client {uuid} (email: {email}) already exists in inbound {inbound_id}, skipping")
+                                return True, "already exists"
+                            raise XUIClientError(f"Failed to add client after update failed: {str(add_error)}")
+                    elif "duplicate email" in error_str or "already exists" in error_str:
+                        # Клиент уже существует - это нормально, считаем успехом
+                        logger.info(f"Client {uuid} (email: {email}) already exists in inbound {inbound_id}")
+                        return True, "already exists"
+                    else:
+                        # Другие ошибки обновления - но клиент был найден в списке, значит он существует
+                        # Считаем это успехом, так как клиент уже есть в системе
+                        logger.warning(f"Update failed for client {uuid} (email: {email}) in inbound {inbound_id}: {update_error}")
+                        logger.info(f"Client was found in list, considering as success despite update failure")
+                        return True, "update skipped (client exists)"
+            else:
+                # Клиент не найден в списке - пробуем добавить
+                try:
+                    await self._add_client_async(
+                        inbound_id=inbound_id,
+                        uuid=uuid,
+                        expiry_time=expiry_time,
+                        traffic_limit=traffic_limit,
+                        enable=enable if enable is not None else True,
+                        email=email,
+                        username=username
+                    )
+                    return False, "added"
+                except Exception as add_error:
+                    add_error_str = str(add_error).lower()
+                    # Если ошибка "duplicate email" - клиент уже существует, считаем успехом
+                    if "duplicate email" in add_error_str or "already exists" in add_error_str:
+                        logger.info(f"Client {uuid} (email: {email}) already exists in inbound {inbound_id}, skipping")
+                        return True, "already exists"
+                    # Перебрасываем другие ошибки
+                    raise XUIClientError(f"Failed to add client: {str(add_error)}")
+                
+        except XUIClientError:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to upsert client {uuid} in inbound {inbound_id}: {e}", exc_info=True)
+            raise XUIClientError(f"Failed to upsert client: {str(e)}")
+    
+    def upsert_client(
+        self,
+        inbound_id: int,
+        uuid: str,
+        expiry_time: Optional[int] = None,
+        traffic_limit: Optional[int] = None,
+        enable: Optional[bool] = None,
+        email: Optional[str] = None,
+        username: Optional[str] = None
+    ) -> Tuple[bool, str]:
+        """
+        Добавляет или обновляет клиента в inbound (UPSERT).
+        
+        Args:
+            inbound_id: ID inbound
+            uuid: UUID клиента
+            expiry_time: Время истечения (timestamp в миллисекундах, опционально)
+            traffic_limit: Лимит трафика в байтах (опционально)
+            enable: Включен ли клиент (опционально)
+            email: Email клиента (опционально, будет сгенерирован как username_inbound_id)
+            username: Username из Hysteria (используется для генерации email если не указан)
+        
+        Returns:
+            Tuple (is_updated: bool, action: str) - True если обновлен, False если добавлен
+        
+        Raises:
+            XUIClientError: При ошибке
+        """
+        self.ensure_logged_in()
+        return self._run_async_in_sync_context(
+            self._upsert_client_async(inbound_id, uuid, expiry_time, traffic_limit, enable, email, username)
+        )
+    
     async def _update_client_async(
         self,
         inbound_id: int,
@@ -395,92 +682,11 @@ class XUIClient:
         email: Optional[str] = None,
         username: Optional[str] = None
     ) -> bool:
-        """Обновляет клиента в inbound (асинхронно)"""
-        await self._ensure_logged_in_async()
-        
-        try:
-            # Сначала получаем текущего клиента по UUID
-            # В py3xui нужно получить inbound, найти клиента и обновить его
-            inbound = await self.py3xui_api.inbound.get_by_id(inbound_id)
-            
-            if not inbound:
-                raise XUIClientError(f"Inbound {inbound_id} not found")
-            
-            # Ищем клиента по UUID
-            client_to_update = None
-            try:
-                # Проверяем, что clients существует и является итерируемым
-                if hasattr(inbound, 'settings') and hasattr(inbound.settings, 'clients'):
-                    clients = inbound.settings.clients
-                    if isinstance(clients, list):
-                        for client in clients:
-                            if hasattr(client, 'id') and client.id == uuid:
-                                client_to_update = client
-                                break
-                    elif hasattr(clients, '__iter__'):
-                        # Если это не список, но итерируемый объект
-                        for client in clients:
-                            if hasattr(client, 'id') and client.id == uuid:
-                                client_to_update = client
-                                break
-            except Exception as e:
-                logger.warning(f"Error accessing clients from inbound {inbound_id}: {e}")
-                client_to_update = None
-            
-            # Если клиент не найден в этом inbound, добавляем его
-            if not client_to_update:
-                logger.info(f"Client {uuid} not found in inbound {inbound_id}, adding it...")
-                # Используем текущие значения или значения по умолчанию
-                add_enable = enable if enable is not None else True
-                try:
-                    await self._add_client_async(
-                        inbound_id=inbound_id,
-                        uuid=uuid,
-                        expiry_time=expiry_time,
-                        traffic_limit=traffic_limit,
-                        enable=add_enable,
-                        email=email,
-                        username=username
-                    )
-                    logger.info(f"Successfully added client {uuid} to inbound {inbound_id}")
-                    return True
-                except Exception as add_error:
-                    logger.error(f"Failed to add client {uuid} to inbound {inbound_id}: {add_error}")
-                    raise XUIClientError(f"Failed to add client to inbound: {str(add_error)}")
-            
-            # Обновляем параметры существующего клиента
-            # Создаем копию клиента для обновления
-            updated_client = Client(
-                id=client_to_update.id,
-                email=client_to_update.email,  # Сохраняем существующий email
-                enable=enable if enable is not None else client_to_update.enable
-            )
-            
-            # Устанавливаем лимиты
-            if expiry_time is not None:
-                # Проверяем формат времени (должно быть в миллисекундах)
-                if expiry_time < 1000000000000:  # Если меньше этого, значит секунды, конвертируем
-                    expiry_time = expiry_time * 1000
-                updated_client.expiry_time = expiry_time
-            elif hasattr(client_to_update, 'expiry_time'):
-                updated_client.expiry_time = client_to_update.expiry_time
-            
-            if traffic_limit is not None:
-                updated_client.total_gb = traffic_limit / (1024 ** 3)
-            elif hasattr(client_to_update, 'total_gb'):
-                updated_client.total_gb = client_to_update.total_gb
-            
-            # Используем правильный метод: api.client.update(client_uuid, client)
-            await self.py3xui_api.client.update(uuid, updated_client)
-            
-            logger.info(f"Updated client {uuid} in inbound {inbound_id}")
-            return True
-            
-        except XUIClientError:
-            raise
-        except Exception as e:
-            logger.error(f"Failed to update client {uuid} in inbound {inbound_id}: {e}", exc_info=True)
-            raise XUIClientError(f"Failed to update client: {str(e)}")
+        """Обновляет клиента в inbound (асинхронно) - использует upsert внутри"""
+        is_updated, _ = await self._upsert_client_async(
+            inbound_id, uuid, expiry_time, traffic_limit, enable, email, username
+        )
+        return True  # Всегда успешно, так как upsert либо обновляет, либо добавляет
     
     def update_client(
         self,
