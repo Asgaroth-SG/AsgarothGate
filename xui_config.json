@@ -3,7 +3,7 @@
   "mode": "multi-xui",
   "xui_servers": [
     {
-      "host": "https://example.com:443",
+      "host": "https://gateway.asgaroth.ru:5560",
       "base_path": "/vpn",
       "username": "admin",
       "password": "your_password_here",

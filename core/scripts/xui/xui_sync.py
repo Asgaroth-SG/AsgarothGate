@@ -18,17 +18,6 @@ from xui.xui_client import XUIClient, XUIClientError, XUIAuthError, XUIConnectio
 
 logger = logging.getLogger(__name__)
 
-# Импортируем настройку логирования (с обработкой ошибок)
-try:
-    from xui.logging_config import setup_xui_logging
-    setup_xui_logging()
-except (ImportError, Exception) as e:
-    # Если не удалось импортировать, используем базовое логирование
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-
 
 class XUISyncError(Exception):
     """Ошибка синхронизации с X-UI"""
@@ -92,14 +81,11 @@ class XUISyncManager:
         self.config = config
         self.clients: Dict[str, XUIClient] = {}
         
-        logger.info(f"Initializing XUISyncManager (enabled: {config.enabled}, mode: {config.mode}, servers: {len(config.xui_servers)})")
-        
         # Инициализируем клиенты для каждого сервера
         if config.enabled:
             for server in config.xui_servers:
                 host = server.get('host')
                 if not host:
-                    logger.warning("Server skipped: host is required")
                     continue
                 
                 # Проверяем наличие username и password (обязательны)
@@ -110,23 +96,17 @@ class XUISyncManager:
                     logger.warning(f"Server {host} skipped: username and password are required")
                     continue
                 
-                base_path = server.get('base_path', '/')
-                logger.info(f"Initializing X-UI client for {host} with base_path={base_path}")
-                
                 client = XUIClient(
                     host=host,
                     username=username,
                     password=password,
-                    base_path=base_path,
+                    base_path=server.get('base_path', '/'),
                     timeout=server.get('timeout', 10),
                     max_retries=server.get('max_retries', 3)
                 )
                 
                 # Используем host как ключ
                 self.clients[host] = client
-                logger.info(f"X-UI client initialized for {host}")
-        else:
-            logger.info("X-UI sync is disabled")
     
     def _get_inbound_ids(self, client: XUIClient, server_config: Optional[Dict] = None) -> List[int]:
         """
@@ -178,7 +158,6 @@ class XUISyncManager:
         Returns:
             Список кортежей (host, client, server_config)
         """
-        logger.debug(f"Getting servers for plan '{user_plan}'")
         user_plan = str(user_plan).lower().strip()
         if user_plan not in ('standard', 'premium'):
             user_plan = 'standard'
@@ -206,9 +185,7 @@ class XUISyncManager:
         # Используем детерминированный UUID на основе имени пользователя
         # Это позволяет восстанавливать маппинг при перезапуске
         namespace = uuid_lib.UUID('6ba7b810-9dad-11d1-80b4-00c04fd430c8')
-        uuid = str(uuid_lib.uuid5(namespace, hysteria_username.lower()))
-        logger.debug(f"Generated UUID {uuid} for user {hysteria_username}")
-        return uuid
+        return str(uuid_lib.uuid5(namespace, hysteria_username.lower()))
     
     def _convert_expiry_days_to_timestamp(self, expiry_days: int) -> Optional[int]:
         """
@@ -270,9 +247,16 @@ class XUISyncManager:
         # Проверяем, есть ли уже маппинг
         existing_mapping = db.get_xui_mapping(hysteria_username)
         if existing_mapping:
-            # Пользователь уже синхронизирован
-            logger.info(f"User {hysteria_username} already has X-UI mapping")
-            return True, None
+            # Пользователь уже синхронизирован, но нужно проверить, синхронизирован ли он во все inbounds
+            # Используем sync_user_update для обновления/добавления в новые inbounds
+            logger.info(f"User {hysteria_username} already has X-UI mapping, updating...")
+            return self.sync_user_update(
+                hysteria_username=hysteria_username,
+                expiry_days=expiry_days,
+                traffic_limit_gb=traffic_limit_gb,
+                enable=enable,
+                user_plan=user_plan
+            )
         
         # Генерируем UUID
         client_uuid = self._generate_client_uuid(hysteria_username)
@@ -299,6 +283,7 @@ class XUISyncManager:
         # Синхронизируем с каждым сервером для плана пользователя
         for host, client, server_config in servers_for_plan:
             try:
+                logger.info(f"Syncing user {hysteria_username} with server {host}")
                 # Получаем список inbounds для этого сервера
                 inbound_ids = self._get_inbound_ids(client, server_config)
                 
@@ -307,24 +292,33 @@ class XUISyncManager:
                     errors.append(f"No inbounds found on {host}")
                     continue
                 
+                logger.info(f"Found {len(inbound_ids)} inbounds on server {host}: {inbound_ids}")
+                
                 # Добавляем клиента в каждый inbound
+                # В 3X-UI email должен быть уникальным глобально, используем формат username_inbound_id
                 for inbound_id in inbound_ids:
                     try:
+                        logger.debug(f"Adding client {client_uuid} to inbound {inbound_id} on {host} with email {hysteria_username}_{inbound_id}")
                         client.add_client(
                             inbound_id=inbound_id,
                             uuid=client_uuid,
                             expiry_time=expiry_timestamp,
                             traffic_limit=traffic_bytes,
-                            enable=enable
+                            enable=enable,
+                            username=hysteria_username  # Используется для генерации email: username_inbound_id
                         )
                         all_inbound_ids.append(inbound_id)
                         logger.info(
-                            f"Added client {client_uuid} to inbound {inbound_id} "
+                            f"Successfully added client {client_uuid} (email: {hysteria_username}_{inbound_id}) to inbound {inbound_id} "
                             f"on server {host}"
                         )
                     except XUIClientError as e:
                         error_msg = f"Failed to add client to inbound {inbound_id} on {host}: {e}"
-                        logger.error(error_msg)
+                        logger.error(error_msg, exc_info=True)
+                        errors.append(error_msg)
+                    except Exception as e:
+                        error_msg = f"Unexpected error adding client to inbound {inbound_id} on {host}: {e}"
+                        logger.error(error_msg, exc_info=True)
                         errors.append(error_msg)
                 
             except (XUIAuthError, XUIConnectionError) as e:
@@ -377,21 +371,17 @@ class XUISyncManager:
         Returns:
             Tuple (success: bool, error_message: Optional[str])
         """
-        logger.info(f"Updating user {hysteria_username} in X-UI (expiry: {expiry_days}, traffic: {traffic_limit_gb}, enable: {enable}, plan: {user_plan})")
-        
         if not self.config.enabled:
-            logger.debug(f"X-UI sync is disabled, skipping update for {hysteria_username}")
             return True, None
         
         if not db:
-            logger.error("Database not available for user update")
             return False, "Database not available"
         
         # Получаем маппинг
         mapping = db.get_xui_mapping(hysteria_username)
         if not mapping:
             # Маппинга нет - создаем
-            logger.info(f"No mapping found for {hysteria_username}, creating new mapping...")
+            logger.info(f"No mapping found for {hysteria_username}, creating...")
             # Нужны базовые параметры пользователя
             user_data = db.get_user(hysteria_username)
             if not user_data:
@@ -448,22 +438,25 @@ class XUISyncManager:
                 servers_for_plan = [(xui_host, self.clients[xui_host], {})]
         
         # Обновляем на каждом сервере для плана
+        updated_inbound_ids = set(inbound_ids) if inbound_ids else set()
+        
         for host, client, server_config in servers_for_plan:
-            # Получаем актуальные inbounds если список пуст
-            if not inbound_ids:
-                inbound_ids = self._get_inbound_ids(client, server_config)
+            # Получаем актуальные inbounds для этого сервера
+            server_inbound_ids = self._get_inbound_ids(client, server_config)
             
-            for inbound_id in inbound_ids:
+            for inbound_id in server_inbound_ids:
                 try:
                     client.update_client(
                         inbound_id=inbound_id,
-                        client_uuid=client_uuid,
+                        uuid=client_uuid,  # Исправлено: параметр должен быть uuid, а не client_uuid
                         expiry_time=expiry_timestamp,
                         traffic_limit=traffic_bytes,
-                        enable=enable
+                        enable=enable,
+                        username=hysteria_username  # Используется для генерации email: username_inbound_id
                     )
+                    updated_inbound_ids.add(inbound_id)  # Добавляем в список обновленных
                     logger.info(
-                        f"Updated client {client_uuid} in inbound {inbound_id} "
+                        f"Updated client {client_uuid} (email: {hysteria_username}_{inbound_id}) in inbound {inbound_id} "
                         f"on server {host}"
                     )
                 except XUIClientError as e:
@@ -475,14 +468,14 @@ class XUISyncManager:
                     logger.error(error_msg)
                     errors.append(error_msg)
         
-        # Обновляем маппинг
+        # Обновляем маппинг со всеми inbound_ids (включая новые)
         sync_status = "success" if not errors else "failed"
         error_message = "; ".join(errors) if errors else None
         
         db.save_xui_mapping(
             hysteria_username=hysteria_username,
             xui_client_uuid=client_uuid,
-            inbound_ids=inbound_ids,
+            inbound_ids=list(updated_inbound_ids),  # Сохраняем все обновленные inbound_ids
             xui_host=xui_host,
             sync_status=sync_status,
             error_message=error_message
@@ -519,11 +512,8 @@ class XUISyncManager:
         inbound_ids = mapping.get('inbound_ids', [])
         xui_host = mapping.get('xui_host')
         
-        logger.info(f"Deleting user {hysteria_username} from X-UI (UUID: {client_uuid}, host: {xui_host}, inbounds: {inbound_ids})")
-        
         if not client_uuid:
             # Удаляем маппинг даже если UUID нет
-            logger.warning(f"No client UUID found for user {hysteria_username}, removing mapping only")
             db.delete_xui_mapping(hysteria_username)
             return True, None
         
@@ -531,7 +521,6 @@ class XUISyncManager:
         
         # Удаляем с каждого сервера
         servers_to_update = [xui_host] if xui_host and self.config.mode == 'single-xui' else list(self.clients.keys())
-        logger.debug(f"Deleting from servers: {servers_to_update}")
         
         for host in servers_to_update:
             if host not in self.clients:
@@ -547,7 +536,7 @@ class XUISyncManager:
                 try:
                     client.delete_client(
                         inbound_id=inbound_id,
-                        client_uuid=client_uuid
+                        uuid=client_uuid  # Исправлено: параметр должен быть uuid, а не client_uuid
                     )
                     logger.info(
                         f"Deleted client {client_uuid} from inbound {inbound_id} "
@@ -584,44 +573,34 @@ class XUISyncManager:
         Returns:
             Список словарей: [{"name": "Server1", "uri": "vless://..."}, ...]
         """
-        logger.debug(f"Getting VLESS URIs for user {hysteria_username}")
-        
         if not self.config.enabled:
-            logger.debug(f"X-UI sync is disabled, returning empty URIs for {hysteria_username}")
             return []
         
         if not db:
-            logger.warning("Database not available for getting URIs")
             return []
         
         # Получаем данные пользователя для определения плана
         user_data = db.get_user(hysteria_username)
         if not user_data:
-            logger.warning(f"User {hysteria_username} not found in database")
             return []
         
         user_plan = str(user_data.get('plan', 'standard')).lower().strip()
         if user_plan not in ('standard', 'premium'):
             user_plan = 'standard'
         
-        logger.debug(f"User {hysteria_username} plan: {user_plan}")
-        
         # Получаем маппинг
         mapping = db.get_xui_mapping(hysteria_username)
         if not mapping:
-            logger.debug(f"No X-UI mapping found for user {hysteria_username}")
             return []
         
         client_uuid = mapping.get('xui_client_uuid')
         if not client_uuid:
-            logger.warning(f"No client UUID in mapping for user {hysteria_username}")
             return []
         
         uris = []
         
         # Получаем серверы для плана пользователя
         servers_for_plan = self._get_servers_for_plan(user_plan)
-        logger.debug(f"Found {len(servers_for_plan)} servers for plan {user_plan}")
         
         # Получаем URIs с каждого сервера для плана
         for host, client, server_config in servers_for_plan:
@@ -638,16 +617,17 @@ class XUISyncManager:
                         # Пытаемся получить share link
                         share_link = client.get_client_share_link(
                             inbound_id=inbound_id,
-                            client_uuid=client_uuid
+                            uuid=client_uuid  # Исправлено: параметр должен быть uuid, а не client_uuid
                         )
                         
                         if share_link:
                             uri = share_link
                         else:
-                            # Собираем URI вручную
+                            # Собираем URI вручную, передаем host сервера
                             uri = client.build_vless_uri(
                                 inbound=inbound,
-                                client_uuid=client_uuid
+                                client_uuid=client_uuid,  # Это правильное имя параметра для build_vless_uri
+                                host=host
                             )
                         
                         if uri:

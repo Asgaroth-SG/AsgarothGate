@@ -12,17 +12,6 @@ from dotenv import dotenv_values
 
 logger = logging.getLogger(__name__)
 
-# Импортируем настройку логирования (с обработкой ошибок)
-try:
-    from xui.logging_config import setup_xui_logging
-    setup_xui_logging()
-except (ImportError, Exception) as e:
-    # Если не удалось импортировать, используем базовое логирование
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-
 # Путь к конфигурационному файлу X-UI
 XUI_CONFIG_PATH = Path("/etc/hysteria/xui_config.json")
 XUI_ENV_PATH = Path("/etc/hysteria/.xui.env")
