@@ -1705,6 +1705,10 @@ $(document).ready(function () {
         $('#xui_server_timeout').val(10);
         $('#xui_server_retries').val(3);
         $('#xui_server_verify_tls').prop('checked', true);
+        // Публичный доступ
+        $('#xui_server_public_host').val('');
+        $('#xui_server_public_port').val(443);
+        $('#xui_server_rewrite_from').val('127.0.0.1');
         $('#xuiServerModal').modal('show');
     });
 
@@ -1747,6 +1751,11 @@ $(document).ready(function () {
                 const plans = server.plans || ['standard', 'premium'];
                 $('#xui_server_plan_standard').prop('checked', plans.includes('standard'));
                 $('#xui_server_plan_premium').prop('checked', plans.includes('premium'));
+                
+                // Публичный доступ
+                $('#xui_server_public_host').val(server.public_host || '');
+                $('#xui_server_public_port').val(server.public_port || 443);
+                $('#xui_server_rewrite_from').val(server.link_host_rewrite_from || '127.0.0.1');
 
                 $('#xuiServerModal').modal('show');
             }
@@ -1828,6 +1837,11 @@ $(document).ready(function () {
             cache: false, // Отключаем кеширование для получения актуальных данных
             success: function (data) {
                 const serverIndex = parseInt($('#xui_server_index').val());
+                // Получаем публичные параметры
+                const publicHost = $('#xui_server_public_host').val().trim() || null;
+                const publicPort = parseInt($('#xui_server_public_port').val()) || 443;
+                const rewriteFrom = $('#xui_server_rewrite_from').val().trim() || '127.0.0.1';
+                
                 const newServer = {
                     name: name,
                     host: host,
@@ -1839,7 +1853,11 @@ $(document).ready(function () {
                     max_retries: parseInt($('#xui_server_retries').val()) || 3,
                     verify_tls: $('#xui_server_verify_tls').is(':checked'),
                     plans: plans,
-                    enabled: $('#xui_server_enabled').is(':checked')
+                    enabled: $('#xui_server_enabled').is(':checked'),
+                    // Публичный доступ для Normal Sub
+                    public_host: publicHost,
+                    public_port: publicPort,
+                    link_host_rewrite_from: rewriteFrom
                 };
 
                 // Обновляем или добавляем сервер
@@ -1848,6 +1866,10 @@ $(document).ready(function () {
                     const oldServer = data.xui_servers[serverIndex];
                     if (password === '' && oldServer.password && oldServer.password !== '***') {
                         newServer.password = oldServer.password;
+                    }
+                    // Сохраняем публичные поля если они не были указаны явно
+                    if (!newServer.public_host && oldServer.public_host) {
+                        newServer.public_host = oldServer.public_host;
                     }
                     data.xui_servers[serverIndex] = newServer;
                 } else {

@@ -18,9 +18,6 @@ qrcode==8.2
 pypng==0.20220715.0
 pillow==12.0.0
 
-# Cache / misc
-propcache==0.4.1
-
 # Database
 pymongo==4.15.4
 
@@ -41,4 +38,7 @@ pydantic-settings==2.12.0
 annotated-types==0.7.0
 
 # SSL / ACME management
+# Note: certbot is used as a system command, not imported as Python module.
+# It's installed via pip for certbot-dns-cloudflare plugin compatibility.
+# Consider installing system certbot via apt/yum for production use.
 certbot==5.1.0

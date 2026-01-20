@@ -783,6 +783,35 @@
                             <label class="form-check-label" for="xui_server_plan_premium">Premium</label>
                         </div>
                     </div>
+                    
+                    <!-- Настройки публичного доступа для Normal Sub -->
+                    <hr>
+                    <h6 class="mb-3"><i class="fas fa-globe mr-2"></i>Публичный доступ (Normal Sub)</h6>
+                    <div class="form-group">
+                        <label for="xui_server_public_host">Публичный домен</label>
+                        <input type="text" class="form-control" id="xui_server_public_host" 
+                               placeholder="gateway.asgaroth.ru">
+                        <small class="form-text text-muted">Домен reverse proxy для выдачи ссылок клиентам</small>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="xui_server_public_port">Публичный порт</label>
+                                <input type="number" class="form-control" id="xui_server_public_port" 
+                                       value="443" min="1" max="65535">
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="xui_server_rewrite_from">Внутренний хост</label>
+                                <input type="text" class="form-control" id="xui_server_rewrite_from" 
+                                       value="127.0.0.1" placeholder="127.0.0.1">
+                                <small class="form-text text-muted">Хост для замены на публичный</small>
+                            </div>
+                        </div>
+                    </div>
+                    <hr>
+                    
                     <div class="form-group">
                         <div class="custom-control custom-switch">
                             <input type="checkbox" class="custom-control-input" id="xui_server_enabled" checked>

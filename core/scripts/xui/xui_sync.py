@@ -128,6 +128,7 @@ class XUISyncManager:
         """
         try:
             inbounds = client.list_inbounds()
+            logger.debug(f"_get_inbound_ids: Found {len(inbounds)} total inbounds")
             
             # Используем фильтр сервера или глобальный фильтр
             inbound_filter = server_config.get('inbound_filter', {}) if server_config else {}
@@ -139,6 +140,8 @@ class XUISyncManager:
             filter_tag = inbound_filter.get('tag')
             filter_remark = inbound_filter.get('remark')
             
+            logger.debug(f"_get_inbound_ids: Filter - protocol={filter_protocol}, tag={filter_tag}, remark={filter_remark}")
+            
             filtered = client.filter_inbounds(
                 protocol=filter_protocol,
                 tag=filter_tag,
@@ -148,11 +151,30 @@ class XUISyncManager:
             # Если фильтр не задан, используем все VLESS inbounds
             if not any([filter_protocol, filter_tag, filter_remark]):
                 filtered = [i for i in inbounds if i.get('protocol', '').lower() == 'vless']
+                logger.debug(f"_get_inbound_ids: No filter specified, using all VLESS inbounds: {len(filtered)} found")
             
-            return [i.get('id') for i in filtered if i.get('id')]
+            # Логируем информацию о каждом отфильтрованном inbound
+            inbound_ids = []
+            for inbound in filtered:
+                inbound_id = inbound.get('id')
+                if inbound_id:
+                    inbound_ids.append(inbound_id)
+                    inbound_protocol = inbound.get('protocol', 'unknown')
+                    inbound_remark = inbound.get('remark', 'no remark')
+                    inbound_stream_settings = inbound.get('stream_settings', {})
+                    inbound_network = inbound_stream_settings.get('network', 'unknown') if isinstance(inbound_stream_settings, dict) else 'unknown'
+                    logger.info(
+                        f"_get_inbound_ids: Selected inbound {inbound_id}: "
+                        f"protocol={inbound_protocol}, network={inbound_network}, remark={inbound_remark}"
+                    )
+            
+            logger.info(f"_get_inbound_ids: Returning {len(inbound_ids)} inbound IDs: {inbound_ids}")
+            return inbound_ids
         
         except Exception as e:
             logger.error(f"Failed to get inbound IDs: {e}")
+            import traceback
+            logger.debug(f"Traceback: {traceback.format_exc()}")
             return []
     
     def _get_servers_for_plan(self, user_plan: str) -> List[Tuple[str, XUIClient, Dict]]:
@@ -621,36 +643,80 @@ class XUISyncManager:
                     try:
                         inbound = client.get_inbound(inbound_id)
                         if not inbound:
+                            logger.debug(f"Inbound {inbound_id} not found, skipping")
                             continue
                         
-                        # Пытаемся получить share link
-                        share_link = client.get_client_share_link(
-                            inbound_id=inbound_id,
-                            uuid=client_uuid  # Исправлено: параметр должен быть uuid, а не client_uuid
+                        # Логируем информацию о inbound для диагностики
+                        inbound_protocol = inbound.get('protocol', 'unknown')
+                        inbound_remark = inbound.get('remark', 'no remark')
+                        inbound_network = inbound.get('stream_settings', {}).get('network', 'unknown')
+                        logger.info(
+                            f"Processing inbound {inbound_id} on server {host}: "
+                            f"protocol={inbound_protocol}, remark={inbound_remark}, network={inbound_network}"
                         )
                         
-                        if share_link:
-                            uri = share_link
-                        else:
-                            # Собираем URI вручную, передаем host сервера
-                            uri = client.build_vless_uri(
-                                inbound=inbound,
-                                client_uuid=client_uuid,  # Это правильное имя параметра для build_vless_uri
-                                host=host
+                        # Пытаемся получить share link
+                        # НЕ передаём server_host — функция сама использует 127.0.0.1,
+                        # который потом перепишется LinkRewriter на публичный адрес
+                        uri = None
+                        try:
+                            share_link = client.get_client_share_link(
+                                inbound_id=inbound_id,
+                                uuid=client_uuid
                             )
+                            
+                            if share_link:
+                                uri = share_link
+                                logger.info(f"Successfully got share_link for inbound {inbound_id} (network={inbound_network})")
+                            else:
+                                logger.debug(f"share_link is None for inbound {inbound_id}, trying build_vless_uri")
+                                # Собираем URI вручную
+                                # НЕ передаём host — функция сама использует 127.0.0.1
+                                uri = client.build_vless_uri(
+                                    inbound=inbound,
+                                    client_uuid=client_uuid
+                                )
+                                if uri:
+                                    logger.info(f"Successfully built URI for inbound {inbound_id} (network={inbound_network})")
+                                else:
+                                    logger.warning(f"build_vless_uri returned None for inbound {inbound_id} (network={inbound_network})")
+                        except (XUIClientError, ValueError) as e:
+                            # Если не удалось получить ссылку из-за отсутствия path/serviceName
+                            # логируем и пропускаем этот inbound
+                            logger.warning(
+                                f"Failed to generate share link for inbound {inbound_id} (network={inbound_network}, remark={inbound_remark}) on server {host}: {e}. "
+                                f"Skipping this inbound."
+                            )
+                            import traceback
+                            logger.debug(f"Traceback for inbound {inbound_id}: {traceback.format_exc()}")
+                            continue
+                        except Exception as e:
+                            # Другие ошибки - логируем и пропускаем
+                            logger.warning(
+                                f"Unexpected error generating share link for inbound {inbound_id} (network={inbound_network}, remark={inbound_remark}) on server {host}: {e}. "
+                                f"Skipping this inbound."
+                            )
+                            import traceback
+                            logger.debug(f"Traceback for inbound {inbound_id}: {traceback.format_exc()}")
+                            continue
                         
                         if uri:
-                            # Используем remark как имя, или host:inbound_id
-                            name = inbound.get('remark', f"{host}:{inbound_id}")
+                            # Используем remark как имя
+                            name = inbound.get('remark', f"Inbound {inbound_id}")
+                            logger.info(f"Adding URI for inbound {inbound_id} (network={inbound_network}, remark={name})")
                             uris.append({
                                 "name": name,
                                 "uri": uri,
                                 "server_id": server_config.get('name', host),  # ID сервера для LinkRewriter
                                 "server_config": server_config  # Полная конфигурация сервера
                             })
+                        else:
+                            logger.warning(f"URI is None for inbound {inbound_id} (network={inbound_network}), skipping")
                     
                     except Exception as e:
                         logger.warning(f"Failed to get URI for inbound {inbound_id} on {host}: {e}")
+                        import traceback
+                        logger.debug(f"Traceback: {traceback.format_exc()}")
                         continue
             
             except Exception as e:

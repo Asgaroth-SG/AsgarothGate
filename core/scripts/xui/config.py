@@ -120,6 +120,14 @@ def get_xui_sync_manager():
         XUISyncManager или None если синхронизация отключена или нет валидных серверов
     """
     try:
+        # Настраиваем логирование для X-UI модулей
+        try:
+            from xui.logging_config import setup_xui_logging
+            setup_xui_logging()
+        except Exception as e:
+            # Если не удалось настроить логирование, продолжаем без него
+            logger.warning(f"Failed to setup X-UI logging: {e}")
+        
         import sys
         from pathlib import Path
         

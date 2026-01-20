@@ -100,7 +100,17 @@ def upsert_query_param(
 
 
 def rewrite_vless(link: str, server_cfg: XuiServerConfig) -> str:
-    """Переписывает VLESS ссылку"""
+    """
+    Переписывает VLESS ссылку для reverse proxy контуров.
+    
+    Правила:
+    - Переписывает только если host == 127.0.0.1 (или link_host_rewrite_from)
+    - Сохраняет security/sni если они уже заданы и не пустые
+    - Добавляет security=tls и sni=public_host если их нет
+    - Для type=xhttp добавляет mode=auto, alpn=h2, fp=chrome если их нет
+    - Удаляет пустые параметры (host=, authority=)
+    - Сохраняет fragment (#name) как есть
+    """
     try:
         parsed = urlparse(link)
         
@@ -121,55 +131,152 @@ def rewrite_vless(link: str, server_cfg: XuiServerConfig) -> str:
         if not is_reverse_proxy_host(host, server_cfg):
             return link
         
-        # Парсим query параметры
-        query_params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        # Сохраняем оригинальные закодированные значения всех параметров до декодирования
+        # Это нужно для сохранения точного формата (особенно для path и serviceName)
+        original_encoded_params = {}  # key_lower -> (original_key, encoded_value)
+        original_key_mapping = {}  # key_lower -> original_key (для сохранения регистра)
+        if parsed.query:
+            for part in parsed.query.split('&'):
+                if '=' in part:
+                    key, value = part.split('=', 1)
+                    key_lower = key.lower()
+                    # Сохраняем оригинальный ключ для всех параметров
+                    original_key_mapping[key_lower] = key
+                    # Сохраняем оригинальное закодированное значение для важных параметров
+                    # НЕ сохраняем пустые host и authority (они будут удалены)
+                    if key_lower in ('path', 'servicename'):
+                        # Всегда сохраняем path и serviceName
+                        original_encoded_params[key_lower] = (key, value)  # (original_key, encoded_value)
+                    elif key_lower == 'authority':
+                        # Сохраняем authority только если он не пустой
+                        if value and value.strip():
+                            original_encoded_params[key_lower] = (key, value)
         
-        # Сохраняем security и sni если они уже есть
-        has_security = 'security' in query_params and query_params['security'].strip()
-        has_sni = 'sni' in query_params and query_params['sni'].strip()
+        # Парсим query параметры (parse_qsl декодирует значения)
+        # Используем case-sensitive парсинг для сохранения регистра ключей
+        query_params_list = parse_qsl(parsed.query, keep_blank_values=True)
+        query_params = {}
+        for key, value in query_params_list:
+            key_lower = key.lower()
+            # Используем оригинальный ключ если он был сохранен
+            original_key = original_key_mapping.get(key_lower, key)
+            query_params[original_key] = value
+        
+        # Вспомогательная функция для получения значения с учетом регистра
+        def get_param_case_insensitive(key: str, default: str = '') -> str:
+            key_lower = key.lower()
+            for k, v in query_params.items():
+                if k.lower() == key_lower:
+                    return v
+            return default
+        
+        # Проверяем security - если none или пустой, будем менять на tls
+        current_security = get_param_case_insensitive('security', '').strip().lower()
+        has_valid_security = current_security and current_security not in ('none', '')
+        
+        # Проверяем sni
+        current_sni = get_param_case_insensitive('sni', '').strip()
+        has_valid_sni = bool(current_sni)
         
         # Заменяем host и port
         new_netloc = f"{uuid}@{server_cfg.public_host}:{server_cfg.public_port}"
         
-        # Добавляем security и sni если их нет
-        if not has_security:
-            upsert_query_param(query_params, 'security', 'tls')
-        if not has_sni:
-            upsert_query_param(query_params, 'sni', server_cfg.public_host)
+        # Определяем тип сети
+        link_type = get_param_case_insensitive('type', '').lower()
         
         # Специфичные правила для xhttp
-        link_type = query_params.get('type', '').lower()
         if link_type == 'xhttp':
-            upsert_query_param(query_params, 'mode', 'auto', preserve_if_exists=True)
-            upsert_query_param(query_params, 'alpn', 'h2', preserve_if_exists=True)
-            upsert_query_param(query_params, 'fp', 'chrome', preserve_if_exists=True)
-            # Удаляем пустые host и authority
-            if 'host' in query_params and not query_params['host'].strip():
-                del query_params['host']
-            if 'authority' in query_params and not query_params['authority'].strip():
-                del query_params['authority']
+            # Добавляем mode=auto если нет или пустой
+            mode_value = get_param_case_insensitive('mode', '')
+            if not mode_value or not mode_value.strip():
+                # Находим оригинальный ключ mode или используем 'mode'
+                mode_key = original_key_mapping.get('mode', 'mode')
+                query_params[mode_key] = 'auto'
+            # Добавляем alpn=h2 если нет или пустой
+            alpn_value = get_param_case_insensitive('alpn', '')
+            if not alpn_value or not alpn_value.strip():
+                alpn_key = original_key_mapping.get('alpn', 'alpn')
+                query_params[alpn_key] = 'h2'
+            # Добавляем fp=chrome если нет или пустой
+            fp_value = get_param_case_insensitive('fp', '')
+            if not fp_value or not fp_value.strip():
+                fp_key = original_key_mapping.get('fp', 'fp')
+                query_params[fp_key] = 'chrome'
         
-        # Собираем новую ссылку
-        new_query = urlencode(query_params, doseq=False)
+        # Устанавливаем security=tls если не было валидного значения (НЕ перетираем существующее)
+        if not has_valid_security:
+            security_key = original_key_mapping.get('security', 'security')
+            upsert_query_param(query_params, security_key, 'tls', preserve_if_exists=False)
+        
+        # Устанавливаем sni если не было (НЕ перетираем существующее)
+        if not has_valid_sni:
+            sni_key = original_key_mapping.get('sni', 'sni')
+            upsert_query_param(query_params, sni_key, server_cfg.public_host, preserve_if_exists=False)
+        
+        # Удаляем пустые/бесполезные параметры (host=, authority=)
+        keys_to_remove = []
+        for key, value in query_params.items():
+            key_lower = key.lower()
+            if key_lower in ('host', 'authority') and (not value or not value.strip()):
+                keys_to_remove.append(key)
+        for key in keys_to_remove:
+            del query_params[key]
+        
+        # Собираем query string, сохраняя оригинальные закодированные значения для важных параметров
+        query_parts = []
+        # Сначала добавляем все параметры из original_encoded_params (важные параметры)
+        # Это гарантирует, что path и serviceName сохраняются точно как были
+        # Пустые authority уже не попадут сюда благодаря проверке выше
+        used_keys = set()
+        for key_lower, (original_key, encoded_value) in original_encoded_params.items():
+            # Пропускаем пустые значения (дополнительная проверка)
+            if encoded_value and encoded_value.strip():
+                # Добавляем параметр с оригинальным ключом и закодированным значением
+                query_parts.append(f"{original_key}={encoded_value}")
+                used_keys.add(key_lower)
+        
+        # Затем добавляем остальные параметры из query_params
+        # Пропускаем те, которые уже были добавлены из original_encoded_params
+        for key, value in query_params.items():
+            key_lower = key.lower()
+            # Пропускаем параметры, которые уже были добавлены из original_encoded_params
+            if key_lower not in used_keys:
+                # Для остальных параметров кодируем через quote
+                encoded_key = quote(str(key), safe='')
+                encoded_value = quote(str(value), safe='')
+                query_parts.append(f"{encoded_key}={encoded_value}")
+        
+        new_query = '&'.join(query_parts)
         new_link = f"vless://{new_netloc}?{new_query}"
+        
+        # Сохраняем fragment как есть (он уже URL-encoded)
         if parsed.fragment:
             new_link += f"#{parsed.fragment}"
         
         logger.debug(
-            f"Rewrite link proto=vless server={server_cfg.server_id} "
+            f"Normalized VLESS link server={server_cfg.server_id} "
             f"{host}:{port} -> {server_cfg.public_host}:{server_cfg.public_port} "
-            f"(security/sni {'preserved' if (has_security or has_sni) else 'added'})"
+            f"(security={'preserved' if has_valid_security else 'set to tls'}, "
+            f"sni={'preserved' if has_valid_sni else 'added'})"
         )
         
         return new_link
     
     except Exception as e:
-        logger.warning(f"Failed to rewrite VLESS link: {e}")
+        logger.warning(f"Failed to rewrite VLESS link: {e}", exc_info=True)
         return link
 
 
 def rewrite_trojan(link: str, server_cfg: XuiServerConfig) -> str:
-    """Переписывает Trojan ссылку"""
+    """
+    Переписывает Trojan ссылку для reverse proxy контуров.
+    
+    Правила:
+    - Переписывает только если host == 127.0.0.1 (или link_host_rewrite_from)
+    - Сохраняет security/sni если они уже заданы и не пустые
+    - Добавляет security=tls и sni=public_host если их нет
+    - Сохраняет fragment (#name) как есть
+    """
     try:
         parsed = urlparse(link)
         
@@ -193,21 +300,30 @@ def rewrite_trojan(link: str, server_cfg: XuiServerConfig) -> str:
         # Парсим query параметры
         query_params = dict(parse_qsl(parsed.query, keep_blank_values=True))
         
-        # Сохраняем security и sni если они уже есть
-        has_security = 'security' in query_params and query_params['security'].strip()
-        has_sni = 'sni' in query_params and query_params['sni'].strip()
+        # Проверяем security и sni - сохраняем если уже есть и не пустые
+        current_security = query_params.get('security', '').strip().lower()
+        has_valid_security = current_security and current_security not in ('none', '')
+        
+        current_sni = query_params.get('sni', '').strip()
+        has_valid_sni = bool(current_sni)
         
         # Заменяем host и port
         new_netloc = f"{password}@{server_cfg.public_host}:{server_cfg.public_port}"
         
-        # Добавляем security и sni если их нет
-        if not has_security:
-            upsert_query_param(query_params, 'security', 'tls')
-        if not has_sni:
-            upsert_query_param(query_params, 'sni', server_cfg.public_host)
+        # Добавляем security и sni если их нет (НЕ перетираем существующие)
+        if not has_valid_security:
+            upsert_query_param(query_params, 'security', 'tls', preserve_if_exists=False)
+        if not has_valid_sni:
+            upsert_query_param(query_params, 'sni', server_cfg.public_host, preserve_if_exists=False)
         
-        # Собираем новую ссылку
-        new_query = urlencode(query_params, doseq=False) if query_params else ''
+        # Собираем новую ссылку используя urlencode
+        query_parts = []
+        for key, value in query_params.items():
+            encoded_key = quote(str(key), safe='')
+            encoded_value = quote(str(value), safe='')
+            query_parts.append(f"{encoded_key}={encoded_value}")
+        
+        new_query = '&'.join(query_parts) if query_parts else ''
         new_link = f"trojan://{new_netloc}"
         if new_query:
             new_link += f"?{new_query}"
@@ -217,18 +333,31 @@ def rewrite_trojan(link: str, server_cfg: XuiServerConfig) -> str:
         logger.debug(
             f"Rewrite link proto=trojan server={server_cfg.server_id} "
             f"{host}:{port} -> {server_cfg.public_host}:{server_cfg.public_port} "
-            f"(security/sni {'preserved' if (has_security or has_sni) else 'added'})"
+            f"(security={'preserved' if has_valid_security else 'set to tls'}, "
+            f"sni={'preserved' if has_valid_sni else 'added'})"
         )
         
         return new_link
     
     except Exception as e:
-        logger.warning(f"Failed to rewrite Trojan link: {e}")
+        logger.warning(f"Failed to rewrite Trojan link: {e}", exc_info=True)
         return link
 
 
 def rewrite_ss(link: str, server_cfg: XuiServerConfig) -> str:
-    """Переписывает Shadowsocks ссылку"""
+    """
+    Переписывает Shadowsocks ссылку для reverse proxy контуров.
+    
+    Поддерживает форматы:
+    - ss://BASE64(method:password)@host:port#name
+    - ss://BASE64(method:password@host:port)#name
+    - ss://method:password@host:port#name
+    
+    Правила:
+    - Переписывает только если host == 127.0.0.1 (или link_host_rewrite_from)
+    - Сохраняет query параметры (plugin=...) если есть
+    - Сохраняет fragment (#name) как есть
+    """
     try:
         # SS может быть в разных форматах:
         # a) ss://BASE64(method:password)@host:port#name
@@ -260,16 +389,14 @@ def rewrite_ss(link: str, server_cfg: XuiServerConfig) -> str:
             # Парсим query (обычно plugin=...)
             query_params = dict(parse_qsl(parsed.query, keep_blank_values=True))
             
-            # Для SS security/sni обычно не нужны, но если есть - сохраняем
-            has_security = 'security' in query_params and query_params['security'].strip()
-            has_sni = 'sni' in query_params and query_params['sni'].strip()
-            
-            if not has_security and not has_sni:
-                # Добавляем только если в query есть другие параметры
-                pass
-            
             # Собираем новую ссылку
-            new_query = urlencode(query_params, doseq=False) if query_params else ''
+            query_parts = []
+            for key, value in query_params.items():
+                encoded_key = quote(str(key), safe='')
+                encoded_value = quote(str(value), safe='')
+                query_parts.append(f"{encoded_key}={encoded_value}")
+            
+            new_query = '&'.join(query_parts) if query_parts else ''
             new_link = f"ss://{new_netloc}"
             if new_query:
                 new_link += f"?{new_query}"
@@ -317,8 +444,20 @@ def rewrite_ss(link: str, server_cfg: XuiServerConfig) -> str:
             new_decoded_str = f"{userinfo}@{server_cfg.public_host}:{server_cfg.public_port}"
             new_base64 = safe_b64_encode(new_decoded_str.encode('utf-8'))
             
+            # Парсим query если есть
+            query_params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+            query_parts = []
+            for key, value in query_params.items():
+                encoded_key = quote(str(key), safe='')
+                encoded_value = quote(str(value), safe='')
+                query_parts.append(f"{encoded_key}={encoded_value}")
+            
+            new_query = '&'.join(query_parts) if query_parts else ''
+            
             # Собираем новую ссылку
             new_link = f"ss://{new_base64}"
+            if new_query:
+                new_link += f"?{new_query}"
             if parsed.fragment:
                 new_link += f"#{parsed.fragment}"
             
@@ -330,12 +469,21 @@ def rewrite_ss(link: str, server_cfg: XuiServerConfig) -> str:
             return new_link
     
     except Exception as e:
-        logger.warning(f"Failed to rewrite SS link: {e}")
+        logger.warning(f"Failed to rewrite SS link: {e}", exc_info=True)
         return link
 
 
 def rewrite_vmess(link: str, server_cfg: XuiServerConfig) -> str:
-    """Переписывает VMESS ссылку"""
+    """
+    Переписывает VMESS ссылку для reverse proxy контуров.
+    
+    Формат: vmess://BASE64(JSON)
+    
+    Правила:
+    - Переписывает только если add == 127.0.0.1 (или link_host_rewrite_from)
+    - Сохраняет tls/sni если они уже заданы и не пустые
+    - Добавляет tls=tls и sni=public_host если их нет
+    """
     try:
         # VMESS формат: vmess://BASE64(JSON)
         if not link.startswith('vmess://'):
@@ -359,18 +507,24 @@ def rewrite_vmess(link: str, server_cfg: XuiServerConfig) -> str:
         if not is_reverse_proxy_host(add, server_cfg):
             return link
         
-        # Сохраняем tls и sni если они уже есть
-        has_tls = 'tls' in vmess_json and vmess_json['tls'] and vmess_json['tls'] not in ('none', '')
-        has_sni = 'sni' in vmess_json and vmess_json['sni'] and vmess_json['sni'].strip()
+        # Сохраняем tls и sni если они уже есть и не пустые
+        current_tls = vmess_json.get('tls', '')
+        has_valid_tls = bool(current_tls) and str(current_tls).strip().lower() not in ('none', '')
         
-        # Заменяем add и port
+        current_sni = vmess_json.get('sni', '')
+        has_valid_sni = bool(current_sni) and str(current_sni).strip()
+        
+        # Сохраняем оригинальный port для логирования
+        original_port = vmess_json.get('port', '?')
+        
+        # Заменяем add и port (port должен быть строкой для VMESS)
         vmess_json['add'] = server_cfg.public_host
-        vmess_json['port'] = server_cfg.public_port
+        vmess_json['port'] = str(server_cfg.public_port)
         
-        # Добавляем tls и sni если их нет
-        if not has_tls:
+        # Добавляем tls и sni если их нет (НЕ перетираем существующие)
+        if not has_valid_tls:
             vmess_json['tls'] = 'tls'
-        if not has_sni:
+        if not has_valid_sni:
             vmess_json['sni'] = server_cfg.public_host
         
         # Кодируем обратно в base64
@@ -381,14 +535,15 @@ def rewrite_vmess(link: str, server_cfg: XuiServerConfig) -> str:
         
         logger.debug(
             f"Rewrite link proto=vmess server={server_cfg.server_id} "
-            f"{add}:{vmess_json.get('port', '?')} -> {server_cfg.public_host}:{server_cfg.public_port} "
-            f"(tls/sni {'preserved' if (has_tls or has_sni) else 'added'})"
+            f"{add}:{original_port} -> {server_cfg.public_host}:{server_cfg.public_port} "
+            f"(tls={'preserved' if has_valid_tls else 'set to tls'}, "
+            f"sni={'preserved' if has_valid_sni else 'added'})"
         )
         
         return new_link
     
     except Exception as e:
-        logger.warning(f"Failed to rewrite VMESS link: {e}")
+        logger.warning(f"Failed to rewrite VMESS link: {e}", exc_info=True)
         return link
 
 

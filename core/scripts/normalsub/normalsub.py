@@ -6,6 +6,7 @@ import time
 import shlex
 import base64
 import sys
+import logging
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from io import BytesIO
@@ -24,6 +25,25 @@ from db.database import db
 from link_rewriter import rewrite_proxy_links, XuiServerConfig as LinkRewriterServerConfig
 
 load_dotenv()
+
+# Настраиваем базовое логирование для normalsub
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Вывод в консоль
+        logging.FileHandler('/var/log/hysteria_normalsub.log', encoding='utf-8')  # Вывод в файл
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+# Настраиваем логирование для X-UI модулей при импорте
+try:
+    from xui.logging_config import setup_xui_logging
+    setup_xui_logging()
+except Exception as e:
+    logger.warning(f"Failed to setup X-UI logging: {e}")
 
 
 @dataclass
@@ -459,7 +479,100 @@ class SubscriptionManager:
     def _get_extra_uris_for_user(self, user_plan: str) -> List[str]:
         return [str(x.get("uri")).strip() for x in self._filter_extra_configs_for_user(user_plan)]
 
+    def _get_default_server_config(self) -> Optional[LinkRewriterServerConfig]:
+        """
+        Получает дефолтную конфигурацию сервера из первого включенного сервера X-UI.
+        Используется для ссылок без явного контекста сервера (Hysteria, extra).
+        
+        Returns:
+            LinkRewriterServerConfig или None если нет настроенных серверов
+        """
+        try:
+            from pathlib import Path
+            
+            xui_path = Path(__file__).parent.parent / "xui"
+            if xui_path.exists():
+                sys.path.insert(0, str(xui_path.parent))
+                from xui.config import load_xui_config
+                
+                config = load_xui_config()
+                servers = config.get('xui_servers', [])
+                
+                # Ищем первый включенный сервер с public_host или извлекаем из host
+                for server in servers:
+                    if not server.get('enabled', True):
+                        continue
+                    
+                    public_host = server.get('public_host')
+                    
+                    # Если public_host не задан, извлекаем домен из host (для reverse proxy)
+                    if not public_host:
+                        host_url = server.get('host', '')
+                        if host_url:
+                            try:
+                                parsed = urlparse(host_url)
+                                public_host = parsed.hostname
+                            except Exception:
+                                continue
+                    
+                    if public_host:
+                        return LinkRewriterServerConfig(
+                            server_id=server.get('name', 'default'),
+                            public_host=public_host,
+                            public_port=server.get('public_port', 443),
+                            link_host_rewrite_from=server.get('link_host_rewrite_from', '127.0.0.1')
+                        )
+        except Exception as e:
+            print(f"Warning: Failed to get default server config: {e}", file=sys.stderr)
+        
+        return None
+
+    def _normalize_link(self, uri: str, server_cfg: Optional[LinkRewriterServerConfig] = None) -> str:
+        """
+        Нормализует ссылку через LinkRewriter.
+        
+        Args:
+            uri: Ссылка для нормализации
+            server_cfg: Конфигурация сервера (если None, используется дефолтная)
+        
+        Returns:
+            Нормализованная ссылка
+        """
+        if not uri:
+            return uri
+        
+        # Если нет конфигурации сервера, пытаемся получить дефолтную
+        if not server_cfg:
+            server_cfg = self._get_default_server_config()
+        
+        # Если всё равно нет конфигурации или public_host не задан, возвращаем как есть
+        if not server_cfg or not server_cfg.public_host:
+            # Логируем только для VLESS ссылок с 127.0.0.1 (чтобы не спамить для других протоколов)
+            if uri.startswith('vless://') and '127.0.0.1' in uri:
+                if server_cfg:
+                    logger.warning(f"Cannot rewrite link - server_cfg exists but public_host is empty. Server: {server_cfg.server_id}, URI: {uri[:80]}...")
+                else:
+                    logger.warning(f"Cannot rewrite link - no server config. URI: {uri[:80]}...")
+            return uri
+        
+        # Применяем rewrite только если это поддерживаемый протокол
+        try:
+            rewritten = rewrite_proxy_links(uri, server_cfg)
+            # Логируем успешное переписывание для отладки
+            if rewritten != uri:
+                logger.debug(f"Normalized VLESS link server={server_cfg.server_id} 127.0.0.1 -> {server_cfg.public_host}:{server_cfg.public_port} (security/sni preserved if present)")
+            return rewritten
+        except Exception as e:
+            # Fail-open: при ошибке возвращаем исходную ссылку
+            logger.warning(f"Failed to rewrite link {uri[:50]}...: {e}", exc_info=True)
+            return uri
+
     def get_normal_subscription(self, username: str, user_agent: str) -> str:
+        """
+        Получает нормализованную подписку для пользователя.
+        
+        Все ссылки проходят через единый pipeline нормализации через LinkRewriter.
+        """
         user_info = self.hysteria_cli.get_user_info(username)
         if user_info is None:
             return "User not found"
@@ -470,8 +583,10 @@ class SubscriptionManager:
         nodes_types = self._load_nodes_types()
         labeled_uris = self.hysteria_cli.get_all_labeled_uris(username)
 
-        processed_uris: List[str] = []
+        # Список ссылок с контекстом (uri, server_cfg)
+        links_with_context: List[Tuple[str, Optional[LinkRewriterServerConfig]]] = []
 
+        # Обрабатываем Hysteria ссылки
         for item in labeled_uris:
             label = item.get("label", "")
             uri = item.get("uri", "")
@@ -488,6 +603,7 @@ class SubscriptionManager:
                 if (not is_premium_user) and node_type == "premium":
                     continue
 
+            # Обработка v2ray-ng специфичных параметров
             if "v2ray" in user_agent and "ng" in user_agent:
                 match = re.search(r'pinSHA256=sha256/([^&]+)', uri)
                 if match:
@@ -498,14 +614,17 @@ class SubscriptionManager:
                         f'pinSHA256={formatted}'
                     )
 
-            processed_uris.append(uri)
+            # Hysteria ссылки без явного контекста сервера (используется дефолтный)
+            links_with_context.append((uri, None))
 
+        # Обрабатываем extra ссылки
         extra_uris = self._get_extra_uris_for_user(user_plan)
+        for uri in extra_uris:
+            # Extra ссылки без явного контекста сервера
+            links_with_context.append((uri, None))
 
         # Получаем VLESS URIs из 3X-UI для пользователя
-        xui_vless_uris = []
         try:
-            # Импортируем модуль синхронизации X-UI
             from pathlib import Path
             xui_path = Path(__file__).parent.parent / "xui"
             if xui_path.exists():
@@ -516,36 +635,60 @@ class SubscriptionManager:
                 if sync_manager:
                     vless_nodes = sync_manager.get_user_vless_uris(username)
                     if vless_nodes:
-                        # Извлекаем URI строки и переписываем их через LinkRewriter
                         for node in vless_nodes:
                             uri = node.get("uri", "")
-                            if uri:
-                                # Получаем конфигурацию сервера для переписывания
-                                server_config_dict = node.get("server_config", {})
-                                server_id = node.get("server_id", server_config_dict.get("name", "unknown"))
-                                
-                                # Создаем конфигурацию для LinkRewriter
-                                public_host = server_config_dict.get("public_host")
-                                public_port = server_config_dict.get("public_port", 443)
-                                link_host_rewrite_from = server_config_dict.get("link_host_rewrite_from", "127.0.0.1")
-                                
-                                if public_host:
-                                    link_rewriter_cfg = LinkRewriterServerConfig(
-                                        server_id=server_id,
-                                        public_host=public_host,
-                                        public_port=public_port,
-                                        link_host_rewrite_from=link_host_rewrite_from
-                                    )
-                                    uri = rewrite_proxy_links(uri, link_rewriter_cfg)
-                                
-                                xui_vless_uris.append(uri)
+                            if not uri:
+                                continue
+                            
+                            # Получаем конфигурацию сервера для переписывания
+                            server_config_dict = node.get("server_config", {})
+                            server_id = server_config_dict.get("name", "unknown")
+                            
+                            # Создаем конфигурацию для LinkRewriter
+                            public_host = server_config_dict.get("public_host")
+                            public_port = server_config_dict.get("public_port", 443)
+                            link_host_rewrite_from = server_config_dict.get("link_host_rewrite_from", "127.0.0.1")
+                            
+                            # Если public_host не задан, извлекаем домен из host сервера X-UI (для reverse proxy)
+                            if not public_host:
+                                host_url = server_config_dict.get("host", "")
+                                if host_url:
+                                    try:
+                                        parsed = urlparse(host_url)
+                                        public_host = parsed.hostname
+                                        if public_host:
+                                            logger.debug(f"Using host domain as public_host for '{server_id}': {public_host}")
+                                    except Exception as e:
+                                        logger.warning(f"Failed to extract hostname from '{host_url}': {e}")
+                            
+                            # Создаем конфигурацию если есть public_host (из настроек или из host)
+                            server_cfg = None
+                            if public_host:
+                                server_cfg = LinkRewriterServerConfig(
+                                    server_id=server_id,
+                                    public_host=public_host,
+                                    public_port=public_port,
+                                    link_host_rewrite_from=link_host_rewrite_from
+                                )
+                                logger.debug(f"Created server_cfg for '{server_id}' with public_host={public_host}, public_port={public_port}")
+                            else:
+                                # Логируем предупреждение, если public_host не удалось определить
+                                logger.warning(f"Server '{server_id}' has no public_host configured and host URL is invalid. Link will not be rewritten.")
+                            
+                            # X-UI ссылки с явным контекстом сервера
+                            links_with_context.append((uri, server_cfg))
         except Exception as e:
             # Не блокируем выдачу подписки при ошибке получения VLESS URIs
-            print(f"Warning: Failed to get X-UI VLESS URIs for {username}: {e}", file=sys.stderr)
+            logger.warning(f"Failed to get X-UI VLESS URIs for {username}: {e}", exc_info=True)
 
-        all_processed_uris = processed_uris + extra_uris + xui_vless_uris
+        # Единый pipeline нормализации: все ссылки проходят через rewrite_proxy_links
+        normalized_uris: List[str] = []
+        for uri, server_cfg in links_with_context:
+            normalized_uri = self._normalize_link(uri, server_cfg)
+            if normalized_uri:
+                normalized_uris.append(normalized_uri)
 
-        if not all_processed_uris:
+        if not normalized_uris:
             return "No URI available"
 
         subscription_info = (
@@ -555,7 +698,7 @@ class SubscriptionManager:
             f"expire={user_info.expiration_timestamp}\n"
         )
         profile_lines = "//profile-title: Asgaroth Gate\n//profile-update-interval: 1\n"
-        return profile_lines + subscription_info + "\n".join(all_processed_uris)
+        return profile_lines + subscription_info + "\n".join(normalized_uris)
 
 
 class TemplateRenderer:
