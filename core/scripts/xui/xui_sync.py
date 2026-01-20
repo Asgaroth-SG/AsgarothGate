@@ -644,7 +644,9 @@ class XUISyncManager:
                             name = inbound.get('remark', f"{host}:{inbound_id}")
                             uris.append({
                                 "name": name,
-                                "uri": uri
+                                "uri": uri,
+                                "server_id": server_config.get('name', host),  # ID сервера для LinkRewriter
+                                "server_config": server_config  # Полная конфигурация сервера
                             })
                     
                     except Exception as e:

@@ -25,6 +25,22 @@ class XUIServerConfig(BaseModel):
     username: Optional[str] = Field(None, description="Имя пользователя (если auth_type=username)")
     password: Optional[str] = Field(None, description="Пароль или token")
     
+    # Публичные параметры для переписывания ссылок в normal sub
+    public_host: Optional[str] = Field(
+        None,
+        description="Публичный домен reverse proxy для ссылок (если отличается от host)"
+    )
+    public_port: int = Field(
+        443,
+        ge=1,
+        le=65535,
+        description="Публичный порт reverse proxy (по умолчанию 443)"
+    )
+    link_host_rewrite_from: Optional[str] = Field(
+        "127.0.0.1",
+        description="Внутренний хост для переписывания (по умолчанию 127.0.0.1)"
+    )
+    
     @field_validator('host')
     @classmethod
     def validate_host(cls, v):

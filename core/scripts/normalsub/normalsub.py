@@ -12,13 +12,16 @@ from io import BytesIO
 
 from aiohttp import web
 from aiohttp.web_middlewares import middleware
-from urllib.parse import unquote, parse_qs, urlparse, urljoin, quote
+from urllib.parse import unquote, parse_qs, urlparse, urljoin, quote, urlencode
 from dotenv import load_dotenv
 import qrcode
 from jinja2 import Environment, FileSystemLoader
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from db.database import db
+
+# Импортируем LinkRewriter
+from link_rewriter import rewrite_proxy_links, XuiServerConfig as LinkRewriterServerConfig
 
 load_dotenv()
 
@@ -39,6 +42,8 @@ class AppConfig:
     sni: str
     template_dir: str
     subpath: str
+    public_host: Optional[str] = None  # Публичный хост для нормализации VLESS ссылок
+    public_port: int = 443  # Публичный порт для нормализации VLESS ссылок
 
 
 class RateLimiter:
@@ -511,8 +516,29 @@ class SubscriptionManager:
                 if sync_manager:
                     vless_nodes = sync_manager.get_user_vless_uris(username)
                     if vless_nodes:
-                        # Извлекаем только URI строки из словарей
-                        xui_vless_uris = [node.get("uri", "") for node in vless_nodes if node.get("uri")]
+                        # Извлекаем URI строки и переписываем их через LinkRewriter
+                        for node in vless_nodes:
+                            uri = node.get("uri", "")
+                            if uri:
+                                # Получаем конфигурацию сервера для переписывания
+                                server_config_dict = node.get("server_config", {})
+                                server_id = node.get("server_id", server_config_dict.get("name", "unknown"))
+                                
+                                # Создаем конфигурацию для LinkRewriter
+                                public_host = server_config_dict.get("public_host")
+                                public_port = server_config_dict.get("public_port", 443)
+                                link_host_rewrite_from = server_config_dict.get("link_host_rewrite_from", "127.0.0.1")
+                                
+                                if public_host:
+                                    link_rewriter_cfg = LinkRewriterServerConfig(
+                                        server_id=server_id,
+                                        public_host=public_host,
+                                        public_port=public_port,
+                                        link_host_rewrite_from=link_host_rewrite_from
+                                    )
+                                    uri = rewrite_proxy_links(uri, link_rewriter_cfg)
+                                
+                                xui_vless_uris.append(uri)
         except Exception as e:
             # Не блокируем выдачу подписки при ошибке получения VLESS URIs
             print(f"Warning: Failed to get X-UI VLESS URIs for {username}: {e}", file=sys.stderr)
@@ -587,6 +613,11 @@ class HysteriaServer:
         template_dir = os.path.join(os.path.dirname(__file__), 'template')
 
         sni = self._load_sni_from_env(sni_file)
+        
+        # Загружаем публичный хост для нормализации VLESS ссылок
+        public_host = os.getenv('NORMAL_SUB_PUBLIC_HOST', None)
+        public_port = int(os.getenv('NORMAL_SUB_PUBLIC_PORT', '443'))
+        
         return AppConfig(
             domain=domain,
             external_port=external_port,
@@ -601,7 +632,9 @@ class HysteriaServer:
             rate_limit_window=rate_limit_window,
             sni=sni,
             template_dir=template_dir,
-            subpath=subpath
+            subpath=subpath,
+            public_host=public_host,
+            public_port=public_port
         )
 
     def _load_sni_from_env(self, sni_file: str) -> str:
