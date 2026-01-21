@@ -15,6 +15,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from db.database import db
 from xui.xui_client import XUIClient, XUIClientError, XUIAuthError, XUIConnectionError
+from xui.xui_public_links import (
+    build_user_public_links,
+    load_server_public_configs,
+    XUIServerPublicConfig
+)
 
 logger = logging.getLogger(__name__)
 
@@ -596,17 +601,67 @@ class XUISyncManager:
     
     def get_user_vless_uris(self, hysteria_username: str) -> List[Dict[str, Any]]:
         """
-        Получает список VLESS URIs для пользователя с учетом плана.
+        Получает список публичных VLESS URIs для пользователя с учетом плана.
+        
+        Использует новый модуль xui_public_links для генерации публичных ссылок
+        напрямую через публичные домены (без переписывания через LinkRewriter).
         
         Args:
             hysteria_username: Имя пользователя в Hysteria2
         
         Returns:
-            Список словарей: [{"name": "Server1", "uri": "vless://..."}, ...]
+            Список словарей: [
+                {
+                    "name": "🇹🇷 Турция (Резерв)",
+                    "uri": "vless://...",
+                    "server_id": "server1",
+                    "inbound_id": 1,
+                    "network": "xhttp",
+                    "public_host": "gateway1.example.com",
+                    "public_port": 443
+                },
+                ...
+            ]
         """
         if not self.config.enabled:
             return []
         
+        if not db:
+            return []
+        
+        try:
+            # Загружаем конфигурацию X-UI для получения публичных параметров серверов
+            from xui.config import load_xui_config
+            xui_config = load_xui_config()
+            
+            # Загружаем публичные конфигурации серверов
+            server_public_configs = load_server_public_configs(xui_config)
+            
+            if not server_public_configs:
+                logger.warning("No public server configs found, falling back to legacy method")
+                return self._get_user_vless_uris_legacy(hysteria_username)
+            
+            # Генерируем публичные ссылки через новый модуль
+            links = build_user_public_links(
+                hysteria_username=hysteria_username,
+                xui_sync_manager=self,
+                server_configs=server_public_configs
+            )
+            
+            return links
+        
+        except Exception as e:
+            logger.error(f"Failed to generate public links for user {hysteria_username}: {e}", exc_info=True)
+            # Fallback к старому методу
+            logger.info("Falling back to legacy link generation method")
+            return self._get_user_vless_uris_legacy(hysteria_username)
+    
+    def _get_user_vless_uris_legacy(self, hysteria_username: str) -> List[Dict[str, Any]]:
+        """
+        Legacy метод получения VLESS URIs (использует внутренние адреса + LinkRewriter).
+        
+        Используется как fallback если новый метод не работает.
+        """
         if not db:
             return []
         
