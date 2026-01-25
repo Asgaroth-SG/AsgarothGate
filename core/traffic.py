@@ -98,11 +98,18 @@ class TrafficManager:
 
         # Получаем онлайн пользователей из 3X-UI
         xui_online_users = self._get_xui_online_users()
+        
+        # Получаем трафик пользователей из 3X-UI
+        xui_traffic = self._get_xui_traffic()
+        if xui_traffic:
+            logging.info(f"Retrieved X-UI traffic for {len(xui_traffic)} users")
+        else:
+            logging.debug("No X-UI traffic retrieved")
 
         users_to_update: List[Tuple[str, Dict[str, Any]]] = []
         for username, user_data in db_users.items():
             updates = self._calculate_user_updates(
-                username, user_data, live_traffic, live_status, xui_online_users
+                username, user_data, live_traffic, live_status, xui_online_users, xui_traffic
             )
             if updates:
                 users_to_update.append((username, updates))
@@ -243,6 +250,124 @@ class TrafficManager:
         
         return online_users
     
+    def _get_xui_traffic(self) -> Dict[str, Dict[str, int]]:
+        """
+        Получает трафик пользователей из всех X-UI серверов.
+        
+        Returns:
+            Словарь {username: {'upload_bytes': int, 'download_bytes': int}} для пользователей с трафиком из 3X-UI
+        """
+        xui_traffic = {}
+        
+        try:
+            from xui.config import load_xui_config
+            config = load_xui_config()
+            if not config.get('enabled', False):
+                return xui_traffic
+            
+            servers = config.get('xui_servers', [])
+            if not servers:
+                return xui_traffic
+            
+            # Получаем все маппинги пользователей
+            all_mappings = {}
+            for user in self.db.get_all_users():
+                username = user.get('_id')
+                if username:
+                    mapping = self.db.get_xui_mapping(username)
+                    if mapping:
+                        all_mappings[username] = mapping
+            
+            if not all_mappings:
+                return xui_traffic
+            
+            # Проверяем каждый сервер
+            from xui.xui_api_wrapper import XUIAPIWrapper
+            
+            for server in servers:
+                if not server.get('enabled', True):
+                    continue
+                
+                auth_type = server.get('auth_type', 'username')
+                if auth_type == 'token':
+                    xui_username = 'admin'
+                else:
+                    xui_username = server.get('username', '')
+                
+                xui_password = server.get('password', '')
+                if not xui_password:
+                    continue
+                
+                client = None
+                try:
+                    client = XUIAPIWrapper(
+                        host=server.get('host'),
+                        username=xui_username,
+                        password=xui_password,
+                        base_path=server.get('base_path', '/'),
+                        timeout=server.get('timeout', 10)
+                    )
+                    
+                    # Получаем трафик для каждого пользователя на этом сервере
+                    for username, mapping in all_mappings.items():
+                        if username in xui_traffic:
+                            continue  # Уже обработан
+                        
+                        client_uuid = mapping.get('xui_client_uuid')
+                        xui_host = mapping.get('xui_host')
+                        
+                        # Проверяем, что это правильный сервер
+                        if xui_host and xui_host != server.get('host'):
+                            continue
+                        
+                        if not client_uuid:
+                            continue
+                        
+                        try:
+                            # Получаем трафик клиента из всех inbounds
+                            traffics = client.get_client_traffics(client_uuid)
+                            
+                            if traffics:
+                                # Суммируем трафик из всех inbounds
+                                total_up = 0
+                                total_down = 0
+                                
+                                for traffic_item in traffics:
+                                    up = traffic_item.get('up', 0)
+                                    down = traffic_item.get('down', 0)
+                                    
+                                    # Преобразуем в int, если это не число
+                                    if isinstance(up, (int, float)):
+                                        total_up += int(up)
+                                    if isinstance(down, (int, float)):
+                                        total_down += int(down)
+                                
+                                if total_up > 0 or total_down > 0:
+                                    xui_traffic[username] = {
+                                        'upload_bytes': total_up,
+                                        'download_bytes': total_down
+                                    }
+                                    logging.debug(
+                                        f"Got X-UI traffic for {username} from {server.get('host')}: "
+                                        f"up={total_up}, down={total_down}"
+                                    )
+                        except Exception as e:
+                            logging.debug(f"Error getting traffic for {username} from X-UI server {server.get('host')}: {e}")
+                
+                except Exception as e:
+                    logging.debug(f"Error getting traffic from X-UI server {server.get('host')}: {e}")
+                finally:
+                    if client:
+                        try:
+                            client.close()
+                        except:
+                            pass
+        
+        except Exception as e:
+            logging.debug(f"Error getting X-UI traffic: {e}")
+        
+        return xui_traffic
+    
     def _check_xui_online_status(self, username: str) -> bool:
         """
         Проверяет статус онлайна пользователя из 3X-UI.
@@ -342,7 +467,8 @@ class TrafficManager:
         user_data: Dict, 
         live_traffic: Dict, 
         live_status: Dict,
-        xui_online_users: Dict[str, int] = None
+        xui_online_users: Dict[str, int] = None,
+        xui_traffic: Dict[str, Dict[str, int]] = None
     ) -> Dict[str, Any]:
         updates = {}
         online_count = self._get_online_connection_count(live_status.get(username))
@@ -374,9 +500,58 @@ class TrafficManager:
         if user_data.get('online_count') != online_count:
             updates['online_count'] = online_count
 
+        # Обрабатываем трафик из Hysteria 2
+        # live_traffic содержит новый трафик с момента последнего сброса
+        # Добавляем его к текущему значению в БД
+        current_upload = user_data.get('upload_bytes', 0)
+        current_download = user_data.get('download_bytes', 0)
+        
+        upload_bytes = current_upload
+        download_bytes = current_download
+        
+        hysteria_new_upload = 0
+        hysteria_new_download = 0
         if username in live_traffic:
-            updates['upload_bytes'] = user_data.get('upload_bytes', 0) + live_traffic[username].upload_bytes
-            updates['download_bytes'] = user_data.get('download_bytes', 0) + live_traffic[username].download_bytes
+            hysteria_new_upload = live_traffic[username].upload_bytes
+            hysteria_new_download = live_traffic[username].download_bytes
+            upload_bytes += hysteria_new_upload
+            download_bytes += hysteria_new_download
+        
+        # Добавляем трафик из 3X-UI
+        # Трафик из X-UI - это общий использованный трафик клиента из всех inbounds на всех серверах
+        # Суммируем его с трафиком из Hysteria 2
+        if xui_traffic and username in xui_traffic:
+            xui_user_traffic = xui_traffic[username]
+            xui_upload = xui_user_traffic.get('upload_bytes', 0)
+            xui_download = xui_user_traffic.get('download_bytes', 0)
+            
+            # Суммируем трафик из обоих источников
+            # Используем максимальное значение между:
+            # 1. Текущий трафик + новый трафик из Hysteria 2
+            # 2. Трафик из X-UI (который уже включает весь использованный трафик клиента)
+            # Это позволяет учитывать трафик из обоих источников без дублирования
+            
+            # Если трафик из X-UI больше текущего, значит есть дополнительный трафик из X-UI
+            # Используем максимальное значение, чтобы учесть трафик из обоих источников
+            upload_bytes = max(upload_bytes, xui_upload)
+            download_bytes = max(download_bytes, xui_download)
+            
+            logging.info(
+                f"X-UI traffic for {username}: "
+                f"xui_upload={xui_upload} bytes ({xui_upload / (1024**3):.3f} GB), "
+                f"xui_download={xui_download} bytes ({xui_download / (1024**3):.3f} GB), "
+                f"current_upload={current_upload} bytes ({current_upload / (1024**3):.3f} GB), "
+                f"current_download={current_download} bytes ({current_download / (1024**3):.3f} GB), "
+                f"hysteria_new_upload={hysteria_new_upload} bytes, "
+                f"hysteria_new_download={hysteria_new_download} bytes, "
+                f"final_upload={upload_bytes} bytes ({upload_bytes / (1024**3):.3f} GB), "
+                f"final_download={download_bytes} bytes ({download_bytes / (1024**3):.3f} GB)"
+            )
+        
+        if upload_bytes != current_upload:
+            updates['upload_bytes'] = upload_bytes
+        if download_bytes != current_download:
+            updates['download_bytes'] = download_bytes
 
         is_activated = "account_creation_date" in user_data
         has_activity = is_online or (username in live_traffic and (live_traffic[username].upload_bytes > 0 or live_traffic[username].download_bytes > 0))

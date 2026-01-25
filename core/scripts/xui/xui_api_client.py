@@ -981,3 +981,48 @@ class XUIAPIClient:
         
         result = response.json()
         return result.get('success', False)
+    
+    async def get_client_traffics(self, client_uuid: str) -> List[Dict[str, Any]]:
+        """
+        Получает статистику трафика клиента по UUID из всех inbounds.
+        Эндпоинт: GET /panel/api/inbounds/getClientTrafficsById/{uuid}
+        
+        Args:
+            client_uuid: UUID клиента (например: bace0701-15e3-5144-97c5-47487d543032)
+        
+        Returns:
+            Список объектов с трафиком клиента из всех inbounds
+            Каждый объект содержит: up, down, total, expiryTime и т.д.
+        """
+        await self._ensure_logged_in()
+        
+        # Эндпоинт: /panel/api/inbounds/getClientTrafficsById/{uuid}
+        url = self._build_api_url(f"panel/api/inbounds/getClientTrafficsById/{client_uuid}")
+        logger.debug(f"Getting client traffics from: {url}")
+        response = await self._request_with_retry('GET', url, cookies=self._cookies)
+        
+        if not response or response.status_code != 200:
+            logger.warning(f"Failed to get client traffics for {client_uuid}: status={response.status_code if response else 'No response'}")
+            if response:
+                logger.debug(f"Response text: {response.text[:200]}")
+            return []
+        
+        data = response.json()
+        obj = self._extract_api_obj(data)
+        
+        if isinstance(obj, list):
+            logger.debug(f"Got {len(obj)} traffic records for client {client_uuid}")
+            return obj
+        elif isinstance(obj, dict):
+            # Может быть структура с ключами 'data', 'traffics', или другим
+            if 'data' in obj:
+                result = obj['data'] if isinstance(obj['data'], list) else []
+                logger.debug(f"Got {len(result)} traffic records from 'data' for client {client_uuid}")
+                return result
+            elif 'traffics' in obj:
+                result = obj['traffics'] if isinstance(obj['traffics'], list) else []
+                logger.debug(f"Got {len(result)} traffic records from 'traffics' for client {client_uuid}")
+                return result
+        
+        logger.warning(f"Unexpected response format for client traffics {client_uuid}: {type(obj)}")
+        return []

@@ -486,6 +486,20 @@ class XUIAPIWrapper:
             self.api_client.is_client_online(client_id)
         )
     
+    def get_client_traffics(self, client_uuid: str) -> List[Dict[str, Any]]:
+        """
+        Получает статистику трафика клиента по UUID из всех inbounds.
+        
+        Args:
+            client_uuid: UUID клиента
+        
+        Returns:
+            Список объектов с трафиком клиента из всех inbounds
+        """
+        return self._run_async_in_sync_context(
+            self.api_client.get_client_traffics(client_uuid)
+        )
+    
     def close(self):
         """Закрывает все соединения"""
         self.api_client.close()
