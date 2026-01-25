@@ -351,6 +351,7 @@ class TrafficManager:
         # Проверяем статус онлайна из 3X-UI
         # Используем предварительно полученный список онлайн пользователей
         xui_online_count = 0
+        is_online_xui = False
         if xui_online_users and username in xui_online_users:
             xui_online_count = xui_online_users[username]
             is_online_xui = xui_online_count > 0
@@ -379,10 +380,15 @@ class TrafficManager:
 
         is_activated = "account_creation_date" in user_data
         has_activity = is_online or (username in live_traffic and (live_traffic[username].upload_bytes > 0 or live_traffic[username].download_bytes > 0))
+        current_status = user_data.get("status", STATUS_ON_HOLD)
 
         # Если пользователь онлайн в 3X-UI, активируем его даже без активности в Hysteria 2
         if is_online_xui and not is_activated:
+            # Пользователь онлайн в 3X-UI, но не активирован - активируем и меняем статус на Online
             updates["account_creation_date"] = self.today_date
+            updates["status"] = STATUS_ONLINE
+        elif is_online_xui and is_activated and current_status == STATUS_ON_HOLD:
+            # Пользователь уже активирован, но статус On-hold - меняем на Online если онлайн в 3X-UI
             updates["status"] = STATUS_ONLINE
         elif not is_activated and has_activity:
             updates["account_creation_date"] = self.today_date
@@ -390,9 +396,9 @@ class TrafficManager:
         elif is_activated:
             # Для активированных пользователей учитываем статус из 3X-UI
             new_status = STATUS_ONLINE if (is_online or is_online_xui) else STATUS_OFFLINE
-            if user_data.get("status") != new_status:
+            if current_status != new_status:
                 updates["status"] = new_status
-        elif not is_activated and not has_activity and user_data.get("status") != STATUS_ON_HOLD:
+        elif not is_activated and not has_activity and current_status != STATUS_ON_HOLD:
             updates["status"] = STATUS_ON_HOLD
             
         return updates
