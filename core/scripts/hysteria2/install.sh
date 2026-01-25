@@ -33,104 +33,178 @@ install_hysteria() {
     mkdir -p /etc/hysteria && cd /etc/hysteria/
     
     echo "Установка Hysteria..."
-    # Пытаемся установить Hysteria с несколькими попытками и увеличенным таймаутом
-    install_success=false
-    curl_error=""
-    install_script="/tmp/hysteria_installer.sh"
     
-    # Функция для загрузки установщика
+    # Функция для определения архитектуры
+    detect_arch() {
+        case $(uname -m) in
+            x86_64|amd64) echo "amd64" ;;
+            aarch64|arm64) echo "arm64" ;;
+            armv7l|armv6l) echo "arm" ;;
+            *) echo "unknown" ;;
+        esac
+    }
+    
+    # Функция для прямой установки из GitHub
+    install_from_github() {
+        local arch=$(detect_arch)
+        if [[ "$arch" == "unknown" ]]; then
+            return 1
+        fi
+        
+        echo "Попытка установки из GitHub releases..."
+        
+        # Определяем последнюю версию
+        local latest_version=$(curl -fsSL --max-time 30 --connect-timeout 10 \
+            https://api.github.com/repos/apernet/hysteria/releases/latest 2>/dev/null | \
+            grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | sed 's/^v//')
+        
+        if [[ -z "$latest_version" ]]; then
+            # Если не удалось получить версию, используем последнюю известную
+            latest_version="v2.4.3"
+        else
+            latest_version="v${latest_version}"
+        fi
+        
+        local binary_name="hysteria-linux-${arch}"
+        local download_url="https://github.com/apernet/hysteria/releases/download/${latest_version}/${binary_name}"
+        local binary_path="/usr/local/bin/hysteria"
+        
+        # Скачиваем бинарник
+        if curl -fsSL --max-time 300 --connect-timeout 30 -o "$binary_path" "$download_url" 2>/dev/null; then
+            chmod +x "$binary_path"
+            
+            # Создаем systemd service файл
+            cat > /etc/systemd/system/hysteria-server.service << 'EOFSERVICE'
+[Unit]
+Description=Hysteria2 Server Service
+After=network.target
+
+[Service]
+Type=simple
+User=hysteria
+Group=hysteria
+ExecStart=/usr/local/bin/hysteria server -c /etc/hysteria/config.json
+Restart=on-failure
+RestartSec=5s
+LimitNOFILE=infinity
+
+[Install]
+WantedBy=multi-user.target
+EOFSERVICE
+            
+            systemctl daemon-reload
+            return 0
+        fi
+        
+        return 1
+    }
+    
+    # Функция для загрузки установщика с get.hy2.sh
     download_installer() {
         local method=$1
+        local proxy=$2
+        local install_script=$3
+        
         if [[ "$method" == "curl" ]]; then
-            # Используем curl с увеличенными таймаутами и опциями для медленных соединений
-            curl -fsSL \
-                --max-time 300 \
-                --connect-timeout 30 \
-                --speed-time 300 \
-                --speed-limit 100 \
-                --retry 2 \
-                --retry-delay 3 \
-                https://get.hy2.sh/ -o "$install_script" >/dev/null 2>&1
+            local curl_cmd="curl -fsSL --max-time 300 --connect-timeout 30"
+            if [[ -n "$proxy" ]]; then
+                curl_cmd="$curl_cmd --proxy $proxy"
+            fi
+            $curl_cmd https://get.hy2.sh/ -o "$install_script" >/dev/null 2>&1
             return $?
         elif [[ "$method" == "wget" ]]; then
-            # Используем wget как альтернативу
-            wget --timeout=300 \
-                 --tries=3 \
-                 --retry-connrefused \
-                 --no-check-certificate \
-                 -O "$install_script" \
-                 https://get.hy2.sh/ >/dev/null 2>&1
+            local wget_cmd="wget --timeout=300 --tries=3 --retry-connrefused"
+            if [[ -n "$proxy" ]]; then
+                wget_cmd="$wget_cmd -e http_proxy=$proxy -e https_proxy=$proxy"
+            fi
+            $wget_cmd -O "$install_script" https://get.hy2.sh/ >/dev/null 2>&1
             return $?
         fi
         return 1
     }
     
-    # Пробуем curl сначала
-    for attempt in 1 2 3; do
-        echo "Попытка $attempt: Загрузка установщика через curl..."
-        download_output=$(download_installer "curl" 2>&1)
-        download_exit=$?
-        
-        if [[ $download_exit -eq 0 ]] && [[ -f "$install_script" ]] && [[ -s "$install_script" ]]; then
-            install_success=true
-            break
-        else
-            curl_error="$download_output"
-            if [[ $attempt -lt 3 ]]; then
-                echo "Попытка $attempt не удалась. Повторная попытка через 10 секунд..."
-                sleep 10
-                rm -f "$install_script" 2>/dev/null || true
+    install_success=false
+    install_script="/tmp/hysteria_installer.sh"
+    
+    # Метод 1: Пробуем стандартный установщик get.hy2.sh
+    echo "Попытка 1: Загрузка установщика с get.hy2.sh..."
+    for attempt in 1 2; do
+        if download_installer "curl" "" "$install_script"; then
+            if [[ -f "$install_script" ]] && [[ -s "$install_script" ]]; then
+                echo "Запуск установщика Hysteria..."
+                if bash "$install_script" >/dev/null 2>&1; then
+                    install_success=true
+                    break
+                fi
             fi
+        fi
+        if [[ $attempt -lt 2 ]]; then
+            sleep 5
+            rm -f "$install_script" 2>/dev/null || true
         fi
     done
     
-    # Если curl не сработал, пробуем wget
+    # Метод 2: Пробуем wget
     if [[ "$install_success" == false ]] && command -v wget &> /dev/null; then
-        echo "Пробуем загрузить установщик через wget..."
-        for attempt in 1 2; do
-            download_output=$(download_installer "wget" 2>&1)
-            download_exit=$?
-            
-            if [[ $download_exit -eq 0 ]] && [[ -f "$install_script" ]] && [[ -s "$install_script" ]]; then
-                install_success=true
-                break
+        echo "Попытка 2: Загрузка установщика через wget..."
+        if download_installer "wget" "" "$install_script"; then
+            if [[ -f "$install_script" ]] && [[ -s "$install_script" ]]; then
+                echo "Запуск установщика Hysteria..."
+                if bash "$install_script" >/dev/null 2>&1; then
+                    install_success=true
+                fi
             fi
-            
-            if [[ $attempt -lt 2 ]]; then
-                echo "Попытка $attempt не удалась. Повторная попытка через 10 секунд..."
-                sleep 10
-                rm -f "$install_script" 2>/dev/null || true
-            fi
-        done
+        fi
     fi
+    
+    # Метод 3: Прямая установка из GitHub (обычно не блокируется)
+    if [[ "$install_success" == false ]]; then
+        echo "Попытка 3: Прямая установка из GitHub releases..."
+        if install_from_github; then
+            install_success=true
+        fi
+    fi
+    
+    # Метод 4: Пробуем через прокси из переменных окружения
+    if [[ "$install_success" == false ]] && [[ -n "$http_proxy" ]] || [[ -n "$HTTP_PROXY" ]]; then
+        local proxy="${http_proxy:-$HTTP_PROXY}"
+        echo "Попытка 4: Использование прокси из переменных окружения ($proxy)..."
+        if download_installer "curl" "$proxy" "$install_script"; then
+            if [[ -f "$install_script" ]] && [[ -s "$install_script" ]]; then
+                echo "Запуск установщика Hysteria..."
+                if bash "$install_script" >/dev/null 2>&1; then
+                    install_success=true
+                fi
+            fi
+        fi
+    fi
+    
+    # Очистка
+    rm -f "$install_script" 2>/dev/null || true
     
     if [[ "$install_success" == false ]]; then
-        echo -e "${red}Ошибка:${NC} Не удалось загрузить установщик Hysteria после всех попыток."
-        echo "Проверьте подключение к интернету и доступность https://get.hy2.sh/"
-        if [[ -n "$curl_error" ]]; then
-            echo "Последняя ошибка:"
-            echo "$curl_error" | tail -3
-        fi
-        rm -f "$install_script" 2>/dev/null || true
+        echo -e "${red}Ошибка:${NC} Не удалось установить Hysteria."
+        echo ""
+        echo "Возможные решения:"
+        echo "1. Проверьте подключение к интернету"
+        echo "2. Установите Hysteria вручную:"
+        echo "   curl -fsSL https://get.hy2.sh/ | bash"
+        echo "3. Или скачайте бинарник с GitHub:"
+        echo "   https://github.com/apernet/hysteria/releases"
+        echo "4. Используйте прокси, установив переменные окружения:"
+        echo "   export http_proxy=http://proxy:port"
+        echo "   export https_proxy=http://proxy:port"
         exit 1
     fi
-    
-    # Выполняем установщик
-    echo "Запуск установщика Hysteria..."
-    if ! bash "$install_script" >/dev/null 2>&1; then
-        echo -e "${red}Ошибка:${NC} Установщик Hysteria завершился с ошибкой."
-        rm -f "$install_script" 2>/dev/null || true
-        exit 1
-    fi
-    
-    # Удаляем временный файл
-    rm -f "$install_script" 2>/dev/null || true
     
     # Проверяем, что Hysteria действительно установлен
     if ! command -v hysteria &> /dev/null; then
-        echo -e "${red}Ошибка:${NC} Hysteria не был установлен. Проверьте логи выше."
+        echo -e "${red}Ошибка:${NC} Hysteria не был установлен."
+        echo "Проверьте, что бинарный файл находится в PATH или в /usr/local/bin/hysteria"
         exit 1
     fi
+    
+    echo -e "${green}✓${NC} Hysteria успешно установлен: $(hysteria version 2>/dev/null | head -1 || echo 'версия неизвестна')"
 
     echo "Генерация ключа CA и сертификата..."
     if ! openssl ecparam -genkey -name prime256v1 -out ca.key >/dev/null 2>&1; then
