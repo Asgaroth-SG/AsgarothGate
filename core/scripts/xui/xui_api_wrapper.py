@@ -454,10 +454,22 @@ class XUIAPIWrapper:
         Получает список онлайн клиентов.
         
         Returns:
-            Список онлайн клиентов с их данными
+            Список онлайн клиентов с их данными (может быть список объектов или список строк)
         """
         return self._run_async_in_sync_context(
             self.api_client.get_online_clients()
+        )
+    
+    def get_online_clients_detailed(self) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Получает детальный список онлайн клиентов через проверку всех inbounds.
+        Используется когда /panel/api/inbounds/onlines возвращает только строки.
+        
+        Returns:
+            Словарь {inbound_id: [список онлайн клиентов]}
+        """
+        return self._run_async_in_sync_context(
+            self.api_client.get_online_clients_detailed()
         )
     
     def is_client_online(self, client_id: str) -> bool:

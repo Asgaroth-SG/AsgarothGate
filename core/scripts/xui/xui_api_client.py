@@ -803,7 +803,7 @@ class XUIAPIClient:
         Эндпоинт: POST /panel/api/inbounds/onlines
         
         Returns:
-            Список онлайн клиентов с их данными
+            Список онлайн клиентов с их данными (может быть список объектов или список строк)
         """
         await self._ensure_logged_in()
         
@@ -818,6 +818,13 @@ class XUIAPIClient:
         obj = self._extract_api_obj(data)
         
         if isinstance(obj, list):
+            # Проверяем, является ли это списком строк (например, ["🇹🇷 Турция"])
+            if obj and isinstance(obj[0], str):
+                # Если это массив строк, нужно получить детальную информацию через inbounds
+                logger.debug(f"get_online_clients returned list of strings: {obj[:5]}...")
+                # Возвращаем как есть, но вызывающий код должен обработать это отдельно
+                return obj
+            # Иначе это список объектов
             return obj
         elif isinstance(obj, dict):
             # Может быть структура с ключами 'clients', 'onlines', или другим
@@ -829,6 +836,62 @@ class XUIAPIClient:
                 return obj['data'] if isinstance(obj['data'], list) else []
         
         return []
+    
+    async def get_online_clients_detailed(self) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        Получает детальный список онлайн клиентов через проверку всех inbounds.
+        Используется когда /panel/api/inbounds/onlines возвращает только строки.
+        
+        Returns:
+            Словарь {inbound_id: [список онлайн клиентов]}
+        """
+        await self._ensure_logged_in()
+        
+        # Получаем список всех inbounds
+        inbounds = await self.get_inbounds_list()
+        online_clients_by_inbound = {}
+        
+        for inbound in inbounds:
+            inbound_id = inbound.get('id')
+            if not inbound_id:
+                continue
+            
+            # Получаем настройки inbound
+            settings = inbound.get('settings', {})
+            if isinstance(settings, str):
+                try:
+                    settings = json.loads(settings)
+                except:
+                    continue
+            
+            clients = settings.get('clients', [])
+            if not clients:
+                continue
+            
+            # Проверяем онлайн статус каждого клиента
+            online_clients = []
+            for client in clients:
+                client_id = client.get('id') or client.get('email', '')
+                if not client_id:
+                    continue
+                
+                # Проверяем онлайн статус через IP адреса
+                try:
+                    ips = await self.get_client_ips(client_id)
+                    if ips and len(ips) > 0:
+                        online_clients.append({
+                            'id': client.get('id'),
+                            'email': client.get('email', ''),
+                            'ips': ips
+                        })
+                except Exception as e:
+                    logger.debug(f"Could not get IPs for client {client_id} in inbound {inbound_id}: {e}")
+                    continue
+            
+            if online_clients:
+                online_clients_by_inbound[inbound_id] = online_clients
+        
+        return online_clients_by_inbound
     
     async def is_client_online(self, client_id: str) -> bool:
         """

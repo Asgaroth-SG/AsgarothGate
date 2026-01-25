@@ -96,9 +96,14 @@ class TrafficManager:
             logging.error(f"Error communicating with Hysteria2 API or DB: {e}")
             return {}
 
+        # Получаем онлайн пользователей из 3X-UI
+        xui_online_users = self._get_xui_online_users()
+
         users_to_update: List[Tuple[str, Dict[str, Any]]] = []
         for username, user_data in db_users.items():
-            updates = self._calculate_user_updates(username, user_data, live_traffic, live_status)
+            updates = self._calculate_user_updates(
+                username, user_data, live_traffic, live_status, xui_online_users
+            )
             if updates:
                 users_to_update.append((username, updates))
 
@@ -111,6 +116,133 @@ class TrafficManager:
                     logging.error(f"Failed to update user {username} in DB: {e}")
         return db_users
 
+    def _get_xui_online_users(self) -> Dict[str, int]:
+        """
+        Получает список онлайн пользователей из всех X-UI серверов.
+        
+        Returns:
+            Словарь {username: online_count} для пользователей, которые онлайн в 3X-UI
+        """
+        online_users = {}
+        
+        try:
+            from xui.config import load_xui_config
+            config = load_xui_config()
+            if not config.get('enabled', False):
+                return online_users
+            
+            servers = config.get('xui_servers', [])
+            if not servers:
+                return online_users
+            
+            # Получаем все маппинги пользователей
+            all_mappings = {}
+            for user in self.db.get_all_users():
+                username = user.get('_id')
+                if username:
+                    mapping = self.db.get_xui_mapping(username)
+                    if mapping:
+                        all_mappings[username] = mapping
+            
+            if not all_mappings:
+                return online_users
+            
+            # Проверяем каждый сервер
+            from xui.xui_api_wrapper import XUIAPIWrapper
+            
+            for server in servers:
+                if not server.get('enabled', True):
+                    continue
+                
+                auth_type = server.get('auth_type', 'username')
+                if auth_type == 'token':
+                    xui_username = 'admin'
+                else:
+                    xui_username = server.get('username', '')
+                
+                xui_password = server.get('password', '')
+                if not xui_password:
+                    continue
+                
+                client = None
+                try:
+                    client = XUIAPIWrapper(
+                        host=server.get('host'),
+                        username=xui_username,
+                        password=xui_password,
+                        base_path=server.get('base_path', '/'),
+                        timeout=server.get('timeout', 10)
+                    )
+                    
+                    # Получаем список онлайн клиентов
+                    online_clients = client.get_online_clients()
+                    
+                    # Если это массив строк, используем детальный метод
+                    if online_clients and isinstance(online_clients[0], str):
+                        logging.debug(f"X-UI server {server.get('host')} returned string list, using detailed method")
+                        online_clients_by_inbound = client.get_online_clients_detailed()
+                        
+                        # Собираем все онлайн клиенты
+                        all_online_clients = []
+                        for inbound_id, clients in online_clients_by_inbound.items():
+                            all_online_clients.extend(clients)
+                    else:
+                        # Это массив объектов
+                        all_online_clients = online_clients if isinstance(online_clients, list) else []
+                    
+                    # Сопоставляем онлайн клиентов с пользователями Hysteria 2
+                    for online_client in all_online_clients:
+                        client_id = online_client.get('id') if isinstance(online_client, dict) else None
+                        client_email = online_client.get('email', '') if isinstance(online_client, dict) else ''
+                        client_ips = online_client.get('ips', []) if isinstance(online_client, dict) else []
+                        
+                        # Ищем пользователя по UUID или email
+                        for username, mapping in all_mappings.items():
+                            if username in online_users:
+                                continue  # Уже обработан
+                            
+                            client_uuid = mapping.get('xui_client_uuid')
+                            xui_host = mapping.get('xui_host')
+                            
+                            # Проверяем, что это правильный сервер
+                            if xui_host and xui_host != server.get('host'):
+                                continue
+                            
+                            # Проверяем по UUID
+                            if client_uuid and client_id == client_uuid:
+                                online_count = len(client_ips) if client_ips else 1
+                                online_users[username] = online_count
+                                logging.debug(f"Found online user {username} by UUID {client_uuid} on {server.get('host')}")
+                                break
+                            
+                            # Проверяем по email
+                            if client_email:
+                                inbound_ids = mapping.get('inbound_ids', [])
+                                for inbound_id in inbound_ids:
+                                    expected_email = f"{username}_{inbound_id}"
+                                    if client_email == expected_email:
+                                        online_count = len(client_ips) if client_ips else 1
+                                        online_users[username] = online_count
+                                        logging.debug(f"Found online user {username} by email {client_email} on {server.get('host')}")
+                                        break
+                                
+                                if username in online_users:
+                                    break
+                
+                except Exception as e:
+                    logging.debug(f"Error getting online clients from X-UI server {server.get('host')}: {e}")
+                finally:
+                    if client:
+                        try:
+                            client.close()
+                        except:
+                            pass
+        
+        except Exception as e:
+            logging.debug(f"Error getting X-UI online users: {e}")
+        
+        return online_users
+    
     def _check_xui_online_status(self, username: str) -> bool:
         """
         Проверяет статус онлайна пользователя из 3X-UI.
@@ -204,21 +336,39 @@ class TrafficManager:
             logging.debug(f"Error checking X-UI online status for {username}: {e}")
             return False
 
-    def _calculate_user_updates(self, username: str, user_data: Dict, live_traffic: Dict, live_status: Dict) -> Dict[str, Any]:
+    def _calculate_user_updates(
+        self, 
+        username: str, 
+        user_data: Dict, 
+        live_traffic: Dict, 
+        live_status: Dict,
+        xui_online_users: Dict[str, int] = None
+    ) -> Dict[str, Any]:
         updates = {}
         online_count = self._get_online_connection_count(live_status.get(username))
         is_online = online_count > 0
         
         # Проверяем статус онлайна из 3X-UI
-        is_online_xui = self._check_xui_online_status(username)
+        # Используем предварительно полученный список онлайн пользователей
+        xui_online_count = 0
+        if xui_online_users and username in xui_online_users:
+            xui_online_count = xui_online_users[username]
+            is_online_xui = xui_online_count > 0
+        else:
+            # Fallback: проверяем индивидуально (старый метод)
+            is_online_xui = self._check_xui_online_status(username)
+            if is_online_xui:
+                xui_online_count = 1
         
-        # Если пользователь онлайн в 3X-UI, считаем его онлайн
-        if is_online_xui and not is_online:
-            is_online = True
-            # Если нет online_count из Hysteria 2, но есть онлайн в 3X-UI, устанавливаем 1
-            if online_count == 0:
-                updates['online_count'] = 1
-                online_count = 1
+        # Если пользователь онлайн в 3X-UI, учитываем это
+        if xui_online_count > 0:
+            # Используем максимальное значение из Hysteria 2 и 3X-UI
+            if xui_online_count > online_count:
+                online_count = xui_online_count
+                is_online = True
+            elif not is_online:
+                is_online = True
+                online_count = xui_online_count
         
         if user_data.get('online_count') != online_count:
             updates['online_count'] = online_count

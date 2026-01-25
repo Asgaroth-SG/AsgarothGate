@@ -228,17 +228,29 @@ class HysteriaCLI:
     def _run_command(self, args: List[str]) -> str:
         try:
             command = ['python3', self.cli_path] + args
+            logger.info(f"Running command: {' '.join(command)}")
             process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             stdout, stderr = process.communicate()
             if process.returncode != 0:
                 if "User not found" in stderr:
+                    logger.warning(f"User not found in command: {' '.join(command)}")
                     return None
                 else:
+                    logger.error(f"Hysteria CLI error (command: {' '.join(command)}): returncode={process.returncode}, stderr={stderr}, stdout={stdout[:200]}")
                     print(f"Hysteria CLI error: {stderr}")
                     raise subprocess.CalledProcessError(process.returncode, command, output=stdout, stderr=stderr)
-            return stdout.strip()
+            result = stdout.strip()
+            if not result:
+                logger.warning(f"Empty output from command: {' '.join(command)}, stderr: {stderr[:200] if stderr else 'None'}")
+            else:
+                logger.info(f"Command succeeded, output length: {len(result)} chars")
+            return result
         except subprocess.CalledProcessError as e:
+            logger.error(f"Hysteria CLI error: {e}, stdout: {e.stdout[:200] if e.stdout else 'None'}, stderr: {e.stderr[:200] if e.stderr else 'None'}")
             print(f"Hysteria CLI error: {e}")
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error running command {' '.join(command)}: {e}", exc_info=True)
             raise
 
     def get_username_by_password(self, password_token: str) -> Optional[str]:
@@ -273,12 +285,76 @@ class HysteriaCLI:
         return re.findall(r'hy2://.*', output)
 
     def get_all_labeled_uris(self, username: str) -> List[Dict[str, str]]:
+        logger.info(f"Getting labeled URIs for user {username}")
         output = self._run_command(['show-user-uri', '-u', username, '-a'])
         if not output:
+            logger.warning(f"No output from show-user-uri for user {username}")
             return []
+        
+        logger.info(f"show-user-uri output length: {len(output)} chars, preview: {output[:200]}")
 
-        matches = re.findall(r"^(.*?):\s*(hy2://.*)$", output, re.MULTILINE)
-        return [{'label': label.strip(), 'uri': uri} for label, uri in matches]
+        # Парсим вывод в формате:
+        # Label:
+        # hy2://...
+        # или
+        # Label: hy2://...
+        # 
+        # Используем более гибкое регулярное выражение, которое обрабатывает:
+        # 1. Label: hy2://... (на одной строке)
+        # 2. Label:\nhy2://... (на разных строках)
+        # 3. Label:\n\nhy2://... (с пустой строкой между)
+        
+        # Сначала пробуем формат на одной строке
+        matches = re.findall(r"^([^\n:]+?):\s*(hy2://[^\s\n]+)", output, re.MULTILINE)
+        
+        # Если не нашли, пробуем формат с переносом строки
+        if not matches:
+            # Ищем паттерн: Label:\n(возможно пустые строки)\nhy2://...
+            pattern = r"^([^\n:]+?):\s*\n\s*(hy2://[^\n]+)"
+            matches = re.findall(pattern, output, re.MULTILINE)
+        
+        # Если всё ещё не нашли, пробуем более простой подход - ищем все hy2:// ссылки
+        # и пытаемся найти соответствующие метки перед ними
+        if not matches:
+            # Находим все hy2:// ссылки
+            uri_lines = re.findall(r"^(hy2://[^\n]+)", output, re.MULTILINE)
+            # Находим все метки (строки, заканчивающиеся на :)
+            label_lines = re.findall(r"^([^\n:]+?):\s*$", output, re.MULTILINE)
+            
+            # Сопоставляем метки и URI по порядку
+            if uri_lines and label_lines:
+                # Берем минимальное количество для сопоставления
+                min_count = min(len(uri_lines), len(label_lines))
+                matches = [(label_lines[i], uri_lines[i]) for i in range(min_count)]
+        
+        if not matches:
+            # Если всё ещё нет совпадений, логируем вывод для отладки
+            logger.warning(f"Could not parse URIs from show-user-uri output for {username}. Output preview: {output[:500]}")
+            # Пробуем найти хотя бы hy2:// ссылки без меток
+            uri_lines = re.findall(r"hy2://[^\s\n]+", output)
+            if uri_lines:
+                logger.info(f"Found {len(uri_lines)} hy2:// URIs without labels, using default label")
+                matches = [("Hysteria2", uri) for uri in uri_lines]
+            else:
+                logger.error(f"No hy2:// URIs found in output for {username}. Full output: {output}")
+        
+        result = []
+        for label, uri in matches:
+            cleaned_label = label.strip()
+            cleaned_uri = uri.strip()
+            logger.info(f"Processing match: label='{cleaned_label}', uri_length={len(cleaned_uri)}, uri_preview='{cleaned_uri[:100]}'")
+            if cleaned_uri:
+                result.append({'label': cleaned_label, 'uri': cleaned_uri})
+            else:
+                logger.warning(f"Skipping match with empty URI, label='{cleaned_label}'")
+        
+        logger.info(f"Parsed {len(result)} labeled URIs for {username}")
+        if result:
+            for r in result:
+                logger.info(f"Final parsed URI: label='{r['label']}', uri_length={len(r['uri'])}, uri_preview='{r['uri'][:100]}'")
+        else:
+            logger.warning(f"No valid URIs parsed from {len(matches)} matches for {username}")
+        return result
 
 
 class UriParser:
@@ -679,25 +755,54 @@ class SubscriptionManager:
 
         nodes_types = self._load_nodes_types()
         labeled_uris = self.hysteria_cli.get_all_labeled_uris(username)
+        
+        logger.info(f"Retrieved {len(labeled_uris)} labeled URIs for {username}")
+        if labeled_uris:
+            logger.info(f"Labeled URIs: {[item.get('label') for item in labeled_uris]}")
 
         # Список ссылок с контекстом (uri, server_cfg)
         links_with_context: List[Tuple[str, Optional[LinkRewriterServerConfig]]] = []
 
         # Обрабатываем Hysteria ссылки
+        hysteria_count = 0
+        logger.info(f"Processing {len(labeled_uris)} labeled URIs for {username}")
         for item in labeled_uris:
             label = item.get("label", "")
             uri = item.get("uri", "")
+            
+            logger.info(f"Processing URI item: label='{label}', uri_length={len(uri) if uri else 0}")
 
             if not uri:
+                logger.warning(f"Skipping item with empty URI, label: {label}")
                 continue
 
-            if "[" in uri or "v6" in uri or "IPv6" in uri:
+            # Проверяем IPv6 более точно: ищем IPv6 адреса в квадратных скобках [::] или метку IPv6
+            # НЕ фильтруем по "v6" в URI, так как это может быть часть параметров (например, obfs-password)
+            # IPv6 адреса в Hysteria URI всегда в квадратных скобках: hy2://user:pass@[::1]:443
+            if "[" in uri:
+                # Проверяем, что это действительно IPv6 адрес в квадратных скобках
+                # Извлекаем часть между @ и : после квадратных скобок
+                try:
+                    if "@" in uri:
+                        host_part = uri.split("@")[1].split(":")[0]
+                        if host_part.startswith("[") and host_part.endswith("]"):
+                            # Это IPv6 адрес в квадратных скобках
+                            logger.info(f"Skipping IPv6 URI: {label}")
+                            continue
+                except Exception:
+                    pass  # Если не удалось распарсить, пропускаем проверку
+            
+            # Проверяем метку на наличие IPv6
+            if "IPv6" in label or ("v6" in label.lower() and "v4" not in label.lower()):
+                # Это явно помечено как IPv6
+                logger.info(f"Skipping IPv6 URI by label: {label}")
                 continue
 
             if label.startswith("Node:"):
                 node_name = label[len("Node:"):].strip()
                 node_type = nodes_types.get(node_name, "standard")
                 if (not is_premium_user) and node_type == "premium":
+                    logger.info(f"Skipping premium node {node_name} for standard user")
                     continue
 
             # Обработка v2ray-ng специфичных параметров
@@ -713,6 +818,10 @@ class SubscriptionManager:
 
             # Hysteria ссылки без явного контекста сервера (используется дефолтный)
             links_with_context.append((uri, None))
+            hysteria_count += 1
+            logger.info(f"Added Hysteria URI: {label} -> {uri[:80]}...")
+        
+        logger.info(f"Total Hysteria URIs added: {hysteria_count}, total links_with_context: {len(links_with_context)}")
 
         # Обрабатываем extra ссылки
         extra_uris = self._get_extra_uris_for_user(user_plan)
@@ -894,12 +1003,22 @@ class SubscriptionManager:
 
         # Единый pipeline нормализации: все ссылки проходят через rewrite_proxy_links
         normalized_uris: List[str] = []
+        hysteria_normalized = 0
+        vless_normalized = 0
+        
         for uri, server_cfg in links_with_context:
             normalized_uri = self._normalize_link(uri, server_cfg)
             if normalized_uri:
                 normalized_uris.append(normalized_uri)
+                if normalized_uri.startswith('hy2://'):
+                    hysteria_normalized += 1
+                elif normalized_uri.startswith('vless://'):
+                    vless_normalized += 1
 
+        logger.info(f"Normalized URIs: {len(normalized_uris)} total (Hysteria: {hysteria_normalized}, VLESS: {vless_normalized})")
+        
         if not normalized_uris:
+            logger.error(f"No normalized URIs available for {username}")
             return "No URI available"
 
         subscription_info = (
@@ -909,7 +1028,9 @@ class SubscriptionManager:
             f"expire={user_info.expiration_timestamp}\n"
         )
         profile_lines = "//profile-title: Asgaroth Gate\n//profile-update-interval: 1\n"
-        return profile_lines + subscription_info + "\n".join(normalized_uris)
+        result = profile_lines + subscription_info + "\n".join(normalized_uris)
+        logger.info(f"Generated subscription for {username}: {len(normalized_uris)} URIs, length={len(result)} chars")
+        return result
 
 
 class TemplateRenderer:
