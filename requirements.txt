@@ -18,9 +18,6 @@ qrcode==8.2
 pypng==0.20220715.0
 pillow==12.0.0
 
-# Cache / misc
-propcache==0.4.1
-
 # Database
 pymongo==4.15.4
 
@@ -28,8 +25,9 @@ pymongo==4.15.4
 hysteria2-api==0.1.3
 
 # X-UI/3X-UI API
-py3xui>=0.1.0
+# py3xui>=0.1.0  # Опционально, используется только в старом xui_client.py как fallback
 nest-asyncio>=1.6.0
+httpx>=0.24.0  # Обязательно для нового официального API клиента
 
 # Web panel (FastAPI stack)
 fastapi==0.121.3
@@ -41,4 +39,7 @@ pydantic-settings==2.12.0
 annotated-types==0.7.0
 
 # SSL / ACME management
+# Note: certbot is used as a system command, not imported as Python module.
+# It's installed via pip for certbot-dns-cloudflare plugin compatibility.
+# Consider installing system certbot via apt/yum for production use.
 certbot==5.1.0

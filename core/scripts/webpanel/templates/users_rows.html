@@ -23,6 +23,9 @@
                     <i class="fas fa-clock text-muted ml-1" title="Не синхронизировано с 3X-UI" style="font-size: 0.8rem;"></i>
                 {% endif %}
             {% endif %}
+            <span class="xui-online-status ml-1" data-username="{{ user.username }}" style="display: none;">
+                <i class="fas fa-wifi text-success" title="Онлайн в 3X-UI" style="font-size: 0.8rem;"></i>
+            </span>
         </td>
 
         <!-- Тариф -->

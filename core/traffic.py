@@ -111,10 +111,115 @@ class TrafficManager:
                     logging.error(f"Failed to update user {username} in DB: {e}")
         return db_users
 
+    def _check_xui_online_status(self, username: str) -> bool:
+        """
+        Проверяет статус онлайна пользователя из 3X-UI.
+        
+        Args:
+            username: Имя пользователя Hysteria 2
+        
+        Returns:
+            True если пользователь онлайн в 3X-UI
+        """
+        try:
+            # Проверяем, есть ли маппинг пользователя с 3X-UI
+            mapping = self.db.get_xui_mapping(username)
+            if not mapping:
+                return False
+            
+            client_uuid = mapping.get('xui_client_uuid')
+            xui_host = mapping.get('xui_host')
+            
+            if not client_uuid:
+                return False
+            
+            # Загружаем конфигурацию X-UI
+            from xui.config import load_xui_config
+            config = load_xui_config()
+            if not config.get('enabled', False):
+                return False
+            
+            servers = config.get('xui_servers', [])
+            if not servers:
+                return False
+            
+            # Находим сервер для этого пользователя
+            target_server = None
+            if xui_host:
+                for server in servers:
+                    if server.get('host') == xui_host and server.get('enabled', True):
+                        target_server = server
+                        break
+            
+            if not target_server:
+                for server in servers:
+                    if server.get('enabled', True):
+                        target_server = server
+                        break
+            
+            if not target_server:
+                return False
+            
+            # Создаем клиент для проверки статуса
+            from xui.xui_api_wrapper import XUIAPIWrapper
+            
+            auth_type = target_server.get('auth_type', 'username')
+            if auth_type == 'token':
+                xui_username = 'admin'
+            else:
+                xui_username = target_server.get('username', '')
+            
+            xui_password = target_server.get('password', '')
+            if not xui_password:
+                return False
+            
+            client = XUIAPIWrapper(
+                host=target_server.get('host'),
+                username=xui_username,
+                password=xui_password,
+                base_path=target_server.get('base_path', '/'),
+                timeout=target_server.get('timeout', 10)
+            )
+            
+            try:
+                # Пробуем проверить по UUID
+                is_online = client.is_client_online(client_uuid)
+                
+                if not is_online:
+                    # Если не нашли по UUID, пробуем по email
+                    inbound_ids = mapping.get('inbound_ids', [])
+                    for inbound_id in inbound_ids:
+                        client_email = f"{username}_{inbound_id}"
+                        if client.is_client_online(client_email):
+                            is_online = True
+                            break
+                
+                return is_online
+            finally:
+                try:
+                    client.close()
+                except:
+                    pass
+        except Exception as e:
+            logging.debug(f"Error checking X-UI online status for {username}: {e}")
+            return False
+
     def _calculate_user_updates(self, username: str, user_data: Dict, live_traffic: Dict, live_status: Dict) -> Dict[str, Any]:
         updates = {}
         online_count = self._get_online_connection_count(live_status.get(username))
         is_online = online_count > 0
+        
+        # Проверяем статус онлайна из 3X-UI
+        is_online_xui = self._check_xui_online_status(username)
+        
+        # Если пользователь онлайн в 3X-UI, считаем его онлайн
+        if is_online_xui and not is_online:
+            is_online = True
+            # Если нет online_count из Hysteria 2, но есть онлайн в 3X-UI, устанавливаем 1
+            if online_count == 0:
+                updates['online_count'] = 1
+                online_count = 1
+        
         if user_data.get('online_count') != online_count:
             updates['online_count'] = online_count
 
@@ -125,11 +230,16 @@ class TrafficManager:
         is_activated = "account_creation_date" in user_data
         has_activity = is_online or (username in live_traffic and (live_traffic[username].upload_bytes > 0 or live_traffic[username].download_bytes > 0))
 
-        if not is_activated and has_activity:
+        # Если пользователь онлайн в 3X-UI, активируем его даже без активности в Hysteria 2
+        if is_online_xui and not is_activated:
+            updates["account_creation_date"] = self.today_date
+            updates["status"] = STATUS_ONLINE
+        elif not is_activated and has_activity:
             updates["account_creation_date"] = self.today_date
             updates["status"] = STATUS_ONLINE if is_online else STATUS_OFFLINE
         elif is_activated:
-            new_status = STATUS_ONLINE if is_online else STATUS_OFFLINE
+            # Для активированных пользователей учитываем статус из 3X-UI
+            new_status = STATUS_ONLINE if (is_online or is_online_xui) else STATUS_OFFLINE
             if user_data.get("status") != new_status:
                 updates["status"] = new_status
         elif not is_activated and not has_activity and user_data.get("status") != STATUS_ON_HOLD:

@@ -162,6 +162,8 @@ $(function () {
                 
                 translateTable();
                 highlightSearchResults(query);
+                // Загружаем статус онлайна из 3X-UI
+                loadXUIOnlineStatuses();
             },
             error: function () {
                 Toast.fire({icon: 'error', title: "Произошла ошибка во время поиска."});
@@ -193,7 +195,9 @@ $(function () {
                 $userTotalCount.text(newTotalCount);
 
                 checkIpLimitServiceStatus();
-                translateTable(); 
+                translateTable();
+                // Загружаем статус онлайна из 3X-UI
+                loadXUIOnlineStatuses();
             },
             error: function () {
                 Toast.fire({icon: 'error', title: "Не удалось восстановить список пользователей."});
@@ -201,6 +205,71 @@ $(function () {
             },
             complete: function () {
                 $userTableBody.css('opacity', 1);
+            }
+        });
+    }
+    
+    // Загрузка статуса онлайна из 3X-UI для всех пользователей
+    function loadXUIOnlineStatuses() {
+        const usernames = [];
+        $('#userTableBody tr.user-main-row').each(function() {
+            const username = $(this).find('td[data-username]').attr('data-username');
+            if (username) {
+                usernames.push(username);
+            }
+        });
+        
+        if (usernames.length === 0) {
+            return;
+        }
+        
+        // Загружаем статус для каждого пользователя (с небольшой задержкой между запросами)
+        usernames.forEach((username, index) => {
+            setTimeout(() => {
+                loadXUIOnlineStatus(username);
+            }, index * 100); // 100ms задержка между запросами
+        });
+    }
+    
+    // Загрузка статуса онлайна для одного пользователя
+    function loadXUIOnlineStatus(username) {
+        const baseUrl = window.location.origin;
+        const apiUrl = `${baseUrl}/api/v1/user/${encodeURIComponent(username)}/xui-online-status`;
+        
+        $.ajax({
+            url: apiUrl,
+            method: 'GET',
+            cache: false,
+            timeout: 10000, // Увеличено до 10 секунд
+            success: function(data) {
+                // Ищем элемент по data-username атрибуту
+                const $statusElement = $(`.xui-online-status[data-username="${username}"]`);
+                
+                if ($statusElement.length === 0) {
+                    console.warn(`XUI online status: Element not found for user ${username}`);
+                    return;
+                }
+                
+                if (data.online === true) {
+                    $statusElement.show();
+                    $statusElement.find('i').removeClass('text-danger text-muted').addClass('text-success');
+                    const ipText = data.client_ips && data.client_ips.length > 0 ? ' (IP: ' + data.client_ips.join(', ') + ')' : '';
+                    $statusElement.attr('title', `Онлайн в 3X-UI${ipText}`);
+                    $statusElement.find('i').attr('title', `Онлайн в 3X-UI${ipText}`);
+                } else {
+                    $statusElement.hide();
+                }
+            },
+            error: function(xhr, status, error) {
+                // Игнорируем ошибки (пользователь может быть не синхронизирован с 3X-UI)
+                const $statusElement = $(`.xui-online-status[data-username="${username}"]`);
+                if ($statusElement.length > 0) {
+                    $statusElement.hide();
+                }
+                // Логируем только серьезные ошибки (не 404)
+                if (xhr.status !== 404 && xhr.status !== 0) {
+                    console.warn(`XUI online status check failed for ${username}: ${status} - ${error}`);
+                }
             }
         });
     }
@@ -709,6 +778,11 @@ $(function () {
     
     initializeLimitSelector();
     checkIpLimitServiceStatus();
-    translateTable(); 
+    translateTable();
     $('[data-toggle="tooltip"]').tooltip();
+    
+    // Загружаем статус онлайна из 3X-UI при первоначальной загрузке
+    setTimeout(() => {
+        loadXUIOnlineStatuses();
+    }, 1000); // Небольшая задержка для загрузки страницы
 });

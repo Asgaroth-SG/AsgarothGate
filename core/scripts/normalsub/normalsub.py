@@ -3,16 +3,18 @@ import json
 import subprocess
 import re
 import time
+import threading
 import shlex
 import base64
 import sys
+import logging
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from io import BytesIO
 
 from aiohttp import web
 from aiohttp.web_middlewares import middleware
-from urllib.parse import unquote, parse_qs, urlparse, urljoin, quote
+from urllib.parse import unquote, parse_qs, urlparse, urljoin, quote, urlencode
 from dotenv import load_dotenv
 import qrcode
 from jinja2 import Environment, FileSystemLoader
@@ -20,7 +22,29 @@ from jinja2 import Environment, FileSystemLoader
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from db.database import db
 
+# Импортируем LinkRewriter
+from link_rewriter import rewrite_proxy_links, XuiServerConfig as LinkRewriterServerConfig
+
 load_dotenv()
+
+# Настраиваем базовое логирование для normalsub
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),  # Вывод в консоль
+        logging.FileHandler('/var/log/hysteria_normalsub.log', encoding='utf-8')  # Вывод в файл
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+# Настраиваем логирование для X-UI модулей при импорте
+try:
+    from xui.logging_config import setup_xui_logging
+    setup_xui_logging()
+except Exception as e:
+    logger.warning(f"Failed to setup X-UI logging: {e}")
 
 
 @dataclass
@@ -39,6 +63,8 @@ class AppConfig:
     sni: str
     template_dir: str
     subpath: str
+    public_host: Optional[str] = None  # Публичный хост для нормализации VLESS ссылок
+    public_port: int = 443  # Публичный порт для нормализации VLESS ссылок
 
 
 class RateLimiter:
@@ -374,6 +400,97 @@ class SubscriptionManager:
     def __init__(self, hysteria_cli: HysteriaCLI, config: AppConfig):
         self.hysteria_cli = hysteria_cli
         self.config = config
+        # Кэш VLESS ссылок для ускорения выдачи подписки
+        # TTL можно задать через XUI_LINKS_CACHE_TTL (в секундах)
+        # Увеличено до 3600 секунд (1 час) для ускорения выдачи подписки
+        try:
+            self._xui_links_cache_ttl = int(os.getenv('XUI_LINKS_CACHE_TTL', '3600'))
+        except Exception:
+            self._xui_links_cache_ttl = 3600  # 1 час по умолчанию
+        try:
+            self._xui_links_cache_max_stale = int(os.getenv('XUI_LINKS_CACHE_MAX_STALE', '86400'))
+        except Exception:
+            self._xui_links_cache_max_stale = 86400  # 24 часа для stale cache
+        self._xui_links_cache_path = os.getenv(
+            'XUI_LINKS_CACHE_PATH',
+            '/etc/hysteria/xui_links_cache.json'
+        )
+        self._xui_links_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
+        self._xui_links_cache_lock = threading.Lock()
+        self._xui_links_refreshing: set[str] = set()
+        self._load_xui_links_cache()
+
+    def _xui_links_cache_key(self, username: str, user_plan: str) -> str:
+        return f"{username}:{user_plan}"
+
+    def _load_xui_links_cache(self) -> None:
+        if not self._xui_links_cache_path:
+            return
+        try:
+            if not os.path.exists(self._xui_links_cache_path):
+                return
+            with open(self._xui_links_cache_path, 'r', encoding='utf-8') as f:
+                raw = json.load(f)
+            if not isinstance(raw, dict):
+                return
+            with self._xui_links_cache_lock:
+                for key, entry in raw.items():
+                    if not isinstance(entry, dict):
+                        continue
+                    ts = entry.get('timestamp')
+                    links = entry.get('links')
+                    if isinstance(ts, (int, float)) and isinstance(links, list):
+                        self._xui_links_cache[key] = (float(ts), links)
+        except Exception as e:
+            logger.debug(f"Failed to load X-UI links cache: {e}")
+
+    def _save_xui_links_cache(self) -> None:
+        if not self._xui_links_cache_path:
+            return
+        try:
+            with self._xui_links_cache_lock:
+                payload = {
+                    key: {
+                        "timestamp": ts,
+                        "links": links
+                    }
+                    for key, (ts, links) in self._xui_links_cache.items()
+                }
+            tmp_path = f"{self._xui_links_cache_path}.tmp"
+            os.makedirs(os.path.dirname(self._xui_links_cache_path), exist_ok=True)
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False)
+            os.replace(tmp_path, self._xui_links_cache_path)
+        except Exception as e:
+            logger.debug(f"Failed to save X-UI links cache: {e}")
+
+    def _refresh_xui_links_async(self, username: str, user_plan: str) -> None:
+        cache_key = self._xui_links_cache_key(username, user_plan)
+        with self._xui_links_cache_lock:
+            if cache_key in self._xui_links_refreshing:
+                return
+            self._xui_links_refreshing.add(cache_key)
+
+        def _worker():
+            try:
+                from xui.config import get_xui_sync_manager
+                sync_manager = get_xui_sync_manager()
+                if not sync_manager:
+                    return
+                links = sync_manager.get_user_vless_uris(username) or []
+                with self._xui_links_cache_lock:
+                    self._xui_links_cache[cache_key] = (time.time(), list(links))
+                self._save_xui_links_cache()
+                logger.debug(
+                    f"Background refresh completed for {username} (plan={user_plan})"
+                )
+            except Exception as e:
+                logger.debug(f"Background refresh failed for {username}: {e}")
+            finally:
+                with self._xui_links_cache_lock:
+                    self._xui_links_refreshing.discard(cache_key)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _load_nodes_types(self) -> Dict[str, str]:
         """
@@ -454,7 +571,105 @@ class SubscriptionManager:
     def _get_extra_uris_for_user(self, user_plan: str) -> List[str]:
         return [str(x.get("uri")).strip() for x in self._filter_extra_configs_for_user(user_plan)]
 
+    def _get_default_server_config(self) -> Optional[LinkRewriterServerConfig]:
+        """
+        Получает дефолтную конфигурацию сервера из первого включенного сервера X-UI.
+        Используется для ссылок без явного контекста сервера (Hysteria, extra).
+        
+        Returns:
+            LinkRewriterServerConfig или None если нет настроенных серверов
+        """
+        try:
+            from pathlib import Path
+            
+            xui_path = Path(__file__).parent.parent / "xui"
+            if xui_path.exists():
+                sys.path.insert(0, str(xui_path.parent))
+                from xui.config import load_xui_config
+                
+                config = load_xui_config()
+                servers = config.get('xui_servers', [])
+                
+                # Ищем первый включенный сервер с public_host или извлекаем из host
+                for server in servers:
+                    if not server.get('enabled', True):
+                        continue
+                    
+                    public_host = server.get('public_host')
+                    
+                    # Если public_host не задан, извлекаем домен из host (для reverse proxy)
+                    if not public_host:
+                        host_url = server.get('host', '')
+                        if host_url:
+                            try:
+                                parsed = urlparse(host_url)
+                                public_host = parsed.hostname
+                            except Exception:
+                                continue
+                    
+                    if public_host:
+                        return LinkRewriterServerConfig(
+                            server_id=server.get('name', 'default'),
+                            public_host=public_host,
+                            public_port=server.get('public_port', 443),
+                            link_host_rewrite_from=server.get('link_host_rewrite_from', '127.0.0.1'),
+                            sni=server.get('sni') or public_host,
+                            xhttp_alpn=server.get('xhttp_alpn'),
+                            xhttp_fp=server.get('xhttp_fp'),
+                            xhttp_mode=server.get('xhttp_mode'),
+                            grpc_authority=server.get('grpc_authority')
+                        )
+        except Exception as e:
+            print(f"Warning: Failed to get default server config: {e}", file=sys.stderr)
+        
+        return None
+
+    def _normalize_link(self, uri: str, server_cfg: Optional[LinkRewriterServerConfig] = None) -> str:
+        """
+        Нормализует ссылку через LinkRewriter.
+        
+        Args:
+            uri: Ссылка для нормализации
+            server_cfg: Конфигурация сервера (если None, используется дефолтная)
+        
+        Returns:
+            Нормализованная ссылка
+        """
+        if not uri:
+            return uri
+        
+        # Если нет конфигурации сервера, пытаемся получить дефолтную
+        if not server_cfg:
+            server_cfg = self._get_default_server_config()
+        
+        # Если всё равно нет конфигурации или public_host не задан, возвращаем как есть
+        if not server_cfg or not server_cfg.public_host:
+            # Логируем только для VLESS ссылок с 127.0.0.1 (чтобы не спамить для других протоколов)
+            if uri.startswith('vless://') and '127.0.0.1' in uri:
+                if server_cfg:
+                    logger.warning(f"Cannot rewrite link - server_cfg exists but public_host is empty. Server: {server_cfg.server_id}, URI: {uri[:80]}...")
+                else:
+                    logger.warning(f"Cannot rewrite link - no server config. URI: {uri[:80]}...")
+            return uri
+        
+        # Применяем rewrite только если это поддерживаемый протокол
+        try:
+            rewritten = rewrite_proxy_links(uri, server_cfg)
+            # Логируем успешное переписывание для отладки
+            if rewritten != uri:
+                logger.debug(f"Normalized VLESS link server={server_cfg.server_id} 127.0.0.1 -> {server_cfg.public_host}:{server_cfg.public_port} (security/sni preserved if present)")
+            return rewritten
+        except Exception as e:
+            # Fail-open: при ошибке возвращаем исходную ссылку
+            logger.warning(f"Failed to rewrite link {uri[:50]}...: {e}", exc_info=True)
+            return uri
+
     def get_normal_subscription(self, username: str, user_agent: str) -> str:
+        """
+        Получает нормализованную подписку для пользователя.
+        
+        Все ссылки проходят через единый pipeline нормализации через LinkRewriter.
+        """
         user_info = self.hysteria_cli.get_user_info(username)
         if user_info is None:
             return "User not found"
@@ -465,8 +680,10 @@ class SubscriptionManager:
         nodes_types = self._load_nodes_types()
         labeled_uris = self.hysteria_cli.get_all_labeled_uris(username)
 
-        processed_uris: List[str] = []
+        # Список ссылок с контекстом (uri, server_cfg)
+        links_with_context: List[Tuple[str, Optional[LinkRewriterServerConfig]]] = []
 
+        # Обрабатываем Hysteria ссылки
         for item in labeled_uris:
             label = item.get("label", "")
             uri = item.get("uri", "")
@@ -483,6 +700,7 @@ class SubscriptionManager:
                 if (not is_premium_user) and node_type == "premium":
                     continue
 
+            # Обработка v2ray-ng специфичных параметров
             if "v2ray" in user_agent and "ng" in user_agent:
                 match = re.search(r'pinSHA256=sha256/([^&]+)', uri)
                 if match:
@@ -493,13 +711,195 @@ class SubscriptionManager:
                         f'pinSHA256={formatted}'
                     )
 
-            processed_uris.append(uri)
+            # Hysteria ссылки без явного контекста сервера (используется дефолтный)
+            links_with_context.append((uri, None))
 
+        # Обрабатываем extra ссылки
         extra_uris = self._get_extra_uris_for_user(user_plan)
+        for uri in extra_uris:
+            # Extra ссылки без явного контекста сервера
+            links_with_context.append((uri, None))
 
-        all_processed_uris = processed_uris + extra_uris
+        # Получаем VLESS URIs из 3X-UI для пользователя
+        try:
+            from pathlib import Path
+            xui_path = Path(__file__).parent.parent / "xui"
+            if xui_path.exists():
+                sys.path.insert(0, str(xui_path.parent))
+                from xui.config import get_xui_sync_manager
+                
+                sync_manager = get_xui_sync_manager()
+                if sync_manager:
+                    vless_nodes: List[Dict[str, Any]] = []
+                    cache_used = False
+                    cache_key = self._xui_links_cache_key(username, user_plan)
+                    now = time.time()
 
-        if not all_processed_uris:
+                    if self._xui_links_cache_ttl > 0:
+                        cached = self._xui_links_cache.get(cache_key)
+                        if cached:
+                            cached_at, cached_links = cached
+                            age = now - cached_at
+                            if age < self._xui_links_cache_ttl:
+                                vless_nodes = cached_links
+                                cache_used = True
+                                logger.debug(
+                                    f"Using cached X-UI links for {username} (ttl={self._xui_links_cache_ttl}s)"
+                                )
+                            elif self._xui_links_cache_max_stale > 0 and age < self._xui_links_cache_max_stale:
+                                # Используем устаревший кэш, но всё равно обновляем в фоне
+                                vless_nodes = cached_links
+                                cache_used = True
+                                logger.debug(
+                                    f"Using stale X-UI links for {username} "
+                                    f"(age={int(age)}s, max_stale={self._xui_links_cache_max_stale}s)"
+                                )
+                                # Обновляем в фоне без блокировки
+                                self._refresh_xui_links_async(username, user_plan)
+
+                    if not cache_used:
+                        # Cache miss в памяти - перечитываем файл кэша
+                        # (он мог быть обновлён при создании пользователя)
+                        logger.debug(f"Cache miss in memory for {username}, reloading cache file...")
+                        self._load_xui_links_cache()
+                        
+                        # Проверяем кэш снова после перезагрузки файла
+                        cached = self._xui_links_cache.get(cache_key)
+                        if cached:
+                            cached_at, cached_links = cached
+                            age = now - cached_at
+                            if age < self._xui_links_cache_max_stale:
+                                vless_nodes = cached_links
+                                cache_used = True
+                                logger.debug(
+                                    f"Found links in cache file for {username} "
+                                    f"(age={int(age)}s, links={len(cached_links)})"
+                                )
+                                # Если кэш устарел, обновляем в фоне
+                                if age >= self._xui_links_cache_ttl:
+                                    self._refresh_xui_links_async(username, user_plan)
+                        
+                        # Если всё ещё нет кэша - генерируем синхронно для первого запроса
+                        if not cache_used:
+                            logger.info(f"No cache found for {username}, generating links synchronously...")
+                            try:
+                                # Генерируем ссылки синхронно - это должно быть быстро благодаря параллельной генерации
+                                logger.debug(f"Calling get_user_vless_uris for {username}...")
+                                generated_nodes = sync_manager.get_user_vless_uris(username) or []
+                                logger.debug(f"get_user_vless_uris returned {len(generated_nodes) if generated_nodes else 0} nodes")
+                                
+                                if generated_nodes:
+                                    vless_nodes = generated_nodes
+                                    cache_used = True
+                                    logger.info(f"Successfully generated {len(generated_nodes)} links for {username}")
+                                    
+                                    # Сохраняем в кэш для следующих запросов
+                                    if self._xui_links_cache_ttl > 0:
+                                        with self._xui_links_cache_lock:
+                                            self._xui_links_cache[cache_key] = (time.time(), list(generated_nodes))
+                                        self._save_xui_links_cache()
+                                        logger.debug(f"Cached {len(generated_nodes)} links for {username} (TTL={self._xui_links_cache_ttl}s)")
+                                else:
+                                    logger.warning(f"No links generated for {username} - check X-UI configuration and user mapping")
+                                    vless_nodes = []
+                            except Exception as e:
+                                logger.error(f"Error generating links for {username}: {e}", exc_info=True)
+                                # При ошибке возвращаем пустой список, но не блокируем запрос
+                                vless_nodes = []
+                                
+                                # Запускаем генерацию в фоне для следующего запроса
+                                with self._xui_links_cache_lock:
+                                    if cache_key not in self._xui_links_refreshing:
+                                        self._xui_links_refreshing.add(cache_key)
+                                        
+                                        def generate_in_background():
+                                            try:
+                                                logger.debug(f"Background: generating links for {username}...")
+                                                generated_nodes = sync_manager.get_user_vless_uris(username) or []
+                                                if self._xui_links_cache_ttl > 0:
+                                                    with self._xui_links_cache_lock:
+                                                        self._xui_links_cache[cache_key] = (time.time(), list(generated_nodes))
+                                                    self._save_xui_links_cache()
+                                                    logger.debug(f"Background: cached {len(generated_nodes)} links for {username} (TTL={self._xui_links_cache_ttl}s)")
+                                            except Exception as e:
+                                                logger.error(f"Background: error generating links for {username}: {e}", exc_info=True)
+                                            finally:
+                                                with self._xui_links_cache_lock:
+                                                    self._xui_links_refreshing.discard(cache_key)
+                                        
+                                        try:
+                                            import threading
+                                            thread = threading.Thread(target=generate_in_background, daemon=True)
+                                            thread.start()
+                                        except Exception as e:
+                                            logger.error(f"Failed to start background link generation for {username}: {e}", exc_info=True)
+                                            self._xui_links_refreshing.discard(cache_key)
+                    
+                    if vless_nodes:
+                        for node in vless_nodes:
+                            uri = node.get("uri", "")
+                            if not uri:
+                                continue
+                            
+                            # Получаем конфигурацию сервера для переписывания
+                            server_config_dict = node.get("server_config", {})
+                            server_id = server_config_dict.get("name", "unknown")
+                            
+                            # Создаем конфигурацию для LinkRewriter
+                            public_host = server_config_dict.get("public_host")
+                            public_port = server_config_dict.get("public_port", 443)
+                            link_host_rewrite_from = server_config_dict.get("link_host_rewrite_from", "127.0.0.1")
+                            sni = server_config_dict.get("sni")
+                            xhttp_alpn = server_config_dict.get("xhttp_alpn")
+                            xhttp_fp = server_config_dict.get("xhttp_fp")
+                            xhttp_mode = server_config_dict.get("xhttp_mode")
+                            grpc_authority = server_config_dict.get("grpc_authority")
+                            
+                            # Если public_host не задан, извлекаем домен из host сервера X-UI (для reverse proxy)
+                            if not public_host:
+                                host_url = server_config_dict.get("host", "")
+                                if host_url:
+                                    try:
+                                        parsed = urlparse(host_url)
+                                        public_host = parsed.hostname
+                                        if public_host:
+                                            logger.debug(f"Using host domain as public_host for '{server_id}': {public_host}")
+                                    except Exception as e:
+                                        logger.warning(f"Failed to extract hostname from '{host_url}': {e}")
+                            
+                            # Создаем конфигурацию если есть public_host (из настроек или из host)
+                            server_cfg = None
+                            if public_host:
+                                server_cfg = LinkRewriterServerConfig(
+                                    server_id=server_id,
+                                    public_host=public_host,
+                                    public_port=public_port,
+                                    link_host_rewrite_from=link_host_rewrite_from,
+                                    sni=sni or public_host,
+                                    xhttp_alpn=xhttp_alpn,
+                                    xhttp_fp=xhttp_fp,
+                                    xhttp_mode=xhttp_mode,
+                                    grpc_authority=grpc_authority
+                                )
+                                logger.debug(f"Created server_cfg for '{server_id}' with public_host={public_host}, public_port={public_port}")
+                            else:
+                                # Логируем предупреждение, если public_host не удалось определить
+                                logger.warning(f"Server '{server_id}' has no public_host configured and host URL is invalid. Link will not be rewritten.")
+                            
+                            # X-UI ссылки с явным контекстом сервера
+                            links_with_context.append((uri, server_cfg))
+        except Exception as e:
+            # Не блокируем выдачу подписки при ошибке получения VLESS URIs
+            logger.warning(f"Failed to get X-UI VLESS URIs for {username}: {e}", exc_info=True)
+
+        # Единый pipeline нормализации: все ссылки проходят через rewrite_proxy_links
+        normalized_uris: List[str] = []
+        for uri, server_cfg in links_with_context:
+            normalized_uri = self._normalize_link(uri, server_cfg)
+            if normalized_uri:
+                normalized_uris.append(normalized_uri)
+
+        if not normalized_uris:
             return "No URI available"
 
         subscription_info = (
@@ -509,7 +909,7 @@ class SubscriptionManager:
             f"expire={user_info.expiration_timestamp}\n"
         )
         profile_lines = "//profile-title: Asgaroth Gate\n//profile-update-interval: 1\n"
-        return profile_lines + subscription_info + "\n".join(all_processed_uris)
+        return profile_lines + subscription_info + "\n".join(normalized_uris)
 
 
 class TemplateRenderer:
@@ -567,6 +967,11 @@ class HysteriaServer:
         template_dir = os.path.join(os.path.dirname(__file__), 'template')
 
         sni = self._load_sni_from_env(sni_file)
+        
+        # Загружаем публичный хост для нормализации VLESS ссылок
+        public_host = os.getenv('NORMAL_SUB_PUBLIC_HOST', None)
+        public_port = int(os.getenv('NORMAL_SUB_PUBLIC_PORT', '443'))
+        
         return AppConfig(
             domain=domain,
             external_port=external_port,
@@ -581,7 +986,9 @@ class HysteriaServer:
             rate_limit_window=rate_limit_window,
             sni=sni,
             template_dir=template_dir,
-            subpath=subpath
+            subpath=subpath,
+            public_host=public_host,
+            public_port=public_port
         )
 
     def _load_sni_from_env(self, sni_file: str) -> str:

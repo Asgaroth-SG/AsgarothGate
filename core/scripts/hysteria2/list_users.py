@@ -4,6 +4,8 @@ import init_paths
 import sys
 import json
 from pathlib import Path
+from datetime import datetime
+from bson.objectid import ObjectId
 from hysteria2_api import Hysteria2Client
 from db.database import db
 from paths import CONFIG_FILE, API_BASE_URL
@@ -17,6 +19,23 @@ def get_secret() -> str | None:
         return config_data.get("trafficStats", {}).get("secret")
     except (json.JSONDecodeError, IOError):
         return None
+
+def convert_datetime_to_str(obj):
+    """
+    Рекурсивно конвертирует объекты datetime и ObjectId в строки для JSON сериализации.
+    """
+    if isinstance(obj, datetime):
+        # Конвертируем datetime в строку формата YYYY-MM-DD
+        return obj.strftime("%Y-%m-%d")
+    elif isinstance(obj, ObjectId):
+        # Конвертируем ObjectId в строку
+        return str(obj)
+    elif isinstance(obj, dict):
+        return {key: convert_datetime_to_str(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_datetime_to_str(item) for item in obj]
+    else:
+        return obj
 
 def get_users_from_db() -> list:
     if db is None:
@@ -58,6 +77,9 @@ def main():
     for user in users_list:
         user.setdefault('online_count', 0)
 
+    # Конвертируем все datetime объекты в строки перед сериализацией
+    users_list = convert_datetime_to_str(users_list)
+    
     print(json.dumps(users_list, indent=2))
 
 if __name__ == "__main__":

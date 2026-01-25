@@ -115,9 +115,96 @@ class User(BaseModel):
 
         traffic_used_display = f"{used_formatted}/{quota_formatted} ({percentage:.1f}%)"
 
+        # Определяем финальный статус пользователя
+        final_status = user_data.get('status', 'Not Active')
+        
+        # Если статус "On-hold" или "Offline", проверяем статус онлайна из 3X-UI
+        if final_status in ('On-hold', 'Offline'):
+            try:
+                import sys
+                sys.path.insert(0, '/etc/hysteria/core/scripts')
+                from db.database import db
+                from xui.config import load_xui_config
+                
+                if db:
+                    mapping = db.get_xui_mapping(user_data['username'])
+                    if mapping:
+                        client_uuid = mapping.get('xui_client_uuid')
+                        xui_host = mapping.get('xui_host')
+                        
+                        if client_uuid:
+                            config = load_xui_config()
+                            if config.get('enabled', False):
+                                servers = config.get('xui_servers', [])
+                                if servers:
+                                    # Находим сервер
+                                    target_server = None
+                                    if xui_host:
+                                        for server in servers:
+                                            if server.get('host') == xui_host and server.get('enabled', True):
+                                                target_server = server
+                                                break
+                                    
+                                    if not target_server:
+                                        for server in servers:
+                                            if server.get('enabled', True):
+                                                target_server = server
+                                                break
+                                    
+                                    if target_server:
+                                        from xui.xui_api_wrapper import XUIAPIWrapper
+                                        
+                                        auth_type = target_server.get('auth_type', 'username')
+                                        if auth_type == 'token':
+                                            xui_username = 'admin'
+                                        else:
+                                            xui_username = target_server.get('username', '')
+                                        
+                                        xui_password = target_server.get('password', '')
+                                        
+                                        if xui_password:
+                                            try:
+                                                # Используем короткий таймаут для быстрой проверки в интерфейсе
+                                                client = XUIAPIWrapper(
+                                                    host=target_server.get('host'),
+                                                    username=xui_username,
+                                                    password=xui_password,
+                                                    base_path=target_server.get('base_path', '/'),
+                                                    timeout=3  # Короткий таймаут для быстрой проверки
+                                                )
+                                                
+                                                try:
+                                                    # Проверяем по UUID
+                                                    is_online = client.is_client_online(client_uuid)
+                                                    
+                                                    if not is_online:
+                                                        # Пробуем по email
+                                                        inbound_ids = mapping.get('inbound_ids', [])
+                                                        for inbound_id in inbound_ids:
+                                                            client_email = f"{user_data['username']}_{inbound_id}"
+                                                            if client.is_client_online(client_email):
+                                                                is_online = True
+                                                                break
+                                                    
+                                                    # Если пользователь онлайн в 3X-UI, меняем статус на Online
+                                                    # (для On-hold это активация, для Offline - обновление статуса)
+                                                    if is_online:
+                                                        final_status = 'Online'
+                                                finally:
+                                                    try:
+                                                        client.close()
+                                                    except:
+                                                        pass
+                                            except Exception:
+                                                # Игнорируем ошибки проверки статуса
+                                                pass
+            except Exception:
+                # Игнорируем ошибки при проверке статуса из 3X-UI
+                pass
+        
         return {
             'username': user_data['username'],
-            'status': user_data.get('status', 'Not Active'),
+            'status': final_status,
             'quota': quota_formatted,
             'traffic_used': traffic_used_display,
             'expiry_date': display_expiry_date,

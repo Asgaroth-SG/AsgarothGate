@@ -53,6 +53,7 @@
     data-xui-sync-status-url="{{ url_for('get_xui_sync_status_api') }}"
     data-xui-sync-user-url="{{ url_for('sync_user_xui_api') }}"
     data-xui-sync-all-url="{{ url_for('sync_all_users_xui_api') }}"
+    data-xui-get-logs-url="{{ url_for('get_xui_logs_api') }}"
 >
     <div class='container-fluid'>
         <div class='row'>
@@ -549,88 +550,98 @@
                             <!-- X-UI Integration Tab -->
                             <div class='tab-pane fade' id='xui' role='tabpanel' aria-labelledby='xui-tab'>
                                 <div class="container-fluid p-3">
-                                    <h4><i class="fas fa-server"></i> Интеграция с 3X-UI</h4>
+                                    <h4><i class="fas fa-server"></i> Синхронизация</h4>
                                     <p class="text-muted">Настройка автоматической синхронизации пользователей с панелью 3X-UI</p>
-                                    
-                                    <div class="alert alert-info">
-                                        <i class="fas fa-info-circle"></i> 
-                                        При создании/обновлении пользователей они автоматически синхронизируются с 3X-UI.
-                                        VLESS-клиенты создаются персонально для каждого пользователя.
-                                    </div>
 
-                                    <!-- Статус синхронизации -->
+                                    <!-- A) Сервера 3X-UI -->
                                     <div class="card mb-3">
-                                        <div class="card-header">
-                                            <h5 class="mb-0">Статус синхронизации</h5>
+                                        <div class="card-header d-flex justify-content-between align-items-center">
+                                            <h5 class="mb-0"><i class="fas fa-server"></i> Сервера 3X-UI</h5>
+                                            <button type="button" class="btn btn-sm btn-success" id="xui_add_server_btn">
+                                                <i class="fas fa-plus"></i> Добавить сервер
+                                            </button>
                                         </div>
                                         <div class="card-body">
-                                            <div id="xui_sync_status_container">
-                                                <div class="text-center">
-                                                    <div class="spinner-border" role="status">
-                                                        <span class="sr-only">Загрузка...</span>
-                                                    </div>
-                                                </div>
+                                            <div id="xui_servers_grid" class="row">
+                                                <!-- Плитки серверов будут добавлены через JavaScript -->
                                             </div>
-                                            <div class="mt-3">
-                                                <button id="xui_sync_all_btn" type="button" class="btn btn-primary">
-                                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
-                                                    Синхронизировать всех пользователей
-                                                </button>
+                                            <div id="xui_no_servers" class="text-center text-muted py-4" style="display: none;">
+                                                <p>Нет настроенных серверов. Нажмите "Добавить сервер" для настройки.</p>
                                             </div>
                                         </div>
                                     </div>
 
-                                    <!-- Конфигурация -->
+                                    <!-- B) Синхронизация -->
                                     <div class="card mb-3">
                                         <div class="card-header">
-                                            <h5 class="mb-0">Конфигурация 3X-UI</h5>
+                                            <h5 class="mb-0"><i class="fas fa-sync"></i> Синхронизация</h5>
                                         </div>
                                         <div class="card-body">
-                                            <form id="xui_config_form">
+                                            <form id="xui_sync_form">
                                                 <div class="form-group">
                                                     <div class="custom-control custom-switch">
-                                                        <input type="checkbox" class="custom-control-input" id="xui_enabled" checked>
+                                                        <input type="checkbox" class="custom-control-input" id="xui_enabled">
                                                         <label class="custom-control-label" for="xui_enabled">Включить синхронизацию</label>
                                                     </div>
                                                 </div>
 
                                                 <div class="form-group">
-                                                    <label for="xui_mode">Режим работы</label>
-                                                    <select class="form-control" id="xui_mode">
-                                                        <option value="multi-xui">Multi-XUI (несколько серверов)</option>
-                                                        <option value="single-xui">Single-XUI (один сервер)</option>
-                                                    </select>
-                                                </div>
-
-                                                <div id="xui_servers_container">
-                                                    <p class="text-muted">Нет настроенных серверов. Нажмите "Добавить сервер" для настройки.</p>
+                                                    <label for="xui_sync_interval">Интервал синхронизации (минуты)</label>
+                                                    <input type="number" class="form-control" id="xui_sync_interval" 
+                                                           value="60" min="1" required>
+                                                    <small class="form-text text-muted">Период автоматической синхронизации пользователей</small>
                                                 </div>
 
                                                 <div class="form-group">
-                                                    <button type="button" class="btn btn-success" id="xui_add_server_btn">
-                                                        <i class="fas fa-plus"></i> Добавить сервер
-                                                    </button>
-                                                </div>
-
-                                                <div class="form-group">
-                                                    <button type="button" class="btn btn-info" id="xui_test_connection_btn">
+                                                    <button type="button" class="btn btn-primary" id="xui_sync_now_btn">
                                                         <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
-                                                        Тестировать подключение
+                                                        Запустить сейчас
+                                                    </button>
+                                                    <button type="button" class="btn btn-success ml-2" id="xui_save_sync_btn">
+                                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                                        Сохранить настройки
                                                     </button>
                                                 </div>
 
-                                                <div class="form-group">
-                                                    <button type="submit" class="btn btn-primary">
-                                                        <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
-                                                        Сохранить конфигурацию
-                                                    </button>
+                                                <div class="card bg-light mt-3">
+                                                    <div class="card-body">
+                                                        <div id="xui_last_sync_info">
+                                                            <p class="text-muted mb-0">Нет данных</p>
+                                                        </div>
+                                                    </div>
                                                 </div>
                                             </form>
                                         </div>
                                     </div>
 
-                                    <!-- Результат теста подключения -->
-                                    <div id="xui_test_result" class="alert" style="display: none;"></div>
+                                    <!-- C) Логи (скрыты по умолчанию) -->
+                                    <div class="card mb-3">
+                                        <div class="card-header d-flex justify-content-between align-items-center">
+                                            <h5 class="mb-0"><i class="fas fa-file-alt"></i> Логи</h5>
+                                            <button type="button" class="btn btn-sm btn-secondary" id="xui_toggle_logs_btn">
+                                                <i class="fas fa-chevron-down"></i> Показать
+                                            </button>
+                                        </div>
+                                        <div class="card-body" id="xui_logs_content" style="display: none;">
+                                            <div class="form-group">
+                                                <label for="xui_log_lines">Количество строк</label>
+                                                <input type="number" class="form-control" id="xui_log_lines" value="50" min="10" max="1000">
+                                            </div>
+                                            <div class="form-group">
+                                                <button type="button" class="btn btn-info" id="xui_load_logs_btn">
+                                                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                                                    Загрузить логи
+                                                </button>
+                                                <button type="button" class="btn btn-secondary ml-2" id="xui_copy_logs_btn">
+                                                    <i class="fas fa-copy"></i> Скопировать
+                                                </button>
+                                            </div>
+                                            <div class="form-group mb-0">
+                                                <textarea class="form-control" id="xui_logs_display" rows="10" 
+                                                          style="font-family: monospace; font-size: 0.85rem;" readonly></textarea>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -673,6 +684,184 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
                 <button type="button" class="btn btn-primary" id="save_edited_config_btn">Сохранить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модалка для добавления/редактирования сервера 3X-UI -->
+<div class="modal fade" id="xuiServerModal" tabindex="-1" role="dialog" aria-labelledby="xuiServerModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="xuiServerModalLabel">Добавить сервер</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="xui_server_form">
+                    <input type="hidden" id="xui_server_index" value="-1">
+                    <div class="form-group">
+                        <label for="xui_server_name">Имя сервера</label>
+                        <input type="text" class="form-control" id="xui_server_name" 
+                               placeholder="Мой сервер 3X-UI" required>
+                        <small class="form-text text-muted">Уникальное имя для идентификации сервера</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="xui_server_host">Адрес сервера</label>
+                        <input type="text" class="form-control" id="xui_server_host" 
+                               placeholder="https://panel.example.com:5560" required>
+                        <small class="form-text text-muted">Полный URL с протоколом (http:// или https://)</small>
+                    </div>
+                    <div class="form-group">
+                        <label>Авторизация</label>
+                        <div class="custom-control custom-radio mb-2">
+                            <input type="radio" class="custom-control-input" id="xui_server_auth_username" 
+                                   name="xui_server_auth_type" value="username" checked>
+                            <label class="custom-control-label" for="xui_server_auth_username">Username / Password</label>
+                        </div>
+                        <div class="custom-control custom-radio">
+                            <input type="radio" class="custom-control-input" id="xui_server_auth_token" 
+                                   name="xui_server_auth_type" value="token">
+                            <label class="custom-control-label" for="xui_server_auth_token">Token</label>
+                        </div>
+                    </div>
+                    <div id="xui_server_username_password_group">
+                        <div class="form-group">
+                            <label for="xui_server_username">Имя пользователя</label>
+                            <input type="text" class="form-control" id="xui_server_username" 
+                                   placeholder="admin" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="xui_server_password">Пароль</label>
+                            <input type="password" class="form-control" id="xui_server_password" 
+                                   placeholder="password" required>
+                        </div>
+                    </div>
+                    <div id="xui_server_token_group" style="display: none;">
+                        <div class="form-group">
+                            <label for="xui_server_token">Token</label>
+                            <input type="password" class="form-control" id="xui_server_token" 
+                                   placeholder="token">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="xui_server_base_path">Базовый путь</label>
+                        <input type="text" class="form-control" id="xui_server_base_path" 
+                               value="/" placeholder="/">
+                    </div>
+                    <div class="form-group">
+                        <div class="custom-control custom-switch">
+                            <input type="checkbox" class="custom-control-input" id="xui_server_verify_tls" checked>
+                            <label class="custom-control-label" for="xui_server_verify_tls">Проверять TLS сертификат</label>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="xui_server_timeout">Таймаут (сек)</label>
+                                <input type="number" class="form-control" id="xui_server_timeout" 
+                                       value="10" min="1" max="60" required>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="xui_server_retries">Повторы</label>
+                                <input type="number" class="form-control" id="xui_server_retries" 
+                                       value="3" min="1" max="10" required>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Планы</label>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="xui_server_plan_standard" value="standard" checked>
+                            <label class="form-check-label" for="xui_server_plan_standard">Standard</label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="xui_server_plan_premium" value="premium" checked>
+                            <label class="form-check-label" for="xui_server_plan_premium">Premium</label>
+                        </div>
+                    </div>
+                    
+                    <!-- Настройки публичного доступа для Normal Sub -->
+                    <hr>
+                    <h6 class="mb-3"><i class="fas fa-globe mr-2"></i>Публичный доступ (Normal Sub)</h6>
+                    <div class="form-group">
+                        <label for="xui_server_public_host">Публичный домен</label>
+                        <input type="text" class="form-control" id="xui_server_public_host" 
+                               placeholder="gateway.example.com">
+                        <small class="form-text text-muted">Если пусто — будет взят домен из адреса сервера</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="xui_server_sni">SNI</label>
+                        <input type="text" class="form-control" id="xui_server_sni" 
+                               placeholder="gateway.example.com">
+                        <small class="form-text text-muted">Если пусто — будет использован public_host</small>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <div class="form-group">
+                                <label for="xui_server_public_port">Публичный порт</label>
+                                <input type="number" class="form-control" id="xui_server_public_port" 
+                                       value="443" min="1" max="65535">
+                            </div>
+                        </div>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <button class="btn btn-outline-secondary btn-sm" type="button" data-toggle="collapse" data-target="#xui_advanced_public_settings"
+                                    aria-expanded="false" aria-controls="xui_advanced_public_settings">
+                                Дополнительные параметры
+                            </button>
+                        </div>
+                    </div>
+                    <div id="xui_advanced_public_settings" class="collapse">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="xui_server_rewrite_from">Внутренний хост</label>
+                                    <input type="text" class="form-control" id="xui_server_rewrite_from" 
+                                           value="127.0.0.1" placeholder="127.0.0.1">
+                                    <small class="form-text text-muted">Хост для замены на публичный</small>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group col-md-4">
+                                <label for="xui_server_xhttp_mode">xHTTP mode</label>
+                                <input type="text" class="form-control" id="xui_server_xhttp_mode" placeholder="auto">
+                            </div>
+                            <div class="form-group col-md-4">
+                                <label for="xui_server_xhttp_alpn">xHTTP ALPN</label>
+                                <input type="text" class="form-control" id="xui_server_xhttp_alpn" placeholder="h2">
+                            </div>
+                            <div class="form-group col-md-4">
+                                <label for="xui_server_xhttp_fp">xHTTP FP</label>
+                                <input type="text" class="form-control" id="xui_server_xhttp_fp" placeholder="chrome">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="xui_server_grpc_authority">gRPC authority</label>
+                            <input type="text" class="form-control" id="xui_server_grpc_authority" 
+                                   placeholder="например, grpc.example.com">
+                        </div>
+                    </div>
+                    <hr>
+                    
+                    <div class="form-group">
+                        <div class="custom-control custom-switch">
+                            <input type="checkbox" class="custom-control-input" id="xui_server_enabled" checked>
+                            <label class="custom-control-label" for="xui_server_enabled">Включен</label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-primary" id="xui_save_server_btn">
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                    Сохранить
+                </button>
             </div>
         </div>
     </div>
