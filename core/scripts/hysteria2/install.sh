@@ -36,32 +36,95 @@ install_hysteria() {
     # Пытаемся установить Hysteria с несколькими попытками и увеличенным таймаутом
     install_success=false
     curl_error=""
+    install_script="/tmp/hysteria_installer.sh"
+    
+    # Функция для загрузки установщика
+    download_installer() {
+        local method=$1
+        if [[ "$method" == "curl" ]]; then
+            # Используем curl с увеличенными таймаутами и опциями для медленных соединений
+            curl -fsSL \
+                --max-time 300 \
+                --connect-timeout 30 \
+                --speed-time 300 \
+                --speed-limit 100 \
+                --retry 2 \
+                --retry-delay 3 \
+                https://get.hy2.sh/ -o "$install_script" >/dev/null 2>&1
+            return $?
+        elif [[ "$method" == "wget" ]]; then
+            # Используем wget как альтернативу
+            wget --timeout=300 \
+                 --tries=3 \
+                 --retry-connrefused \
+                 --no-check-certificate \
+                 -O "$install_script" \
+                 https://get.hy2.sh/ >/dev/null 2>&1
+            return $?
+        fi
+        return 1
+    }
+    
+    # Пробуем curl сначала
     for attempt in 1 2 3; do
-        curl_output=$(timeout 120 bash <(curl -fsSL --max-time 60 --connect-timeout 10 https://get.hy2.sh/) 2>&1)
-        curl_exit_code=$?
+        echo "Попытка $attempt: Загрузка установщика через curl..."
+        download_output=$(download_installer "curl" 2>&1)
+        download_exit=$?
         
-        if [[ $curl_exit_code -eq 0 ]]; then
+        if [[ $download_exit -eq 0 ]] && [[ -f "$install_script" ]] && [[ -s "$install_script" ]]; then
             install_success=true
             break
         else
-            # Сохраняем последнюю ошибку
-            curl_error="$curl_output"
+            curl_error="$download_output"
             if [[ $attempt -lt 3 ]]; then
-                echo "Попытка $attempt не удалась. Повторная попытка через 5 секунд..."
-                sleep 5
+                echo "Попытка $attempt не удалась. Повторная попытка через 10 секунд..."
+                sleep 10
+                rm -f "$install_script" 2>/dev/null || true
             fi
         fi
     done
     
+    # Если curl не сработал, пробуем wget
+    if [[ "$install_success" == false ]] && command -v wget &> /dev/null; then
+        echo "Пробуем загрузить установщик через wget..."
+        for attempt in 1 2; do
+            download_output=$(download_installer "wget" 2>&1)
+            download_exit=$?
+            
+            if [[ $download_exit -eq 0 ]] && [[ -f "$install_script" ]] && [[ -s "$install_script" ]]; then
+                install_success=true
+                break
+            fi
+            
+            if [[ $attempt -lt 2 ]]; then
+                echo "Попытка $attempt не удалась. Повторная попытка через 10 секунд..."
+                sleep 10
+                rm -f "$install_script" 2>/dev/null || true
+            fi
+        done
+    fi
+    
     if [[ "$install_success" == false ]]; then
-        echo -e "${red}Ошибка:${NC} Не удалось загрузить и установить Hysteria после 3 попыток."
+        echo -e "${red}Ошибка:${NC} Не удалось загрузить установщик Hysteria после всех попыток."
         echo "Проверьте подключение к интернету и доступность https://get.hy2.sh/"
         if [[ -n "$curl_error" ]]; then
-            echo "Детали ошибки:"
-            echo "$curl_error" | head -5
+            echo "Последняя ошибка:"
+            echo "$curl_error" | tail -3
         fi
+        rm -f "$install_script" 2>/dev/null || true
         exit 1
     fi
+    
+    # Выполняем установщик
+    echo "Запуск установщика Hysteria..."
+    if ! bash "$install_script" >/dev/null 2>&1; then
+        echo -e "${red}Ошибка:${NC} Установщик Hysteria завершился с ошибкой."
+        rm -f "$install_script" 2>/dev/null || true
+        exit 1
+    fi
+    
+    # Удаляем временный файл
+    rm -f "$install_script" 2>/dev/null || true
     
     # Проверяем, что Hysteria действительно установлен
     if ! command -v hysteria &> /dev/null; then
