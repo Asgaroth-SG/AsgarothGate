@@ -751,6 +751,41 @@ class SubscriptionManager:
         user_info = self.hysteria_cli.get_user_info(username)
         if user_info is None:
             return "User not found"
+        
+        # Если пользователь заблокирован, возвращаем подписку с сообщением о блокировке
+        if user_info.blocked:
+            # Определяем сообщение в зависимости от причины блокировки
+            if user_info.block_reason == "traffic":
+                message = "⚠️ Трафик исчерпан"
+            elif user_info.block_reason == "expiration":
+                message = "⛔️ Подписка истекла"
+            else:
+                # По умолчанию, если причина не указана, определяем по данным пользователя
+                import time
+                from datetime import datetime, timedelta
+                now = datetime.now()
+                total_bytes = user_info.upload_bytes + user_info.download_bytes
+                expired_by_traffic = (user_info.max_download_bytes > 0 and total_bytes >= user_info.max_download_bytes)
+                
+                if expired_by_traffic:
+                    message = "⚠️ Трафик исчерпан"
+                else:
+                    message = "⛔️ Подписка истекла"
+            
+            # Формируем fake URI с сообщением
+            fake_uri = f"hysteria2://x@end.com:443?sni=support.me#{message}"
+            
+            # Для Happ клиента возвращаем подписку с fake URI
+            subscription_info = (
+                f"//subscription-userinfo: upload={user_info.upload_bytes}; "
+                f"download={user_info.download_bytes}; "
+                f"total={user_info.max_download_bytes}; "
+                f"expire={user_info.expiration_timestamp}\n"
+            )
+            profile_lines = "//profile-title: Asgaroth Gate\n//profile-update-interval: 1\n"
+            result = profile_lines + subscription_info + fake_uri
+            logger.info(f"Generated blocked subscription for {username} with message: {message}")
+            return result
 
         user_plan = Utils.normalize_plan(getattr(user_info, "plan", "standard"))
         is_premium_user = (user_plan == "premium")
@@ -1210,6 +1245,20 @@ class HysteriaServer:
         
         fake_uri = f"hysteria2://x@end.com:443?sni=support.me#{message}"
         user_agent = request.headers.get('User-Agent', '').lower()
+
+        # Обработка для Happ клиента
+        if 'happ' in user_agent:
+            # Для Happ возвращаем подписку в стандартном формате с fake URI
+            subscription_info = (
+                f"//subscription-userinfo: upload={user_info.upload_bytes}; "
+                f"download={user_info.download_bytes}; "
+                f"total={user_info.max_download_bytes}; "
+                f"expire={user_info.expiration_timestamp}\n"
+            )
+            profile_lines = "//profile-title: Asgaroth Gate\n//profile-update-interval: 1\n"
+            subscription = profile_lines + subscription_info + fake_uri
+            logger.info(f"Returning blocked subscription for Happ client: {message}")
+            return web.Response(text=subscription, content_type='text/plain')
 
         if any(browser in user_agent for browser in ['chrome', 'firefox', 'safari', 'edge', 'opera']):
             context = self._get_blocked_template_context(fake_uri, user_info, message)
