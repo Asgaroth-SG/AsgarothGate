@@ -53,6 +53,7 @@
     data-xui-sync-status-url="{{ url_for('get_xui_sync_status_api') }}"
     data-xui-sync-user-url="{{ url_for('sync_user_xui_api') }}"
     data-xui-sync-all-url="{{ url_for('sync_all_users_xui_api') }}"
+    data-xui-get-logs-url="{{ url_for('get_xui_logs_api') }}"
 >
     <div class='container-fluid'>
         <div class='row'>
@@ -710,7 +711,7 @@
                     <div class="form-group">
                         <label for="xui_server_host">Адрес сервера</label>
                         <input type="text" class="form-control" id="xui_server_host" 
-                               placeholder="https://gateway.asgaroth.ru:5560" required>
+                               placeholder="https://panel.example.com:5560" required>
                         <small class="form-text text-muted">Полный URL с протоколом (http:// или https://)</small>
                     </div>
                     <div class="form-group">
@@ -790,8 +791,14 @@
                     <div class="form-group">
                         <label for="xui_server_public_host">Публичный домен</label>
                         <input type="text" class="form-control" id="xui_server_public_host" 
-                               placeholder="gateway.asgaroth.ru">
-                        <small class="form-text text-muted">Домен reverse proxy для выдачи ссылок клиентам</small>
+                               placeholder="gateway.example.com">
+                        <small class="form-text text-muted">Если пусто — будет взят домен из адреса сервера</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="xui_server_sni">SNI</label>
+                        <input type="text" class="form-control" id="xui_server_sni" 
+                               placeholder="gateway.example.com">
+                        <small class="form-text text-muted">Если пусто — будет использован public_host</small>
                     </div>
                     <div class="row">
                         <div class="col-md-6">
@@ -801,13 +808,42 @@
                                        value="443" min="1" max="65535">
                             </div>
                         </div>
-                        <div class="col-md-6">
-                            <div class="form-group">
-                                <label for="xui_server_rewrite_from">Внутренний хост</label>
-                                <input type="text" class="form-control" id="xui_server_rewrite_from" 
-                                       value="127.0.0.1" placeholder="127.0.0.1">
-                                <small class="form-text text-muted">Хост для замены на публичный</small>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <button class="btn btn-outline-secondary btn-sm" type="button" data-toggle="collapse" data-target="#xui_advanced_public_settings"
+                                    aria-expanded="false" aria-controls="xui_advanced_public_settings">
+                                Дополнительные параметры
+                            </button>
+                        </div>
+                    </div>
+                    <div id="xui_advanced_public_settings" class="collapse">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="form-group">
+                                    <label for="xui_server_rewrite_from">Внутренний хост</label>
+                                    <input type="text" class="form-control" id="xui_server_rewrite_from" 
+                                           value="127.0.0.1" placeholder="127.0.0.1">
+                                    <small class="form-text text-muted">Хост для замены на публичный</small>
+                                </div>
                             </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group col-md-4">
+                                <label for="xui_server_xhttp_mode">xHTTP mode</label>
+                                <input type="text" class="form-control" id="xui_server_xhttp_mode" placeholder="auto">
+                            </div>
+                            <div class="form-group col-md-4">
+                                <label for="xui_server_xhttp_alpn">xHTTP ALPN</label>
+                                <input type="text" class="form-control" id="xui_server_xhttp_alpn" placeholder="h2">
+                            </div>
+                            <div class="form-group col-md-4">
+                                <label for="xui_server_xhttp_fp">xHTTP FP</label>
+                                <input type="text" class="form-control" id="xui_server_xhttp_fp" placeholder="chrome">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label for="xui_server_grpc_authority">gRPC authority</label>
+                            <input type="text" class="form-control" id="xui_server_grpc_authority" 
+                                   placeholder="например, grpc.example.com">
                         </div>
                     </div>
                     <hr>

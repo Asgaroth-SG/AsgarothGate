@@ -47,7 +47,8 @@ $(document).ready(function () {
         xuiTestConnection: contentSection.dataset.xuiTestConnectionUrl,
         xuiSyncStatus: contentSection.dataset.xuiSyncStatusUrl,
         xuiSyncUser: contentSection.dataset.xuiSyncUserUrl,
-        xuiSyncAll: contentSection.dataset.xuiSyncAllUrl
+        xuiSyncAll: contentSection.dataset.xuiSyncAllUrl,
+        xuiGetLogs: contentSection.dataset.xuiGetLogsUrl || '/api/v1/config/xui/logs'
     };
 
     initUI();
@@ -175,6 +176,43 @@ $(document).ready(function () {
     function isValidPositiveNumber(value) {
         if (!value) return false;
         return /^[0-9]+$/.test(value) && parseInt(value) > 0;
+    }
+
+    function extractHostnameFromUrl(url) {
+        if (!url) return '';
+        const raw = url.toString().trim();
+        if (!raw) return '';
+        let candidate = raw;
+        if (!candidate.includes('://')) {
+            candidate = `https://${candidate}`;
+        }
+        try {
+            const parsed = new URL(candidate);
+            return parsed.hostname || '';
+        } catch (e) {
+            const hostPart = raw.split('/')[0];
+            return hostPart.split(':')[0] || '';
+        }
+    }
+
+    function autofillXuiPublicFields() {
+        const hostValue = $('#xui_server_host').val().trim();
+        const derivedHost = extractHostnameFromUrl(hostValue);
+        if (!derivedHost) return;
+        
+        const nameField = $('#xui_server_name');
+        const publicHostField = $('#xui_server_public_host');
+        const sniField = $('#xui_server_sni');
+        
+        if (!nameField.val().trim()) {
+            nameField.val(derivedHost);
+        }
+        if (!publicHostField.val().trim()) {
+            publicHostField.val(derivedHost);
+        }
+        if (!sniField.val().trim()) {
+            sniField.val(derivedHost);
+        }
     }
 
     function confirmAction(actionName, callback) {
@@ -1340,6 +1378,11 @@ $(document).ready(function () {
         }
     });
 
+    // Автозаполнение публичных полей при вводе адреса
+    $(document).on('blur', '#xui_server_host', function () {
+        autofillXuiPublicFields();
+    });
+
 
     // Переключение видимости логов
     $('#xui_toggle_logs_btn').on('click', function () {
@@ -1534,6 +1577,7 @@ $(document).ready(function () {
         
         const btn = tile.find('.xui-test-server-btn');
         const statusBadge = tile.find('.badge').first();
+        const statusTextContainer = tile.find('.card-text').last();
         
         // Показываем индикатор загрузки только если это не автоматическая проверка
         if (showNotification) {
@@ -1558,13 +1602,31 @@ $(document).ready(function () {
                 
                 if (data.healthy) {
                     statusBadge.removeClass('badge-danger badge-secondary').addClass('badge-success').text('Online');
-                    if (statusTextContainer.length && !statusTextContainer.find('.badge').length) {
-                        statusTextContainer.html(`<span class="badge badge-secondary">${escapeHtml(data.message)}</span>`);
-                    } else if (statusTextContainer.length) {
-                        statusTextContainer.find('.badge').text(escapeHtml(data.message));
+                    // Обновляем пинг вместо status_text
+                    if (data.ping_ms !== undefined && data.ping_ms !== null) {
+                        const pingValue = data.ping_ms.toFixed(0);
+                        // Ищем элемент с пингом или создаем новый
+                        let pingElement = tile.find('.card-text').filter(function() {
+                            return $(this).html().includes('Пинг:');
+                        });
+                        if (pingElement.length) {
+                            pingElement.html(`<i class="fas fa-network-wired"></i> Пинг: <strong>${pingValue} мс</strong>`);
+                        } else {
+                            // Вставляем после host (первый .card-text)
+                            tile.find('.card-text').first().after(`<p class="card-text small mb-2"><i class="fas fa-network-wired"></i> Пинг: <strong>${pingValue} мс</strong></p>`);
+                        }
+                    }
+                    // Удаляем старый status_text если есть
+                    statusTextContainer.find('.badge').remove();
+                    if (statusTextContainer.length && statusTextContainer.text().trim() === '') {
+                        statusTextContainer.remove();
                     }
                 } else {
                     statusBadge.removeClass('badge-success badge-secondary').addClass('badge-danger').text('Offline');
+                    // Удаляем пинг при ошибке
+                    tile.find('.card-text').filter(function() {
+                        return $(this).html().includes('Пинг:');
+                    }).remove();
                     if (statusTextContainer.length && !statusTextContainer.find('.badge').length) {
                         statusTextContainer.html(`<span class="badge badge-secondary">${escapeHtml(data.message)}</span>`);
                     } else if (statusTextContainer.length) {
@@ -1574,9 +1636,10 @@ $(document).ready(function () {
                 
                 // Показываем уведомление только если это ручная проверка
                 if (showNotification && window.showToast) {
+                    const notificationMessage = data.healthy ? 'Сервер Online' : data.message;
                     showToast(data.healthy ? 'success' : 'error', 
                         data.healthy ? 'Успешно' : 'Ошибка', 
-                        data.message, 
+                        notificationMessage, 
                         { timer: data.healthy ? 3000 : 5000 });
                 }
             },
@@ -1584,7 +1647,6 @@ $(document).ready(function () {
                 if (state[index].requestId !== currentRequestId) return;
                 const error = extractErrorMessage(xhr, 'Не удалось проверить сервер');
                 const statusBadge = tile.find('.badge').first();
-                const statusTextContainer = tile.find('.card-text').last();
                 statusBadge.removeClass('badge-success badge-secondary').addClass('badge-danger').text('Error');
                 if (statusTextContainer.length) {
                     if (!statusTextContainer.find('.badge').length) {
@@ -1618,10 +1680,17 @@ $(document).ready(function () {
         const name = escapeHtml(server.name || server.host || `Сервер ${index + 1}`);
         const host = escapeHtml(server.host || '');
         const status = server.status || 'unknown';
-        const statusText = server.status_text || '';
+        const pingMs = server.ping_ms !== undefined && server.ping_ms !== null ? server.ping_ms : null;
         const statusClass = status === 'online' ? 'success' : status === 'offline' ? 'danger' : 'secondary';
         const statusLabel = status === 'online' ? 'Online' : status === 'offline' ? 'Offline' : 'Unknown';
         const enabled = server.enabled !== false;
+        
+        // Форматируем пинг
+        let pingDisplay = '';
+        if (pingMs !== null && pingMs !== undefined) {
+            const pingValue = pingMs.toFixed(0);
+            pingDisplay = `<p class="card-text small mb-2"><i class="fas fa-network-wired"></i> Пинг: <strong>${pingValue} мс</strong></p>`;
+        }
 
         return $(`
             <div class="col-md-6 col-lg-4 mb-3">
@@ -1632,7 +1701,7 @@ $(document).ready(function () {
                             <span class="badge badge-${statusClass}">${statusLabel}</span>
                         </div>
                         <p class="card-text text-muted small mb-2">${host}</p>
-                        ${statusText ? `<p class="card-text small mb-2"><span class="badge badge-secondary">${escapeHtml(statusText)}</span></p>` : ''}
+                        ${pingDisplay}
                         <div class="d-flex justify-content-end" style="gap: 0.25rem;">
                             <button type="button" class="btn btn-xs btn-info xui-test-server-btn" data-index="${index}" 
                                     ${!enabled ? 'disabled' : ''} data-toggle="tooltip" data-placement="top" title="Тест" aria-label="Тест">
@@ -1707,8 +1776,13 @@ $(document).ready(function () {
         $('#xui_server_verify_tls').prop('checked', true);
         // Публичный доступ
         $('#xui_server_public_host').val('');
+        $('#xui_server_sni').val('');
         $('#xui_server_public_port').val(443);
         $('#xui_server_rewrite_from').val('127.0.0.1');
+        $('#xui_server_xhttp_mode').val('auto');
+        $('#xui_server_xhttp_alpn').val('h2');
+        $('#xui_server_xhttp_fp').val('chrome');
+        $('#xui_server_grpc_authority').val('');
         $('#xuiServerModal').modal('show');
     });
 
@@ -1754,8 +1828,13 @@ $(document).ready(function () {
                 
                 // Публичный доступ
                 $('#xui_server_public_host').val(server.public_host || '');
+                $('#xui_server_sni').val(server.sni || server.public_host || '');
                 $('#xui_server_public_port').val(server.public_port || 443);
                 $('#xui_server_rewrite_from').val(server.link_host_rewrite_from || '127.0.0.1');
+                $('#xui_server_xhttp_mode').val(server.xhttp_mode || 'auto');
+                $('#xui_server_xhttp_alpn').val(server.xhttp_alpn || 'h2');
+                $('#xui_server_xhttp_fp').val(server.xhttp_fp || 'chrome');
+                $('#xui_server_grpc_authority').val(server.grpc_authority || '');
 
                 $('#xuiServerModal').modal('show');
             }
@@ -1837,10 +1916,18 @@ $(document).ready(function () {
             cache: false, // Отключаем кеширование для получения актуальных данных
             success: function (data) {
                 const serverIndex = parseInt($('#xui_server_index').val());
-                // Получаем публичные параметры
-                const publicHost = $('#xui_server_public_host').val().trim() || null;
+                // Получаем публичные параметры (автозаполнение при пустых значениях)
+                const derivedPublicHost = extractHostnameFromUrl(host);
+                const publicHostInput = $('#xui_server_public_host').val().trim();
+                const sniInput = $('#xui_server_sni').val().trim();
+                const publicHost = publicHostInput || derivedPublicHost || null;
                 const publicPort = parseInt($('#xui_server_public_port').val()) || 443;
                 const rewriteFrom = $('#xui_server_rewrite_from').val().trim() || '127.0.0.1';
+                const sni = sniInput || publicHost || null;
+                const xhttpMode = $('#xui_server_xhttp_mode').val().trim() || null;
+                const xhttpAlpn = $('#xui_server_xhttp_alpn').val().trim() || null;
+                const xhttpFp = $('#xui_server_xhttp_fp').val().trim() || null;
+                const grpcAuthority = $('#xui_server_grpc_authority').val().trim() || null;
                 
                 const newServer = {
                     name: name,
@@ -1857,7 +1944,12 @@ $(document).ready(function () {
                     // Публичный доступ для Normal Sub
                     public_host: publicHost,
                     public_port: publicPort,
-                    link_host_rewrite_from: rewriteFrom
+                    link_host_rewrite_from: rewriteFrom,
+                    sni: sni,
+                    xhttp_mode: xhttpMode,
+                    xhttp_alpn: xhttpAlpn,
+                    xhttp_fp: xhttpFp,
+                    grpc_authority: grpcAuthority
                 };
 
                 // Обновляем или добавляем сервер
@@ -1870,6 +1962,9 @@ $(document).ready(function () {
                     // Сохраняем публичные поля если они не были указаны явно
                     if (!newServer.public_host && oldServer.public_host) {
                         newServer.public_host = oldServer.public_host;
+                    }
+                    if (!newServer.sni && oldServer.sni) {
+                        newServer.sni = oldServer.sni;
                     }
                     data.xui_servers[serverIndex] = newServer;
                 } else {
@@ -2233,16 +2328,46 @@ $(document).ready(function () {
         btn.prop('disabled', true);
         btn.find('.spinner-border').show();
 
-        // Заглушка - в реальности нужен API endpoint для логов
-        setTimeout(function () {
-            if (state.requestId !== currentRequestId) return;
-            
-            $('#xui_logs_display').val('Логи синхронизации\n\n[API endpoint для логов не реализован]');
-            state.inProgress = false;
-            state.requestId = null;
-            btn.prop('disabled', false);
-            btn.find('.spinner-border').hide();
-        }, 500);
+        // Загружаем логи через API
+        $.ajax({
+            url: API_URLS.xuiGetLogs,
+            method: 'GET',
+            data: { lines: lines },
+            cache: false,
+            success: function (data) {
+                if (state.requestId !== currentRequestId) return;
+                
+                if (data.success) {
+                    $('#xui_logs_display').val(data.logs || 'Логи пусты');
+                    if (window.showToast) {
+                        showToast('success', 'Успешно', 
+                            `Загружено ${data.lines_count || 0} строк логов`, 
+                            { timer: 2000 });
+                    }
+                } else {
+                    $('#xui_logs_display').val('Ошибка загрузки логов');
+                    if (window.showToast) {
+                        showToast('error', 'Ошибка', 'Не удалось загрузить логи', { timer: 3000 });
+                    }
+                }
+            },
+            error: function (xhr) {
+                if (state.requestId !== currentRequestId) return;
+                const error = extractErrorMessage(xhr, 'Не удалось загрузить логи');
+                $('#xui_logs_display').val(`Ошибка: ${error}`);
+                if (window.showToast) {
+                    showToast('error', 'Ошибка', error, { timer: 3000 });
+                }
+            },
+            complete: function () {
+                if (state.requestId === currentRequestId) {
+                    state.inProgress = false;
+                    state.requestId = null;
+                    btn.prop('disabled', false);
+                    btn.find('.spinner-border').hide();
+                }
+            }
+        });
     });
 
     // Копирование логов

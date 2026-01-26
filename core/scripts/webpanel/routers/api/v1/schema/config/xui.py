@@ -36,6 +36,26 @@ class XUIServerConfig(BaseModel):
         le=65535,
         description="Публичный порт reverse proxy (по умолчанию 443)"
     )
+    sni: Optional[str] = Field(
+        None,
+        description="SNI для публичных ссылок (по умолчанию public_host)"
+    )
+    xhttp_alpn: Optional[str] = Field(
+        None,
+        description="ALPN для xHTTP (по умолчанию h2)"
+    )
+    xhttp_fp: Optional[str] = Field(
+        None,
+        description="Fingerprint для xHTTP (по умолчанию chrome)"
+    )
+    xhttp_mode: Optional[str] = Field(
+        None,
+        description="Mode для xHTTP (по умолчанию auto)"
+    )
+    grpc_authority: Optional[str] = Field(
+        None,
+        description="Authority для gRPC (опционально)"
+    )
     link_host_rewrite_from: Optional[str] = Field(
         "127.0.0.1",
         description="Внутренний хост для переписывания (по умолчанию 127.0.0.1)"
@@ -153,3 +173,4 @@ class XUIServerHealthResponse(BaseModel):
     healthy: bool
     message: str
     inbounds_count: Optional[int] = None
+    ping_ms: Optional[float] = None  # Пинг до сервера в миллисекундах

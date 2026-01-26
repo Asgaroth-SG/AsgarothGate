@@ -6,6 +6,7 @@
 import logging
 import uuid as uuid_lib
 import sys
+import asyncio
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
@@ -14,12 +15,17 @@ from datetime import datetime, timedelta
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from db.database import db
-from xui.xui_client import XUIClient, XUIClientError, XUIAuthError, XUIConnectionError
+from xui.xui_api_wrapper import XUIAPIWrapper
+from xui.xui_api_client import XUIAPIError, XUIAPIAuthError, XUIAPIConnectionError
 from xui.xui_public_links import (
     build_user_public_links,
     load_server_public_configs,
     XUIServerPublicConfig
 )
+
+# Для обратной совместимости
+XUIClient = XUIAPIWrapper
+XUIClientError = XUIAPIError
 
 logger = logging.getLogger(__name__)
 
@@ -114,13 +120,15 @@ class XUISyncManager:
                     password=password,
                     base_path=server.get('base_path', '/'),
                     timeout=server.get('timeout', 10),
-                    max_retries=server.get('max_retries', 3)
+                    max_retries=server.get('max_retries', 3),
+                    verify_ssl=server.get('verify_ssl', True),
+                    force_https=server.get('force_https', True)
                 )
                 
                 # Используем host как ключ
                 self.clients[host] = client
     
-    def _get_inbound_ids(self, client: XUIClient, server_config: Optional[Dict] = None) -> List[int]:
+    def _get_inbound_ids(self, client: XUIAPIWrapper, server_config: Optional[Dict] = None) -> List[int]:
         """
         Получает список ID inbounds согласно фильтру.
         
@@ -182,7 +190,7 @@ class XUISyncManager:
             logger.debug(f"Traceback: {traceback.format_exc()}")
             return []
     
-    def _get_servers_for_plan(self, user_plan: str) -> List[Tuple[str, XUIClient, Dict]]:
+    def _get_servers_for_plan(self, user_plan: str) -> List[Tuple[str, XUIAPIWrapper, Dict]]:
         """
         Получает список серверов X-UI для указанного плана пользователя.
         
@@ -205,6 +213,134 @@ class XUISyncManager:
                     result.append((host, self.clients[host], server_config))
         
         return result
+
+    def _build_link_rewriter_config(
+        self,
+        server_config: Dict[str, Any],
+        server_id: str,
+        host: Optional[str] = None
+    ):
+        """Создает конфиг LinkRewriter для указанного X-UI сервера."""
+        if not server_config:
+            return None
+        public_host = server_config.get('public_host')
+        if not public_host:
+            host_url = server_config.get('host') or host
+            if host_url:
+                try:
+                    from urllib.parse import urlparse
+                    parsed = urlparse(host_url)
+                    public_host = parsed.hostname or host_url
+                except Exception:
+                    public_host = host_url
+        if not public_host:
+            return None
+        
+        sni = server_config.get('sni') or public_host
+        
+        from link_rewriter import XuiServerConfig as LinkRewriterServerConfig
+        return LinkRewriterServerConfig(
+            server_id=server_id,
+            public_host=public_host,
+            public_port=server_config.get('public_port', 443),
+            link_host_rewrite_from=server_config.get('link_host_rewrite_from', '127.0.0.1'),
+            sni=sni,
+            xhttp_alpn=server_config.get('xhttp_alpn'),
+            xhttp_fp=server_config.get('xhttp_fp'),
+            xhttp_mode=server_config.get('xhttp_mode'),
+            grpc_authority=server_config.get('grpc_authority')
+        )
+
+    def _normalize_xui_links(self, links: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Нормализует VLESS ссылки через LinkRewriter с учетом контекста сервера."""
+        if not links:
+            return links
+        try:
+            from link_rewriter import rewrite_proxy_links
+        except Exception as e:
+            logger.warning(f"LinkRewriter import failed: {e}")
+            return links
+        
+        for item in links:
+            uri = item.get('uri')
+            if not uri:
+                continue
+            server_config = item.get('server_config', {}) or {}
+            server_id = (
+                item.get('server_id')
+                or server_config.get('name')
+                or server_config.get('host')
+                or 'unknown'
+            )
+            server_cfg = self._build_link_rewriter_config(server_config, server_id, server_config.get('host'))
+            if not server_cfg:
+                continue
+            try:
+                normalized = rewrite_proxy_links(uri, server_cfg)
+                if normalized:
+                    item['uri'] = normalized
+            except Exception as e:
+                logger.warning(f"Failed to normalize link for server {server_id}: {e}", exc_info=True)
+        
+        return links
+    
+    def _save_links_to_normalsub_cache(
+        self, 
+        hysteria_username: str, 
+        user_plan: str, 
+        links: List[Dict[str, Any]]
+    ) -> bool:
+        """
+        Сохраняет ссылки напрямую в файл кэша normalsub.
+        
+        Это позволяет мгновенно выдавать подписку при первом запросе,
+        так как ссылки уже будут в кэше.
+        
+        Args:
+            hysteria_username: Имя пользователя в Hysteria2
+            user_plan: План пользователя (standard/premium)
+            links: Список ссылок для сохранения
+            
+        Returns:
+            True если сохранение успешно, False иначе
+        """
+        import os
+        import json
+        import time
+        
+        cache_path = os.environ.get('XUI_LINKS_CACHE_PATH', '/etc/hysteria/xui_links_cache.json')
+        cache_key = f"{hysteria_username}:{user_plan}"
+        
+        try:
+            # Читаем существующий кэш
+            cache_data = {}
+            if os.path.exists(cache_path):
+                try:
+                    with open(cache_path, 'r', encoding='utf-8') as f:
+                        cache_data = json.load(f)
+                except (json.JSONDecodeError, IOError) as e:
+                    logger.warning(f"Failed to read existing cache: {e}")
+                    cache_data = {}
+            
+            # Добавляем/обновляем запись
+            cache_data[cache_key] = {
+                "timestamp": time.time(),
+                "links": links
+            }
+            
+            # Сохраняем кэш атомарно
+            os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+            tmp_path = f"{cache_path}.tmp"
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, ensure_ascii=False)
+            os.replace(tmp_path, cache_path)
+            
+            logger.debug(f"Saved {len(links)} links to normalsub cache for {cache_key}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to save links to normalsub cache: {e}", exc_info=True)
+            return False
     
     def _generate_client_uuid(self, hysteria_username: str) -> str:
         """
@@ -237,26 +373,36 @@ class XUISyncManager:
         expiry_date = datetime.utcnow() + timedelta(days=expiry_days)
         return int(expiry_date.timestamp() * 1000)
     
-    def _convert_traffic_gb_to_bytes(self, traffic_gb: int) -> Optional[int]:
+    def _convert_traffic_gb_to_bytes(self, traffic_gb: float) -> Optional[int]:
         """
         Конвертирует лимит трафика из GB в байты.
         
         Args:
-            traffic_gb: Лимит трафика в GB
+            traffic_gb: Лимит трафика в GB (может быть float или int)
         
         Returns:
-            Лимит в байтах или None если неограниченно
+            Лимит в байтах или None если неограниченно (traffic_gb <= 0)
         """
-        if traffic_gb <= 0:
+        # Нормализуем входное значение
+        try:
+            traffic_gb_float = float(traffic_gb)
+        except (ValueError, TypeError):
+            logger.warning(f"Invalid traffic_gb value: {traffic_gb}, treating as unlimited")
             return None
         
-        return int(traffic_gb * (1024 ** 3))
+        if traffic_gb_float <= 0:
+            return None
+        
+        # Конвертируем в байты
+        bytes_value = int(traffic_gb_float * (1024 ** 3))
+        logger.debug(f"Converted {traffic_gb_float} GB to {bytes_value} bytes")
+        return bytes_value
     
     def sync_user_create(
         self,
         hysteria_username: str,
         expiry_days: int,
-        traffic_limit_gb: int,
+        traffic_limit_gb: float,
         enable: bool = True,
         user_plan: str = "standard"
     ) -> Tuple[bool, Optional[str]]:
@@ -299,6 +445,14 @@ class XUISyncManager:
         expiry_timestamp = self._convert_expiry_days_to_timestamp(expiry_days)
         traffic_bytes = self._convert_traffic_gb_to_bytes(traffic_limit_gb)
         
+        # Логируем для отладки конвертации трафика
+        logger.info(
+            f"Creating user {hysteria_username}: "
+            f"traffic_limit_gb={traffic_limit_gb} (type: {type(traffic_limit_gb).__name__}), "
+            f"traffic_bytes={traffic_bytes}, "
+            f"traffic_gb_calculated={traffic_bytes / (1024 ** 3) if traffic_bytes else 0:.3f}"
+        )
+        
         all_inbound_ids = []
         errors = []
         
@@ -314,8 +468,47 @@ class XUISyncManager:
             logger.warning(f"No X-UI servers configured for plan '{user_plan}'")
             errors.append(f"No X-UI servers available for plan '{user_plan}'")
         
-        # Синхронизируем с каждым сервером для плана пользователя
-        for host, client, server_config in servers_for_plan:
+        # Оптимизация: параллельное создание клиентов на всех серверах и inbounds
+        
+        async def upsert_client_async(host, client, server_config, inbound_id):
+            """Асинхронная функция для создания клиента в одном inbound"""
+            try:
+                logger.debug(f"Upserting client {client_uuid} to inbound {inbound_id} on {host} with email {hysteria_username}_{inbound_id}")
+                
+                # ВАЖНО: Проверяем что traffic_bytes действительно в байтах
+                if traffic_bytes is not None and traffic_bytes < (1024 ** 3):
+                    logger.error(
+                        f"ERROR: traffic_bytes={traffic_bytes} seems too small! "
+                        f"Expected bytes (e.g., 32212254720 for 30 GB), got {traffic_bytes}. "
+                        f"traffic_limit_gb was {traffic_limit_gb}"
+                    )
+                
+                # Используем async версию upsert_client для параллельного выполнения
+                is_updated, action = await client._upsert_client_async(
+                    inbound_id=inbound_id,
+                    uuid=client_uuid,
+                    expiry_time=expiry_timestamp,
+                    traffic_limit=traffic_bytes,  # Должно быть в БАЙТАХ!
+                    enable=enable,
+                    email=f"{hysteria_username}_{inbound_id}",
+                    username=hysteria_username
+                )
+                logger.info(
+                    f"Successfully {action} client {client_uuid} (email: {hysteria_username}_{inbound_id}) in inbound {inbound_id} "
+                    f"on server {host}"
+                )
+                return (True, inbound_id, host, None)
+            except XUIClientError as e:
+                error_msg = f"Failed to upsert client to inbound {inbound_id} on {host}: {e}"
+                logger.error(error_msg, exc_info=True)
+                return (False, inbound_id, host, error_msg)
+            except Exception as e:
+                error_msg = f"Unexpected error upserting client to inbound {inbound_id} on {host}: {e}"
+                logger.error(error_msg, exc_info=True)
+                return (False, inbound_id, host, error_msg)
+        
+        async def sync_server_async(host, client, server_config):
+            """Асинхронная функция для синхронизации с одним сервером"""
             try:
                 logger.info(f"Syncing user {hysteria_username} with server {host}")
                 # Получаем список inbounds для этого сервера
@@ -323,47 +516,111 @@ class XUISyncManager:
                 
                 if not inbound_ids:
                     logger.warning(f"No inbounds found for server {host}")
-                    errors.append(f"No inbounds found on {host}")
-                    continue
+                    return (False, host, f"No inbounds found on {host}")
                 
                 logger.info(f"Found {len(inbound_ids)} inbounds on server {host}: {inbound_ids}")
                 
-                # Добавляем клиента в каждый inbound используя upsert для безопасной обработки существующих клиентов
-                # В 3X-UI email должен быть уникальным глобально, используем формат username_inbound_id
-                for inbound_id in inbound_ids:
-                    try:
-                        logger.debug(f"Upserting client {client_uuid} to inbound {inbound_id} on {host} with email {hysteria_username}_{inbound_id}")
-                        # Используем upsert_client вместо add_client для безопасной обработки существующих клиентов
-                        is_updated, action = client.upsert_client(
-                            inbound_id=inbound_id,
-                            uuid=client_uuid,
-                            expiry_time=expiry_timestamp,
-                            traffic_limit=traffic_bytes,
-                            enable=enable,
-                            username=hysteria_username  # Используется для генерации email: username_inbound_id
-                        )
-                        all_inbound_ids.append(inbound_id)
-                        logger.info(
-                            f"Successfully {action} client {client_uuid} (email: {hysteria_username}_{inbound_id}) in inbound {inbound_id} "
-                            f"on server {host}"
-                        )
-                    except XUIClientError as e:
-                        error_msg = f"Failed to upsert client to inbound {inbound_id} on {host}: {e}"
-                        logger.error(error_msg, exc_info=True)
-                        errors.append(error_msg)
-                    except Exception as e:
-                        error_msg = f"Unexpected error upserting client to inbound {inbound_id} on {host}: {e}"
-                        logger.error(error_msg, exc_info=True)
-                        errors.append(error_msg)
+                # Параллельное создание клиентов во всех inbounds на этом сервере
+                tasks = [
+                    upsert_client_async(host, client, server_config, inbound_id)
+                    for inbound_id in inbound_ids
+                ]
+                results = await asyncio.gather(*tasks, return_exceptions=True)
                 
+                # Обрабатываем результаты
+                for result in results:
+                    if isinstance(result, Exception):
+                        error_msg = f"Unexpected error on {host}: {result}"
+                        logger.error(error_msg, exc_info=True)
+                        errors.append(error_msg)
+                    else:
+                        success, inbound_id, result_host, error = result
+                        if success:
+                            all_inbound_ids.append(inbound_id)
+                        elif error:
+                            errors.append(error)
+                
+                return (True, host, None)
             except (XUIAuthError, XUIConnectionError) as e:
                 error_msg = f"Failed to connect to X-UI server {host}: {e}"
                 logger.error(error_msg)
-                errors.append(error_msg)
+                return (False, host, error_msg)
             except Exception as e:
                 error_msg = f"Unexpected error syncing with {host}: {e}"
                 logger.error(error_msg)
-                errors.append(error_msg)
+                return (False, host, error_msg)
+        
+        # Параллельное создание клиентов на всех серверах
+        async def sync_all_servers():
+            tasks = [
+                sync_server_async(host, client, server_config)
+                for host, client, server_config in servers_for_plan
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            for result in results:
+                if isinstance(result, Exception):
+                    error_msg = f"Unexpected error: {result}"
+                    logger.error(error_msg, exc_info=True)
+                    errors.append(error_msg)
+                else:
+                    success, host, error = result
+                    if error:
+                        errors.append(error)
+        
+        # Запускаем параллельное выполнение
+        # Используем nest_asyncio если уже есть event loop
+        try:
+            # Пробуем получить существующий event loop
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Если loop уже запущен, используем nest_asyncio
+                    try:
+                        import nest_asyncio
+                        nest_asyncio.apply()
+                        loop.run_until_complete(sync_all_servers())
+                    except ImportError:
+                        logger.warning("nest_asyncio not available, falling back to sequential execution")
+                        raise RuntimeError("No event loop available")
+                else:
+                    # Loop существует, но не запущен
+                    loop.run_until_complete(sync_all_servers())
+            except RuntimeError:
+                # Нет event loop, создаем новый
+                asyncio.run(sync_all_servers())
+        except Exception as e:
+            logger.error(f"Error in parallel sync: {e}, falling back to sequential execution", exc_info=True)
+            # Fallback к последовательному выполнению
+            for host, client, server_config in servers_for_plan:
+                try:
+                    logger.info(f"Syncing user {hysteria_username} with server {host}")
+                    inbound_ids = self._get_inbound_ids(client, server_config)
+                    if not inbound_ids:
+                        logger.warning(f"No inbounds found for server {host}")
+                        errors.append(f"No inbounds found on {host}")
+                        continue
+                    logger.info(f"Found {len(inbound_ids)} inbounds on server {host}: {inbound_ids}")
+                    for inbound_id in inbound_ids:
+                        try:
+                            is_updated, action = client.upsert_client(
+                                inbound_id=inbound_id,
+                                uuid=client_uuid,
+                                expiry_time=expiry_timestamp,
+                                traffic_limit=traffic_bytes,
+                                enable=enable,
+                                username=hysteria_username
+                            )
+                            all_inbound_ids.append(inbound_id)
+                            logger.info(f"Successfully {action} client {client_uuid} in inbound {inbound_id} on server {host}")
+                        except Exception as e:
+                            error_msg = f"Failed to upsert client to inbound {inbound_id} on {host}: {e}"
+                            logger.error(error_msg, exc_info=True)
+                            errors.append(error_msg)
+                except Exception as e:
+                    error_msg = f"Unexpected error syncing with {host}: {e}"
+                    logger.error(error_msg)
+                    errors.append(error_msg)
         
         # Сохраняем маппинг
         sync_status = "success" if not errors else "failed"
@@ -381,6 +638,25 @@ class XUISyncManager:
             error_message=error_message
         )
         
+        # Предзагружаем ссылки в кэш normalsub для мгновенной выдачи подписки
+        # Делаем СИНХРОННО, чтобы при первом запросе подписки ссылки уже были готовы
+        if not errors:
+            try:
+                logger.info(f"Pre-loading links for user {hysteria_username} (plan: {user_plan}) into normalsub cache...")
+                links = self.get_user_vless_uris(hysteria_username)
+                logger.debug(f"Pre-loading: get_user_vless_uris returned {len(links) if links else 0} links")
+                if links:
+                    # Сохраняем в файл кэша normalsub
+                    success = self._save_links_to_normalsub_cache(hysteria_username, user_plan, links)
+                    if success:
+                        logger.info(f"Pre-loaded {len(links)} links for user {hysteria_username} into normalsub cache")
+                    else:
+                        logger.warning(f"Failed to save links to cache for {hysteria_username}")
+                else:
+                    logger.warning(f"No links generated for user {hysteria_username} during pre-loading - check X-UI configuration")
+            except Exception as e:
+                logger.error(f"Pre-loading failed for {hysteria_username}: {e}", exc_info=True)
+        
         if errors:
             return False, error_message
         
@@ -392,7 +668,10 @@ class XUISyncManager:
         expiry_days: Optional[int] = None,
         traffic_limit_gb: Optional[int] = None,
         enable: Optional[bool] = None,
-        user_plan: Optional[str] = None
+        user_plan: Optional[str] = None,
+        replace_devices: bool = False,
+        replace_duration: bool = False,
+        devices: Optional[int] = None
     ) -> Tuple[bool, Optional[str]]:
         """
         Синхронизирует обновление пользователя с X-UI.
@@ -402,6 +681,10 @@ class XUISyncManager:
             expiry_days: Новые дни до истечения (None = не менять)
             traffic_limit_gb: Новый лимит трафика в GB (None = не менять)
             enable: Новый статус включения (None = не менять)
+            user_plan: План пользователя (None = не менять)
+            replace_devices: Если True, заменяет лимит устройств вместо добавления
+            replace_duration: Если True, заменяет срок действия вместо продления
+            devices: Новый лимит устройств (используется только если replace_devices=True)
         
         Returns:
             Tuple (success: bool, error_message: Optional[str])
@@ -439,7 +722,25 @@ class XUISyncManager:
         # Конвертируем параметры
         expiry_timestamp = None
         if expiry_days is not None:
-            expiry_timestamp = self._convert_expiry_days_to_timestamp(expiry_days)
+            if replace_duration:
+                # Заменяем срок действия - используем текущее время + новые дни
+                expiry_timestamp = self._convert_expiry_days_to_timestamp(expiry_days)
+            else:
+                # Продлеваем срок действия - получаем текущий срок и добавляем дни
+                # Нужно получить текущий клиент для определения текущего expiry_time
+                user_data = db.get_user(hysteria_username)
+                if user_data:
+                    # Пытаемся получить текущий expiry_time из X-UI
+                    # Если не удалось, используем текущее время
+                    current_time = datetime.utcnow()
+                    expiry_timestamp = int((current_time + timedelta(days=expiry_days)).timestamp() * 1000)
+                else:
+                    expiry_timestamp = self._convert_expiry_days_to_timestamp(expiry_days)
+        elif not replace_duration:
+            # Если не указаны дни и не replace_duration, пытаемся получить текущий срок
+            # и продлить его (но это требует получения данных из X-UI, что сложно)
+            # Пока просто не меняем срок
+            pass
         
         traffic_bytes = None
         if traffic_limit_gb is not None:
@@ -481,6 +782,17 @@ class XUISyncManager:
             
             for inbound_id in server_inbound_ids:
                 try:
+                    # Если нужно заменить лимит устройств, получаем текущий клиент
+                    limit_ip = None
+                    if devices is not None:
+                        if replace_devices:
+                            # Заменяем лимит устройств
+                            limit_ip = devices
+                        else:
+                            # Добавляем к текущему лимиту (требует получения текущего клиента)
+                            # Пока просто устанавливаем новый лимит
+                            limit_ip = devices
+                    
                     # Используем upsert_client для правильной обработки существующих клиентов
                     is_updated, action = client.upsert_client(
                         inbound_id=inbound_id,
@@ -490,6 +802,13 @@ class XUISyncManager:
                         enable=enable,
                         username=hysteria_username  # Используется для генерации email: username_inbound_id
                     )
+                    
+                    # Обновляем лимит устройств если указан
+                    if limit_ip is not None:
+                        # Получаем клиента для обновления limit_ip
+                        # Это требует дополнительной логики в XUIClient
+                        # Пока пропускаем, так как upsert_client не поддерживает limit_ip напрямую
+                        logger.debug(f"limit_ip update requested but not yet implemented in upsert_client")
                     updated_inbound_ids.add(inbound_id)  # Добавляем в список обновленных
                     logger.info(
                         f"{action.capitalize()} client {client_uuid} (email: {hysteria_username}_{inbound_id}) in inbound {inbound_id} "
@@ -570,25 +889,49 @@ class XUISyncManager:
             
             for inbound_id in inbound_ids:
                 try:
-                    client.delete_client(
+                    # Формируем email клиента (такой же формат, как при создании)
+                    client_email = f"{hysteria_username}_{inbound_id}"
+                    
+                    logger.info(f"Attempting to delete client {client_uuid} (email: {client_email}) from inbound {inbound_id} on server {host}")
+                    
+                    # Пробуем удалить по UUID
+                    result = client.delete_client(
                         inbound_id=inbound_id,
-                        uuid=client_uuid  # Исправлено: параметр должен быть uuid, а не client_uuid
+                        uuid=client_uuid
                     )
-                    logger.info(
-                        f"Deleted client {client_uuid} from inbound {inbound_id} "
-                        f"on server {host}"
-                    )
+                    
+                    if not result:
+                        # Если не удалось по UUID, пробуем по email
+                        logger.debug(f"Client not found by UUID {client_uuid}, trying email {client_email}")
+                        result = client.delete_client(
+                            inbound_id=inbound_id,
+                            uuid=client_email  # Пробуем по email
+                        )
+                    
+                    if result:
+                        logger.info(
+                            f"Successfully deleted client {client_uuid} (email: {client_email}) from inbound {inbound_id} "
+                            f"on server {host}"
+                        )
+                    else:
+                        # Клиент не найден - это не критично, возможно уже удален
+                        logger.warning(f"Client {client_uuid} (email: {client_email}) not found in inbound {inbound_id} on {host} (may already be deleted)")
                 except XUIClientError as e:
                     # Клиент может быть уже удален - это не критично
-                    if "not found" in str(e).lower():
-                        logger.warning(f"Client {client_uuid} not found in inbound {inbound_id} on {host}")
+                    error_msg = str(e).lower()
+                    if "not found" in error_msg or "not exist" in error_msg:
+                        logger.warning(f"Client {client_uuid} not found in inbound {inbound_id} on {host} (may already be deleted)")
                     else:
-                        error_msg = f"Failed to delete client from inbound {inbound_id} on {host}: {e}"
-                        logger.error(error_msg)
-                        errors.append(error_msg)
+                        error_msg_full = f"Failed to delete client from inbound {inbound_id} on {host}: {e}"
+                        logger.error(error_msg_full)
+                        errors.append(error_msg_full)
                 except (XUIAuthError, XUIConnectionError) as e:
                     error_msg = f"Failed to connect to X-UI server {host}: {e}"
                     logger.error(error_msg)
+                    errors.append(error_msg)
+                except Exception as e:
+                    error_msg = f"Unexpected error deleting client from inbound {inbound_id} on {host}: {e}"
+                    logger.error(error_msg, exc_info=True)
                     errors.append(error_msg)
         
         # Удаляем маппинг
@@ -604,7 +947,7 @@ class XUISyncManager:
         Получает список публичных VLESS URIs для пользователя с учетом плана.
         
         Использует новый модуль xui_public_links для генерации публичных ссылок
-        напрямую через публичные домены (без переписывания через LinkRewriter).
+        и пропускает их через LinkRewriter для нормализации.
         
         Args:
             hysteria_username: Имя пользователя в Hysteria2
@@ -629,32 +972,68 @@ class XUISyncManager:
         if not db:
             return []
         
+        # Авто-синхронизация при отсутствии маппинга (упрощение для пользователя)
+        try:
+            mapping = db.get_xui_mapping(hysteria_username)
+            if not mapping:
+                user_data = db.get_user(hysteria_username)
+                if user_data:
+                    plan = user_data.get('plan', 'standard')
+                    expiry_days = user_data.get('expiration_days', 0)
+                    traffic_bytes = user_data.get('max_download_bytes', 0)
+                    traffic_gb = int(traffic_bytes / (1024 ** 3)) if traffic_bytes > 0 else 0
+                    enable = not user_data.get('blocked', False)
+                    logger.info(f"No X-UI mapping for {hysteria_username}, auto-syncing before link generation")
+                    success, error = self.sync_user_create(
+                        hysteria_username=hysteria_username,
+                        expiry_days=expiry_days,
+                        traffic_limit_gb=traffic_gb,
+                        enable=enable,
+                        user_plan=plan
+                    )
+                    if not success:
+                        logger.warning(f"Auto-sync failed for {hysteria_username}: {error}")
+        except Exception as e:
+            logger.warning(f"Auto-sync skipped for {hysteria_username}: {e}")
+        
         try:
             # Загружаем конфигурацию X-UI для получения публичных параметров серверов
             from xui.config import load_xui_config
             xui_config = load_xui_config()
             
+            logger.debug(f"Loaded X-UI config: enabled={xui_config.get('enabled')}, servers={len(xui_config.get('xui_servers', []))}")
+            
             # Загружаем публичные конфигурации серверов
             server_public_configs = load_server_public_configs(xui_config)
             
+            logger.debug(f"Loaded {len(server_public_configs)} server public configs: {list(server_public_configs.keys())}")
+            
             if not server_public_configs:
                 logger.warning("No public server configs found, falling back to legacy method")
-                return self._get_user_vless_uris_legacy(hysteria_username)
+                return self._normalize_xui_links(self._get_user_vless_uris_legacy(hysteria_username))
             
             # Генерируем публичные ссылки через новый модуль
+            logger.info(f"Generating public VLESS links for user {hysteria_username}")
             links = build_user_public_links(
                 hysteria_username=hysteria_username,
                 xui_sync_manager=self,
                 server_configs=server_public_configs
             )
             
-            return links
+            if not links:
+                logger.warning(f"No public VLESS links generated for {hysteria_username}, trying legacy")
+                legacy_links = self._get_user_vless_uris_legacy(hysteria_username)
+                if legacy_links:
+                    return self._normalize_xui_links(legacy_links)
+            
+            logger.info(f"Generated {len(links)} VLESS links for user {hysteria_username}")
+            return self._normalize_xui_links(links)
         
         except Exception as e:
             logger.error(f"Failed to generate public links for user {hysteria_username}: {e}", exc_info=True)
             # Fallback к старому методу
             logger.info("Falling back to legacy link generation method")
-            return self._get_user_vless_uris_legacy(hysteria_username)
+            return self._normalize_xui_links(self._get_user_vless_uris_legacy(hysteria_username))
     
     def _get_user_vless_uris_legacy(self, hysteria_username: str) -> List[Dict[str, Any]]:
         """

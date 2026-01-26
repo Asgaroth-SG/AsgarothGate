@@ -176,6 +176,7 @@ def process_users(target_usernames: List[str]) -> List[Dict[str, Any]]:
             )
         
         # VLESS URIs из X-UI
+        # Получаем VLESS ссылки, но не блокируем выдачу URI при ошибке
         try:
             # Добавляем путь для импорта модулей xui
             import sys
@@ -186,6 +187,8 @@ def process_users(target_usernames: List[str]) -> List[Dict[str, Any]]:
                 from xui.config import get_xui_sync_manager
                 sync_manager = get_xui_sync_manager()
                 if sync_manager:
+                    # Пытаемся получить VLESS URIs, но не ждем долго
+                    # Таймаут на уровне subprocess в cli_api.py (30 секунд)
                     vless_uris = sync_manager.get_user_vless_uris(username)
                     if vless_uris:
                         user_output["vless_nodes"] = vless_uris
@@ -197,6 +200,7 @@ def process_users(target_usernames: List[str]) -> List[Dict[str, Any]]:
                 user_output["vless_nodes"] = []
         except Exception as e:
             # Не блокируем выдачу URI при ошибке получения VLESS
+            # Это может произойти из-за проблем с event loop или таймаута
             user_output["vless_nodes"] = []
             if hasattr(sys, 'stderr'):
                 print(f"Warning: Failed to get VLESS URIs for {username}: {e}", file=sys.stderr)

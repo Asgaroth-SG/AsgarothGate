@@ -7,6 +7,7 @@ import os
 import json
 import logging
 from typing import Dict, Any, Optional
+from urllib.parse import urlparse
 from pathlib import Path
 from dotenv import dotenv_values
 
@@ -15,6 +16,63 @@ logger = logging.getLogger(__name__)
 # Путь к конфигурационному файлу X-UI
 XUI_CONFIG_PATH = Path("/etc/hysteria/xui_config.json")
 XUI_ENV_PATH = Path("/etc/hysteria/.xui.env")
+
+
+def _extract_hostname(host_url: Optional[str]) -> Optional[str]:
+    """Извлекает hostname из URL/строки хоста."""
+    if not host_url:
+        return None
+    raw = str(host_url).strip()
+    if not raw:
+        return None
+    candidate = raw
+    if '://' not in candidate:
+        candidate = f"https://{candidate}"
+    try:
+        parsed = urlparse(candidate)
+        if parsed.hostname:
+            return parsed.hostname
+    except Exception:
+        pass
+    # Fallback: убрать путь/порт вручную
+    return raw.split('/')[0].split(':')[0] if raw else None
+
+
+def normalize_xui_server_config(server: Dict[str, Any]) -> Dict[str, Any]:
+    """Автоматически дополняет публичные параметры сервера X-UI."""
+    if not server:
+        return {}
+    normalized = dict(server)
+    
+    public_host = normalized.get('public_host')
+    if not public_host:
+        derived_host = _extract_hostname(normalized.get('host', ''))
+        if derived_host:
+            normalized['public_host'] = derived_host
+    
+    if not normalized.get('public_port'):
+        normalized['public_port'] = 443
+    if not normalized.get('link_host_rewrite_from'):
+        normalized['link_host_rewrite_from'] = '127.0.0.1'
+    if not normalized.get('sni') and normalized.get('public_host'):
+        normalized['sni'] = normalized.get('public_host')
+    
+    if not normalized.get('xhttp_mode'):
+        normalized['xhttp_mode'] = 'auto'
+    if not normalized.get('xhttp_alpn'):
+        normalized['xhttp_alpn'] = 'h2'
+    if not normalized.get('xhttp_fp'):
+        normalized['xhttp_fp'] = 'chrome'
+    
+    return normalized
+
+
+def normalize_xui_config(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Нормализует конфиг X-UI, автозаполняя серверы."""
+    normalized = dict(config or {})
+    servers = normalized.get('xui_servers', []) or []
+    normalized['xui_servers'] = [normalize_xui_server_config(s) for s in servers]
+    return normalized
 
 
 def load_xui_config() -> Dict[str, Any]:
@@ -43,7 +101,7 @@ def load_xui_config() -> Dict[str, Any]:
                 file_config = json.load(f)
                 config.update(file_config)
                 logger.info(f"Loaded X-UI config from {XUI_CONFIG_PATH}")
-                return config
+                return normalize_xui_config(config)
         except Exception as e:
             logger.warning(f"Failed to load X-UI config from file: {e}")
     
@@ -109,7 +167,7 @@ def load_xui_config() -> Dict[str, Any]:
     if env_vars.get('XUI_INBOUND_REMARK'):
         config['inbound_filter']['remark'] = env_vars.get('XUI_INBOUND_REMARK')
     
-    return config
+    return normalize_xui_config(config)
 
 
 def get_xui_sync_manager():

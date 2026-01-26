@@ -469,8 +469,17 @@ def show_user_uri_json(usernames: list[str]) -> list[dict[str, Any]] | None:
     if not os.path.exists(script_path):
         raise ScriptNotFoundError(f"Wrapper URI script not found at: {script_path}")
     try:
-        process = subprocess.run(['python3', script_path, *usernames], capture_output=True, text=True, check=True)
+        # Добавляем таймаут 30 секунд, чтобы не зависать при генерации VLESS ссылок
+        process = subprocess.run(
+            ['python3', script_path, *usernames], 
+            capture_output=True, 
+            text=True, 
+            check=True,
+            timeout=30  # 30 секунд таймаут
+        )
         return json.loads(process.stdout)
+    except subprocess.TimeoutExpired as e:
+        raise CommandExecutionError(f"Wrapper URI script timed out after 30 seconds. This may be due to slow VLESS link generation.")
     except subprocess.CalledProcessError as e:
         raise CommandExecutionError(f"Failed to execute wrapper URI script: {e}\nError: {e.stderr}")
     except FileNotFoundError:

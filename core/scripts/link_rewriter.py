@@ -24,17 +24,57 @@ class XuiServerConfig:
         server_id: str,
         public_host: str,
         public_port: int = 443,
-        link_host_rewrite_from: str = "127.0.0.1"
+        link_host_rewrite_from: str = "127.0.0.1",
+        sni: Optional[str] = None,
+        xhttp_alpn: Optional[str] = "h2",
+        xhttp_fp: Optional[str] = "chrome",
+        xhttp_mode: Optional[str] = "auto",
+        grpc_authority: Optional[str] = None
     ):
         self.server_id = server_id
         self.public_host = public_host
         self.public_port = public_port
         self.link_host_rewrite_from = link_host_rewrite_from
+        self.sni = sni
+        self.xhttp_alpn = xhttp_alpn if xhttp_alpn is not None else "h2"
+        self.xhttp_fp = xhttp_fp if xhttp_fp is not None else "chrome"
+        self.xhttp_mode = xhttp_mode if xhttp_mode is not None else "auto"
+        self.grpc_authority = grpc_authority
+
+
+def _normalize_host_list(value: Any) -> Tuple[str, ...]:
+    """Нормализует список хостов для сравнения"""
+    if value is None:
+        return ()
+    if isinstance(value, (list, tuple, set)):
+        raw_values = list(value)
+    else:
+        text_value = str(value)
+        raw_values = text_value.split(',') if ',' in text_value else [text_value]
+    result = []
+    for item in raw_values:
+        if item is None:
+            continue
+        normalized = str(item).strip().lower()
+        if normalized:
+            result.append(normalized)
+    return tuple(result)
 
 
 def is_reverse_proxy_host(host: str, server_cfg: XuiServerConfig) -> bool:
     """Проверяет, является ли хост внутренним адресом для переписывания"""
-    return host in (server_cfg.link_host_rewrite_from, "127.0.0.1", "localhost")
+    if not host:
+        return False
+    host_normalized = host.strip().lower()
+    rewrite_hosts = _normalize_host_list(server_cfg.link_host_rewrite_from)
+    return host_normalized in rewrite_hosts or host_normalized in ("127.0.0.1", "localhost")
+
+
+def is_public_gateway_host(host: str, server_cfg: XuiServerConfig) -> bool:
+    """Проверяет, является ли хост публичным gateway сервера"""
+    if not host or not server_cfg.public_host:
+        return False
+    return host.strip().lower() == server_cfg.public_host.strip().lower()
 
 
 def safe_b64_decode(data: str) -> Optional[bytes]:
@@ -106,9 +146,11 @@ def rewrite_vless(link: str, server_cfg: XuiServerConfig) -> str:
     Правила:
     - Переписывает только если host == 127.0.0.1 (или link_host_rewrite_from)
     - Сохраняет security/sni если они уже заданы и не пустые
-    - Добавляет security=tls и sni=public_host если их нет
-    - Для type=xhttp добавляет mode=auto, alpn=h2, fp=chrome если их нет
-    - Удаляет пустые параметры (host=, authority=)
+    - Добавляет security=tls и sni=public_host (или sni из конфига) если их нет
+    - Для type=xhttp добавляет mode/alpn/fp из конфига если их нет
+    - Для type=grpc может переопределять authority из конфига (включая пустое)
+    - Если authority совпадает с serviceName и override не задан, очищает authority
+    - Удаляет пустые параметры (host=, authority=) если не требуется сохранить пустой authority
     - Сохраняет fragment (#name) как есть
     """
     try:
@@ -127,8 +169,8 @@ def rewrite_vless(link: str, server_cfg: XuiServerConfig) -> str:
             host = host_port
             port = 443
         
-        # Проверяем, нужно ли переписывать
-        if not is_reverse_proxy_host(host, server_cfg):
+        # Проверяем, нужно ли переписывать (внутренний хост или уже публичный)
+        if not (is_reverse_proxy_host(host, server_cfg) or is_public_gateway_host(host, server_cfg)):
             return link
         
         # Сохраняем оригинальные закодированные значения всех параметров до декодирования
@@ -177,6 +219,7 @@ def rewrite_vless(link: str, server_cfg: XuiServerConfig) -> str:
         # Проверяем sni
         current_sni = get_param_case_insensitive('sni', '').strip()
         has_valid_sni = bool(current_sni)
+        sni_value = (server_cfg.sni or server_cfg.public_host or '').strip()
         
         # Заменяем host и port
         new_netloc = f"{uuid}@{server_cfg.public_host}:{server_cfg.public_port}"
@@ -186,22 +229,59 @@ def rewrite_vless(link: str, server_cfg: XuiServerConfig) -> str:
         
         # Специфичные правила для xhttp
         if link_type == 'xhttp':
-            # Добавляем mode=auto если нет или пустой
+            # Добавляем mode если нет или пустой
             mode_value = get_param_case_insensitive('mode', '')
-            if not mode_value or not mode_value.strip():
-                # Находим оригинальный ключ mode или используем 'mode'
+            mode_setting = (server_cfg.xhttp_mode or '').strip()
+            if mode_setting and (not mode_value or not mode_value.strip()):
                 mode_key = original_key_mapping.get('mode', 'mode')
-                query_params[mode_key] = 'auto'
-            # Добавляем alpn=h2 если нет или пустой
+                query_params[mode_key] = mode_setting
+            # Добавляем alpn если нет или пустой
             alpn_value = get_param_case_insensitive('alpn', '')
-            if not alpn_value or not alpn_value.strip():
+            alpn_setting = (server_cfg.xhttp_alpn or '').strip()
+            if alpn_setting and (not alpn_value or not alpn_value.strip()):
                 alpn_key = original_key_mapping.get('alpn', 'alpn')
-                query_params[alpn_key] = 'h2'
-            # Добавляем fp=chrome если нет или пустой
+                query_params[alpn_key] = alpn_setting
+            # Добавляем fp если нет или пустой
             fp_value = get_param_case_insensitive('fp', '')
-            if not fp_value or not fp_value.strip():
+            fp_setting = (server_cfg.xhttp_fp or '').strip()
+            if fp_setting and (not fp_value or not fp_value.strip()):
                 fp_key = original_key_mapping.get('fp', 'fp')
-                query_params[fp_key] = 'chrome'
+                query_params[fp_key] = fp_setting
+        
+        # Специфичные правила для grpc
+        keep_empty_authority = False
+        if link_type == 'grpc':
+            authority_value = get_param_case_insensitive('authority', '')
+            service_name_value = get_param_case_insensitive('serviceName', '')
+            authority_key = original_key_mapping.get('authority', 'authority')
+            if server_cfg.grpc_authority is not None:
+                # Явная настройка authority из конфига (включая пустое)
+                keep_empty_authority = True
+                authority_setting = str(server_cfg.grpc_authority).strip()
+                if (
+                    authority_setting
+                    and service_name_value
+                    and authority_setting.strip() == service_name_value.strip()
+                ):
+                    # authority совпадает с serviceName - очищаем как избыточный
+                    query_params[authority_key] = ''
+                else:
+                    query_params[authority_key] = authority_setting
+                # Не используем оригинально закодированное authority, если оно было
+                original_encoded_params.pop('authority', None)
+            elif (
+                authority_value
+                and service_name_value
+                and authority_value.strip() == service_name_value.strip()
+            ):
+                # authority совпадает с serviceName - очищаем как избыточный
+                keep_empty_authority = True
+                query_params[authority_key] = ''
+                original_encoded_params.pop('authority', None)
+            else:
+                authority_setting = (server_cfg.grpc_authority or '').strip()
+                if authority_setting and (not authority_value or not authority_value.strip()):
+                    query_params[authority_key] = authority_setting
         
         # Устанавливаем security=tls если не было валидного значения (НЕ перетираем существующее)
         if not has_valid_security:
@@ -209,14 +289,16 @@ def rewrite_vless(link: str, server_cfg: XuiServerConfig) -> str:
             upsert_query_param(query_params, security_key, 'tls', preserve_if_exists=False)
         
         # Устанавливаем sni если не было (НЕ перетираем существующее)
-        if not has_valid_sni:
+        if not has_valid_sni and sni_value:
             sni_key = original_key_mapping.get('sni', 'sni')
-            upsert_query_param(query_params, sni_key, server_cfg.public_host, preserve_if_exists=False)
+            upsert_query_param(query_params, sni_key, sni_value, preserve_if_exists=False)
         
         # Удаляем пустые/бесполезные параметры (host=, authority=)
         keys_to_remove = []
         for key, value in query_params.items():
             key_lower = key.lower()
+            if key_lower == 'authority' and keep_empty_authority:
+                continue
             if key_lower in ('host', 'authority') and (not value or not value.strip()):
                 keys_to_remove.append(key)
         for key in keys_to_remove:

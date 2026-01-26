@@ -6,12 +6,26 @@ X-UI/3X-UI API Client
 
 import asyncio
 import logging
+import json
 from typing import Dict, List, Optional, Any, Tuple
 from urllib.parse import urlparse, unquote
 from datetime import datetime
 from dataclasses import dataclass
 import uuid as uuid_lib
 import re
+
+# Для прямых HTTP запросов к API 3X-UI
+try:
+    import httpx
+    HTTPX_AVAILABLE = True
+except ImportError:
+    httpx = None  # type: ignore
+    HTTPX_AVAILABLE = False
+    try:
+        import requests
+        REQUESTS_AVAILABLE = True
+    except ImportError:
+        REQUESTS_AVAILABLE = False
 
 # Импортируем nest_asyncio для работы в уже запущенном event loop
 try:
@@ -35,6 +49,147 @@ except ImportError:
     )
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_api_obj(response_json: Any) -> Any:
+    """
+    Extracts the payload object from 3X-UI API responses.
+    """
+    if isinstance(response_json, dict):
+        for key in ('obj', 'data', 'result'):
+            if key in response_json:
+                return response_json.get(key)
+    return None
+
+
+def parse_raw_stream_settings(stream_settings_raw: Any, inbound_id: int | str = 'unknown') -> Dict[str, Any]:
+    """
+    Парсит СЫРОЙ streamSettings из API 3X-UI БЕЗ преобразований ключей.
+    
+    Источник: прямой JSON ответ от /panel/api/inbounds/list
+    
+    Правила:
+    - Если строка → json.loads()
+    - Если dict → использовать напрямую
+    - НЕ преобразовывать ключи (camelCase/snake_case)
+    - Сохранять структуру ТАК, КАК ПРИШЛА ИЗ API
+    
+    Args:
+        stream_settings_raw: Сырой streamSettings из API (str или dict)
+        inbound_id: ID inbound для логирования
+        
+    Returns:
+        Нормализованный dict с ключами КАК В API (camelCase: network, xhttpSettings, grpcSettings)
+        
+    Raises:
+        ValueError: Если парсинг не удался (критическая ошибка)
+    """
+    if stream_settings_raw is None:
+        logger.warning(f"Inbound {inbound_id}: stream_settings_raw is None")
+        return {}
+    
+    # Если уже dict - используем напрямую
+    if isinstance(stream_settings_raw, dict):
+        logger.debug(
+            f"Inbound {inbound_id}: stream_settings_raw is dict, "
+            f"keys: {list(stream_settings_raw.keys())}"
+        )
+        return stream_settings_raw
+    
+    # Если строка - парсим JSON
+    if isinstance(stream_settings_raw, str):
+        try:
+            parsed = json.loads(stream_settings_raw)
+            if isinstance(parsed, dict):
+                logger.debug(
+                    f"Inbound {inbound_id}: Parsed JSON string, "
+                    f"keys: {list(parsed.keys())}"
+                )
+                return parsed
+            else:
+                logger.error(
+                    f"Inbound {inbound_id}: Parsed JSON is not a dict, "
+                    f"type: {type(parsed)}, value: {parsed}"
+                )
+                return {}
+        except json.JSONDecodeError as e:
+            logger.error(
+                f"Inbound {inbound_id}: Failed to parse stream_settings as JSON: {e}. "
+                f"String (first 200 chars): {stream_settings_raw[:200]}"
+            )
+            return {}
+        except Exception as e:
+            logger.error(
+                f"Inbound {inbound_id}: Unexpected error parsing stream_settings: {e}"
+            )
+            return {}
+
+    # Если объект с dict()/model_dump() - пытаемся сохранить алиасы (camelCase)
+    if hasattr(stream_settings_raw, 'dict'):
+        try:
+            try:
+                parsed = stream_settings_raw.dict(by_alias=True)
+            except TypeError:
+                parsed = stream_settings_raw.dict()
+            if isinstance(parsed, dict):
+                logger.debug(
+                    f"Inbound {inbound_id}: Parsed via dict(), "
+                    f"keys: {list(parsed.keys())}"
+                )
+                return parsed
+        except Exception as e:
+            logger.debug(f"Inbound {inbound_id}: Failed to parse via dict(): {e}")
+
+    if hasattr(stream_settings_raw, 'model_dump'):
+        try:
+            try:
+                parsed = stream_settings_raw.model_dump(by_alias=True)
+            except TypeError:
+                parsed = stream_settings_raw.model_dump()
+            if isinstance(parsed, dict):
+                logger.debug(
+                    f"Inbound {inbound_id}: Parsed via model_dump(), "
+                    f"keys: {list(parsed.keys())}"
+                )
+                return parsed
+        except Exception as e:
+            logger.debug(f"Inbound {inbound_id}: Failed to parse via model_dump(): {e}")
+
+    if hasattr(stream_settings_raw, '__dict__'):
+        try:
+            normalized = _normalize_stream_settings(stream_settings_raw)
+            if isinstance(normalized, dict):
+                logger.debug(
+                    f"Inbound {inbound_id}: Parsed via __dict__, "
+                    f"keys: {list(normalized.keys())}"
+                )
+                return normalized
+        except Exception as e:
+            logger.debug(f"Inbound {inbound_id}: Failed to parse via __dict__: {e}")
+    
+    # Другие типы - пытаемся преобразовать через JSON
+    try:
+        # Сериализуем в JSON и обратно для преобразования в dict
+        json_str = json.dumps(stream_settings_raw, default=str)
+        parsed = json.loads(json_str)
+        if isinstance(parsed, dict):
+            logger.debug(
+                f"Inbound {inbound_id}: Converted via JSON serialization, "
+                f"keys: {list(parsed.keys())}"
+            )
+            return parsed
+        else:
+            logger.warning(
+                f"Inbound {inbound_id}: Converted value is not a dict, "
+                f"type: {type(parsed)}"
+            )
+            return {}
+    except Exception as e:
+        logger.error(
+            f"Inbound {inbound_id}: Failed to convert stream_settings to dict: {e}, "
+            f"type: {type(stream_settings_raw)}"
+        )
+        return {}
 
 
 def _normalize_stream_settings(stream_settings: Any) -> Dict[str, Any]:
@@ -145,110 +300,81 @@ def _normalize_stream_settings(stream_settings: Any) -> Dict[str, Any]:
         return {}
 
 
-def _extract_xhttp_path(stream_settings: Dict[str, Any], inbound_id: int | str) -> str:
+def _extract_xhttp_path(stream_settings: Dict[str, Any], inbound_id: int | str) -> Optional[str]:
     """
-    Извлекает path для xhttp из stream_settings.
-    Источник истины - ТОЛЬКО streamSettings из 3X-UI, никаких fallback значений.
+    Извлекает path для xhttp из СЫРОГО stream_settings из API 3X-UI.
     
-    Приоритет поиска:
-    1. xhttpSettings.path (camelCase)
-    2. extra (legacy структура)
-    3. xhttp_settings.path (snake_case)
-    4. splithttpSettings.path
+    Ищет ТОЛЬКО в streamSettings["xhttpSettings"]["path"] (camelCase как в API).
+    НЕ преобразует ключи, работает с данными КАК ОНИ ПРИШЛИ ИЗ API.
     
     Args:
-        stream_settings: Нормализованный dict stream_settings
+        stream_settings: СЫРОЙ dict stream_settings из API (ключи camelCase)
         inbound_id: ID inbound для логирования
         
     Returns:
-        Path строка (не пустой и не "/")
-        
-    Raises:
-        ValueError: Если path не найден, пустой или равен "/"
+        Path строка (не пустой и не "/") или None если не найден/невалиден
     """
-    # ПРИОРИТЕТ 1: xhttpSettings (camelCase) - основной источник
-    xhttp_settings = stream_settings.get('xhttpSettings')
-    if xhttp_settings:
-        if not isinstance(xhttp_settings, dict):
-            xhttp_settings = _normalize_stream_settings(xhttp_settings)
-        if isinstance(xhttp_settings, dict):
-            path = xhttp_settings.get('path')
+    def _extract_path_from_settings(settings: Any, label: str) -> Optional[str]:
+        if not settings:
+            return None
+        if not isinstance(settings, dict):
+            settings = parse_raw_stream_settings(settings, inbound_id)
+        if isinstance(settings, dict):
+            path = settings.get('path')
             if path is not None:
                 if isinstance(path, str):
                     path = path.strip()
                     if path and path != '/':
-                        logger.debug(f"Inbound {inbound_id}: Found xhttp path in xhttpSettings: '{path}'")
+                        logger.debug(f"Inbound {inbound_id}: Found xhttp path in {label}.path: '{path}'")
                         return path
                 elif isinstance(path, (int, float)):
                     path_str = str(path).strip()
                     if path_str and path_str != '/':
-                        logger.debug(f"Inbound {inbound_id}: Found xhttp path in xhttpSettings (numeric): '{path_str}'")
+                        logger.debug(f"Inbound {inbound_id}: Found xhttp path in {label}.path (numeric): '{path_str}'")
                         return path_str
-    
-    # ПРИОРИТЕТ 2: extra (legacy структура)
-    extra = stream_settings.get('extra')
-    if extra:
-        if not isinstance(extra, dict):
-            extra = _normalize_stream_settings(extra)
-        if isinstance(extra, dict):
-            # Проверяем xhttpSettings внутри extra
-            extra_xhttp = extra.get('xhttpSettings') or extra.get('xhttp_settings')
-            if extra_xhttp:
-                if not isinstance(extra_xhttp, dict):
-                    extra_xhttp = _normalize_stream_settings(extra_xhttp)
-                if isinstance(extra_xhttp, dict):
-                    path = extra_xhttp.get('path')
-                    if path is not None:
-                        if isinstance(path, str):
-                            path = path.strip()
-                            if path and path != '/':
-                                logger.debug(f"Inbound {inbound_id}: Found xhttp path in extra.xhttpSettings: '{path}'")
-                                return path
-    
-    # ПРИОРИТЕТ 3: xhttp_settings (snake_case)
-    xhttp_settings_snake = stream_settings.get('xhttp_settings')
-    if xhttp_settings_snake:
-        if not isinstance(xhttp_settings_snake, dict):
-            xhttp_settings_snake = _normalize_stream_settings(xhttp_settings_snake)
-        if isinstance(xhttp_settings_snake, dict):
-            path = xhttp_settings_snake.get('path')
-            if path is not None:
-                if isinstance(path, str):
+            paths = settings.get('paths')
+            if paths and isinstance(paths, list) and len(paths) > 0:
+                path = paths[0]
+                if path is not None and isinstance(path, str):
                     path = path.strip()
                     if path and path != '/':
-                        logger.debug(f"Inbound {inbound_id}: Found xhttp path in xhttp_settings: '{path}'")
+                        logger.debug(f"Inbound {inbound_id}: Found xhttp path in {label}.paths[0]: '{path}'")
                         return path
+        return None
+
+    # ПРИОРИТЕТ 1: xhttpSettings (camelCase) - как в API
+    path = _extract_path_from_settings(stream_settings.get('xhttpSettings'), 'xhttpSettings')
+    if path:
+        return path
+
+    # ПРИОРИТЕТ 2: xhttp_settings (snake_case) - fallback
+    path = _extract_path_from_settings(stream_settings.get('xhttp_settings'), 'xhttp_settings')
+    if path:
+        return path
+
+    # ПРИОРИТЕТ 3: splithttpSettings (альтернативное название)
+    path = _extract_path_from_settings(stream_settings.get('splithttpSettings'), 'splithttpSettings')
+    if path:
+        return path
+
+    # ПРИОРИТЕТ 4: splithttp_settings (snake_case) - fallback
+    path = _extract_path_from_settings(stream_settings.get('splithttp_settings'), 'splithttp_settings')
+    if path:
+        return path
     
-    # ПРИОРИТЕТ 4: splithttpSettings (альтернативное название)
-    splithttp_settings = stream_settings.get('splithttpSettings') or stream_settings.get('splithttp_settings')
-    if splithttp_settings:
-        if not isinstance(splithttp_settings, dict):
-            splithttp_settings = _normalize_stream_settings(splithttp_settings)
-        if isinstance(splithttp_settings, dict):
-            path = splithttp_settings.get('path')
-            if path is not None:
-                if isinstance(path, str):
-                    path = path.strip()
-                    if path and path != '/':
-                        logger.debug(f"Inbound {inbound_id}: Found xhttp path in splithttpSettings: '{path}'")
-                        return path
-    
-    # Если ничего не найдено - логируем warning и выбрасываем исключение
+    # Если ничего не найдено - логируем warning и возвращаем None
     import json
     try:
-        stream_settings_dump = json.dumps(stream_settings, indent=2, default=str)[:1000]
+        stream_settings_dump = json.dumps(stream_settings, indent=2, default=str)[:500]
     except:
-        stream_settings_dump = str(stream_settings)[:1000]
+        stream_settings_dump = str(stream_settings)[:500]
     
     logger.warning(
-        f"Inbound {inbound_id}: Failed to extract xhttp path from stream_settings. "
-        f"xhttpSettings key is missing or path not found/is empty/equals '/'. "
+        f"Inbound {inbound_id}: xhttpSettings missing or path not found/is empty/equals '/' in RAW stream_settings. "
+        f"Available keys: {list(stream_settings.keys()) if isinstance(stream_settings, dict) else 'not a dict'}. "
         f"stream_settings (truncated): {stream_settings_dump}"
     )
-    raise ValueError(
-        f"Inbound {inbound_id}: xhttp path not found in stream_settings or path is invalid (empty or '/'). "
-        f"Please check inbound configuration in 3X-UI. Available keys: {list(stream_settings.keys()) if isinstance(stream_settings, dict) else 'not a dict'}"
-    )
+    return None
 
 
 def _parse_vless_link(vless_link: str) -> Dict[str, str]:
@@ -290,82 +416,78 @@ def _parse_vless_link(vless_link: str) -> Dict[str, str]:
         return {}
 
 
-def _extract_grpc_service_name(stream_settings: Dict[str, Any], inbound_id: int | str) -> str:
+def _extract_grpc_service_name(stream_settings: Dict[str, Any], inbound_id: int | str) -> Optional[str]:
     """
-    Извлекает serviceName для grpc из stream_settings.
-    Источник истины - ТОЛЬКО streamSettings из 3X-UI.
+    Извлекает serviceName для grpc из СЫРОГО stream_settings из API 3X-UI.
     
-    Приоритет поиска:
-    1. grpcSettings.serviceName (camelCase) - основной источник
-    2. grpcSettings.service_name (snake_case)
-    3. grpcSettings.service (legacy)
-    4. grpc_settings.* (альтернативный ключ)
+    Ищет ТОЛЬКО в streamSettings["grpcSettings"]["serviceName"] (camelCase как в API).
+    НЕ преобразует ключи, работает с данными КАК ОНИ ПРИШЛИ ИЗ API.
     
     Args:
-        stream_settings: Нормализованный dict stream_settings
+        stream_settings: СЫРОЙ dict stream_settings из API (ключи camelCase)
         inbound_id: ID inbound для логирования
         
     Returns:
-        Service name строка (не пустая)
-        
-    Raises:
-        ValueError: Если serviceName не найден или пустой
+        Service name строка (не пустая) или None если не найден/невалиден
     """
-    def _try_extract_service_name(grpc_dict: dict, source: str) -> str | None:
-        """Попытка извлечь serviceName из словаря grpcSettings."""
-        # Проверяем все возможные ключи
-        for key in ['serviceName', 'service_name', 'service']:
-            value = grpc_dict.get(key)
-            if value is not None:
-                if isinstance(value, str):
-                    value = value.strip()
-                    if value:
-                        logger.debug(f"Inbound {inbound_id}: Found grpc serviceName via {source}.{key}: '{value}'")
-                        return value
-                elif isinstance(value, (int, float)):
-                    value_str = str(value).strip()
-                    if value_str:
-                        logger.debug(f"Inbound {inbound_id}: Found grpc serviceName via {source}.{key} (numeric): '{value_str}'")
-                        return value_str
-        return None
-    
-    # ПРИОРИТЕТ 1: grpcSettings (camelCase) - основной источник
+    # ПРИОРИТЕТ 1: grpcSettings (camelCase) - как в API
     grpc_settings = stream_settings.get('grpcSettings')
     if grpc_settings:
         if not isinstance(grpc_settings, dict):
-            grpc_settings = _normalize_stream_settings(grpc_settings)
+            # Если это не dict, пытаемся нормализовать
+            grpc_settings = parse_raw_stream_settings(grpc_settings, inbound_id)
+        
         if isinstance(grpc_settings, dict):
-            result = _try_extract_service_name(grpc_settings, 'grpcSettings')
-            if result:
-                return result
+            # Ищем serviceName (camelCase как в API)
+            service_name = grpc_settings.get('serviceName')
+            if service_name is not None:
+                if isinstance(service_name, str):
+                    service_name = service_name.strip()
+                    if service_name:
+                        logger.debug(f"Inbound {inbound_id}: Found grpc serviceName in grpcSettings.serviceName: '{service_name}'")
+                        return service_name
+                elif isinstance(service_name, (int, float)):
+                    service_name_str = str(service_name).strip()
+                    if service_name_str:
+                        logger.debug(f"Inbound {inbound_id}: Found grpc serviceName in grpcSettings.serviceName (numeric): '{service_name_str}'")
+                        return service_name_str
+            
+            # Fallback: service_name (snake_case) - на случай если API вернул так
+            service_name = grpc_settings.get('service_name')
+            if service_name is not None:
+                if isinstance(service_name, str):
+                    service_name = service_name.strip()
+                    if service_name:
+                        logger.debug(f"Inbound {inbound_id}: Found grpc serviceName in grpcSettings.service_name: '{service_name}'")
+                        return service_name
     
-    # ПРИОРИТЕТ 2: grpc_settings (snake_case)
+    # ПРИОРИТЕТ 2: grpc_settings (snake_case) - fallback если API вернул так
     grpc_settings_snake = stream_settings.get('grpc_settings')
     if grpc_settings_snake:
         if not isinstance(grpc_settings_snake, dict):
-            grpc_settings_snake = _normalize_stream_settings(grpc_settings_snake)
+            grpc_settings_snake = parse_raw_stream_settings(grpc_settings_snake, inbound_id)
         if isinstance(grpc_settings_snake, dict):
-            result = _try_extract_service_name(grpc_settings_snake, 'grpc_settings')
-            if result:
-                return result
+            service_name = grpc_settings_snake.get('serviceName') or grpc_settings_snake.get('service_name')
+            if service_name is not None:
+                if isinstance(service_name, str):
+                    service_name = service_name.strip()
+                    if service_name:
+                        logger.debug(f"Inbound {inbound_id}: Found grpc serviceName in grpc_settings: '{service_name}'")
+                        return service_name
     
-    # Если ничего не найдено - логируем warning и выбрасываем исключение
-    # НЕ используем fallback значения!
+    # Если ничего не найдено - логируем warning и возвращаем None
     import json
     try:
-        stream_settings_dump = json.dumps(stream_settings, indent=2, default=str)[:1000]
+        stream_settings_dump = json.dumps(stream_settings, indent=2, default=str)[:500]
     except:
-        stream_settings_dump = str(stream_settings)[:1000]
+        stream_settings_dump = str(stream_settings)[:500]
     
     logger.warning(
-        f"Inbound {inbound_id}: Failed to extract grpc serviceName from stream_settings. "
-        f"grpcSettings key is missing or serviceName not found/is empty. "
+        f"Inbound {inbound_id}: grpcSettings missing or serviceName not found/is empty in RAW stream_settings. "
+        f"Available keys: {list(stream_settings.keys()) if isinstance(stream_settings, dict) else 'not a dict'}. "
         f"stream_settings (truncated): {stream_settings_dump}"
     )
-    raise ValueError(
-        f"Inbound {inbound_id}: grpc serviceName not found in stream_settings or is empty. "
-        f"Please check inbound configuration in 3X-UI. Available keys: {list(stream_settings.keys()) if isinstance(stream_settings, dict) else 'not a dict'}"
-    )
+    return None
 
 
 @dataclass
@@ -414,19 +536,23 @@ class XUIClient:
         base_path: str = "/",
         timeout: int = 10,
         max_retries: int = 3,
-        retry_delay: float = 1.0
+        retry_delay: float = 1.0,
+        verify_ssl: bool = True,
+        force_https: bool = True
     ):
         """
         Инициализация клиента.
         
         Args:
-            host: Хост X-UI (например, "http://localhost:54321" или "https://xui.example.com")
+            host: Хост X-UI (например, "https://xui.example.com:5560")
             username: Имя пользователя X-UI (обязательно)
             password: Пароль X-UI (обязательно)
             base_path: Базовый путь панели (по умолчанию "/", может быть "/panel" и т.д.)
             timeout: Таймаут запросов в секундах
             max_retries: Максимальное количество попыток при ошибках
             retry_delay: Задержка между попытками в секундах
+            verify_ssl: Проверять SSL сертификат (True по умолчанию)
+            force_https: Принудительно использовать HTTPS (True по умолчанию)
         """
         if not PY3XUI_AVAILABLE:
             raise ImportError(
@@ -436,10 +562,19 @@ class XUIClient:
         if not username or not password:
             raise ValueError("Username and password are required")
         
-        # Нормализуем host (добавляем http:// если нет)
+        # SSL настройки
+        self.verify_ssl = verify_ssl
+        self.force_https = force_https
+        
+        # Нормализуем host (добавляем https:// если нет схемы)
         parsed = urlparse(host)
         if not parsed.scheme:
-            host = f"http://{host}"
+            # По умолчанию используем HTTPS для безопасности
+            host = f"https://{host}"
+        elif parsed.scheme == 'http' and force_https:
+            # Принудительно переключаем на HTTPS
+            host = host.replace('http://', 'https://', 1)
+            logger.info(f"Forced HTTPS for host: {host}")
         
         # Сохраняем оригинальный host без base_path
         self.base_url = host.rstrip('/')
@@ -465,6 +600,136 @@ class XUIClient:
         self._logged_in = False
         self._last_login_time = None
         self._login_cache_duration = 3600  # 1 час
+        self._direct_http_cookies: Optional[Dict[str, str]] = None
+        self._direct_http_last_login: Optional[datetime] = None
+        
+        # HTTP клиент с connection pooling для повторного использования соединений
+        self._http_client: Optional[Any] = None  # httpx.AsyncClient если доступен
+        
+        logger.info(
+            f"XUIClient initialized: host={self.base_url}, "
+            f"verify_ssl={self.verify_ssl}, force_https={self.force_https}"
+        )
+    
+    async def _get_http_client(self) -> Any:  # httpx.AsyncClient если доступен
+        """
+        Возвращает HTTP клиент с connection pooling.
+        Создает новый клиент если нужно или возвращает существующий.
+        
+        Преимущества connection pooling:
+        - Повторное использование TCP соединений
+        - Повторное использование TLS сессий
+        - Уменьшение latency
+        """
+        if not HTTPX_AVAILABLE:
+            raise XUIConnectionError("httpx library is not available")
+        
+        if self._http_client is None or self._http_client.is_closed:
+            # Настройки для HTTPS с поддержкой HTTP/2
+            self._http_client = httpx.AsyncClient(
+                timeout=httpx.Timeout(self.timeout, connect=5.0),
+                verify=self.verify_ssl,
+                follow_redirects=True,
+                http2=True,  # Включаем HTTP/2 для лучшей производительности
+                limits=httpx.Limits(
+                    max_keepalive_connections=5,
+                    max_connections=10,
+                    keepalive_expiry=30.0
+                )
+            )
+            logger.debug(f"Created new HTTP client for {self.base_url} (verify_ssl={self.verify_ssl})")
+        
+        return self._http_client
+    
+    async def _close_http_client(self):
+        """Закрывает HTTP клиент"""
+        if self._http_client and not self._http_client.is_closed:
+            await self._http_client.aclose()
+            self._http_client = None
+            logger.debug("HTTP client closed")
+    
+    def close(self):
+        """Закрывает все соединения"""
+        try:
+            self._run_async_in_sync_context(self._close_http_client())
+        except Exception as e:
+            logger.warning(f"Error closing HTTP client: {e}")
+    
+    async def _request_with_retry(
+        self,
+        method: str,
+        url: str,
+        cookies: Optional[Dict[str, str]] = None,
+        json: Optional[Dict] = None,
+        data: Optional[Dict] = None,
+        **kwargs
+    ) -> Optional[Any]:  # httpx.Response если доступен
+        """
+        Выполняет HTTP запрос с повторными попытками и экспоненциальной задержкой.
+        
+        Args:
+            method: HTTP метод (GET, POST, etc.)
+            url: URL запроса
+            cookies: Cookies для запроса
+            json: JSON данные
+            data: Form данные
+            **kwargs: Дополнительные параметры для httpx
+            
+        Returns:
+            Response или None при неудаче
+        """
+        client = await self._get_http_client()
+        last_error = None
+        
+        for attempt in range(self.max_retries):
+            try:
+                if method.upper() == 'GET':
+                    response = await client.get(url, cookies=cookies, **kwargs)
+                elif method.upper() == 'POST':
+                    if json is not None:
+                        response = await client.post(url, cookies=cookies, json=json, **kwargs)
+                    else:
+                        response = await client.post(url, cookies=cookies, data=data, **kwargs)
+                else:
+                    response = await client.request(method, url, cookies=cookies, json=json, **kwargs)
+                
+                # Успешный ответ
+                if response.status_code in (200, 201):
+                    return response
+                
+                # Ошибка авторизации - не повторяем
+                if response.status_code in (401, 403):
+                    logger.warning(f"Auth error {response.status_code} for {url}")
+                    return response
+                
+                # Серверная ошибка - повторяем
+                if response.status_code >= 500:
+                    logger.warning(
+                        f"Server error {response.status_code} for {url}, "
+                        f"attempt {attempt + 1}/{self.max_retries}"
+                    )
+                    last_error = f"HTTP {response.status_code}"
+                else:
+                    # Другие ошибки - возвращаем как есть
+                    return response
+                    
+            except httpx.TimeoutException as e:
+                last_error = f"Timeout: {e}"
+                logger.warning(f"Timeout for {url}, attempt {attempt + 1}/{self.max_retries}")
+            except httpx.ConnectError as e:
+                last_error = f"Connection error: {e}"
+                logger.warning(f"Connection error for {url}, attempt {attempt + 1}/{self.max_retries}")
+            except Exception as e:
+                last_error = f"Error: {e}"
+                logger.warning(f"Request error for {url}: {e}, attempt {attempt + 1}/{self.max_retries}")
+            
+            # Экспоненциальная задержка перед повтором
+            if attempt < self.max_retries - 1:
+                delay = self.retry_delay * (2 ** attempt)
+                await asyncio.sleep(delay)
+        
+        logger.error(f"All {self.max_retries} attempts failed for {url}: {last_error}")
+        return None
     
     def _run_async_in_sync_context(self, coro):
         """
@@ -540,6 +805,428 @@ class XUIClient:
             self.py3xui_api = None
             self.connection = None
             raise XUIAuthError(f"Failed to login via py3xui: {str(e)}")
+
+    async def _ensure_direct_http_cookies_async(self) -> Optional[Dict[str, str]]:
+        """
+        Ensures cookies for direct HTTP calls to 3X-UI API.
+        Uses HTTPS with connection pooling for better performance.
+        """
+        if not HTTPX_AVAILABLE:
+            return None
+
+        if self._direct_http_cookies and self._direct_http_last_login:
+            elapsed = (datetime.now() - self._direct_http_last_login).total_seconds()
+            if elapsed < self._login_cache_duration:
+                return self._direct_http_cookies
+
+        login_url = f"{self.base_url.rstrip('/')}/login"
+        try:
+            # Используем pooled клиент для авторизации
+            client = await self._get_http_client()
+            response = await client.post(
+                login_url,
+                data={
+                    "username": self.config.USERNAME,
+                    "password": self.config.PASSWORD
+                }
+            )
+            if response.status_code != 200:
+                logger.warning(
+                    f"Direct HTTP login failed: status={response.status_code}, url={login_url}"
+                )
+                return None
+
+            cookies = dict(client.cookies)
+            if not cookies:
+                logger.warning("Direct HTTP login returned no cookies")
+                return None
+
+            self._direct_http_cookies = cookies
+            self._direct_http_last_login = datetime.now()
+            logger.debug(f"Direct HTTP login successful for {self.base_url}")
+            return cookies
+        except Exception as e:
+            logger.warning(f"Direct HTTP login failed: {e}")
+            return None
+
+    async def _add_client_direct_http_async(
+        self,
+        inbound_id: int,
+        uuid: str,
+        expiry_time: Optional[int] = None,
+        traffic_limit: Optional[int] = None,
+        enable: bool = True,
+        email: Optional[str] = None
+    ) -> bool:
+        """
+        Создает клиента через прямой HTTP запрос к официальному API 3X-UI (из документации Postman).
+        Использует только официальные эндпоинты без py3xui.
+        
+        Согласно документации 3X-UI API:
+        - TotalGB: лимит трафика в GB (integer, 64-bit)
+        - Total: лимит трафика в байтах
+        """
+        if not HTTPX_AVAILABLE:
+            return False
+        
+        cookies = await self._ensure_direct_http_cookies_async()
+        if not cookies:
+            logger.warning("Cannot add client: no cookies available")
+            return False
+        
+        try:
+            # Получаем текущий inbound
+            inbound = await self._get_raw_inbound_direct_async(inbound_id)
+            if not inbound:
+                logger.warning(f"Cannot add client: inbound {inbound_id} not found")
+                return False
+            
+            # Парсим settings
+            settings = inbound.get('settings', {})
+            if isinstance(settings, str):
+                settings = json.loads(settings)
+            
+            clients = settings.get('clients', [])
+            
+            # Проверяем, не существует ли уже клиент с таким email или UUID
+            for existing_client in clients:
+                if existing_client.get('id') == uuid or existing_client.get('email') == email:
+                    logger.warning(f"Client {uuid} already exists in inbound {inbound_id}")
+                    return False
+            
+            # Создаем нового клиента согласно документации 3X-UI API
+            new_client = {
+                'id': uuid,
+                'email': email or f"{uuid}_{inbound_id}",
+                'enable': enable
+            }
+            
+            # Устанавливаем expiry_time если указан
+            if expiry_time is not None:
+                # Проверяем формат (миллисекунды или секунды)
+                if expiry_time < 1000000000000:  # Если меньше этого, значит секунды
+                    expiry_time = expiry_time * 1000
+                new_client['expiryTime'] = expiry_time
+            
+            # Устанавливаем трафик: используем ТОЛЬКО totalGB, но значение в БАЙТАХ
+            # Панель интерпретирует totalGB как байты, а не как GB
+            if traffic_limit is not None:
+                if traffic_limit < (1024 ** 3):
+                    logger.error(
+                        f"ERROR: traffic_limit={traffic_limit} is too small for bytes! "
+                        f"Expected value in bytes (e.g., 32212254720 for 30 GB)"
+                    )
+                
+                # Устанавливаем ТОЛЬКО totalGB в байтах
+                # НЕ устанавливаем total, чтобы избежать путаницы
+                new_client['totalGB'] = traffic_limit  # В байтах!
+                # Удаляем total если он есть
+                if 'total' in new_client:
+                    del new_client['total']
+                if 'totalGb' in new_client:
+                    del new_client['totalGb']
+                
+                total_gb_calc = traffic_limit / (1024 ** 3)
+                logger.info(
+                    f"Creating client {uuid} with traffic:\n"
+                    f"  - totalGB (bytes): {traffic_limit}\n"
+                    f"  - totalGB (GB calculated): {total_gb_calc:.3f} GB\n"
+                    f"  - NOT setting 'total' field (panel uses totalGB in bytes)"
+                )
+            
+            # Добавляем клиента в список
+            clients.append(new_client)
+            settings['clients'] = clients
+            
+            # Логируем что именно отправляется
+            logger.info(
+                f"Client {uuid} data to be sent:\n"
+                f"  - id: {new_client.get('id')}\n"
+                f"  - email: {new_client.get('email')}\n"
+                f"  - total: {new_client.get('total')}\n"
+                f"  - totalGB: {new_client.get('totalGB', 'NOT SET')}\n"
+                f"  - totalGb: {new_client.get('totalGb', 'NOT SET')}\n"
+                f"  - All keys: {list(new_client.keys())}"
+            )
+            
+            # Подготавливаем данные для обновления inbound
+            settings_str = json.dumps(settings)
+            
+            stream_settings = inbound.get('streamSettings', {})
+            if isinstance(stream_settings, str):
+                stream_settings_str = stream_settings
+            else:
+                stream_settings_str = json.dumps(stream_settings)
+            
+            sniffing = inbound.get('sniffing', {})
+            if isinstance(sniffing, str):
+                sniffing_str = sniffing
+            else:
+                sniffing_str = json.dumps(sniffing)
+            
+            # Обновляем inbound через официальный API эндпоинт
+            update_url = f"{self.base_url.rstrip('/')}/panel/api/inbounds/update/{inbound_id}"
+            update_data = {
+                'settings': settings_str,
+                'streamSettings': stream_settings_str,
+                'sniffing': sniffing_str,
+                'remark': inbound.get('remark', ''),
+                'listen': inbound.get('listen', ''),
+                'port': inbound.get('port', 0),
+                'protocol': inbound.get('protocol', 'vless'),
+                'enable': inbound.get('enable', True),
+                'expiryTime': inbound.get('expiryTime', 0),
+                'tag': inbound.get('tag', '')
+            }
+            
+            logger.info(f"Creating client {uuid} via direct HTTP API: {update_url}")
+            
+            # Используем pooled клиент с retry для надежности
+            response = await self._request_with_retry('POST', update_url, cookies=cookies, json=update_data)
+            if response and response.status_code == 200:
+                result = response.json()
+                if result.get('success', False):
+                    logger.info(f"Successfully created client {uuid} via direct HTTP API")
+                    # Проверяем что клиент действительно создан с правильными значениями
+                    # Минимальная задержка для обеспечения консистентности данных
+                    await asyncio.sleep(0.1)
+                    created_inbound = await self._get_raw_inbound_direct_async(inbound_id)
+                    if created_inbound:
+                        created_settings = created_inbound.get('settings', {})
+                        if isinstance(created_settings, str):
+                            created_settings = json.loads(created_settings)
+                        created_clients = created_settings.get('clients', [])
+                        for c in created_clients:
+                            if c.get('id') == uuid or c.get('email') == email:
+                                logger.info(
+                                    f"Verified created client {uuid}:\n"
+                                    f"  - total: {c.get('total')}\n"
+                                    f"  - totalGB: {c.get('totalGB', 'NOT SET')}\n"
+                                    f"  - totalGb: {c.get('totalGb', 'NOT SET')}\n"
+                                    f"  - All keys: {list(c.keys())}"
+                                )
+                                break
+                    return True
+                else:
+                    logger.warning(
+                        f"API returned success=false: {result.get('msg', 'Unknown error')}"
+                    )
+                    return False
+            else:
+                status = response.status_code if response else 'No response'
+                text = response.text[:500] if response else 'N/A'
+                logger.warning(
+                    f"Failed to create client via direct HTTP: "
+                    f"status={status}, response={text}"
+                )
+                return False
+        except Exception as e:
+            logger.error(f"Error creating client via direct HTTP: {e}", exc_info=True)
+            return False
+
+    async def _update_client_traffic_direct_async(
+        self,
+        inbound_id: int,
+        client_uuid: str,
+        traffic_limit: int,
+        client_email: str
+    ) -> bool:
+        """
+        Обновляет трафик клиента через прямой HTTP запрос к API 3X-UI.
+        Это необходимо, так как py3xui может не правильно установить трафик при создании.
+        """
+        if not HTTPX_AVAILABLE:
+            return False
+        
+        cookies = await self._ensure_direct_http_cookies_async()
+        if not cookies:
+            logger.warning("Cannot update traffic: no cookies available")
+            return False
+        
+        try:
+            # Получаем inbound с клиентами
+            inbound = await self._get_raw_inbound_direct_async(inbound_id)
+            if not inbound:
+                logger.warning(f"Cannot update traffic: inbound {inbound_id} not found")
+                return False
+            
+            # Находим клиента в settings
+            settings = inbound.get('settings', {})
+            if isinstance(settings, str):
+                settings = json.loads(settings)
+            
+            clients = settings.get('clients', [])
+            client_found = False
+            
+            for client in clients:
+                # Ищем по UUID или email
+                if (client.get('id') == client_uuid or 
+                    client.get('email') == client_email):
+                    # Обновляем трафик
+                    # ВАЖНО: Проверяем что traffic_limit в байтах
+                    if traffic_limit < (1024 ** 3):
+                        logger.error(
+                            f"ERROR in _update_client_traffic_direct_async: "
+                            f"traffic_limit={traffic_limit} is too small! Expected bytes."
+                        )
+                    
+                    # Устанавливаем ТОЛЬКО totalGB в байтах
+                    # Панель интерпретирует totalGB как байты, а не как GB
+                    client['totalGB'] = traffic_limit  # В байтах!
+                    # Удаляем total если он есть, чтобы избежать путаницы
+                    if 'total' in client:
+                        del client['total']
+                    if 'totalGb' in client:
+                        del client['totalGb']
+                    client_found = True
+                    total_gb_calc = traffic_limit / (1024 ** 3)
+                    logger.info(
+                        f"Updated client {client_uuid} traffic in memory:\n"
+                        f"  - traffic_limit (input): {traffic_limit} bytes\n"
+                        f"  - totalGB (bytes): {traffic_limit}\n"
+                        f"  - totalGB (GB calculated): {total_gb_calc:.3f} GB\n"
+                        f"  - NOT setting 'total' field (panel uses totalGB in bytes)"
+                    )
+                    break
+            
+            if not client_found:
+                logger.warning(f"Client {client_uuid} not found in inbound {inbound_id} for traffic update")
+                return False
+            
+            # Обновляем settings обратно в inbound
+            settings_str = json.dumps(settings) if isinstance(settings, dict) else str(settings)
+            
+            # Получаем все необходимые поля для обновления inbound
+            stream_settings = inbound.get('streamSettings', {})
+            if isinstance(stream_settings, str):
+                stream_settings_str = stream_settings
+            else:
+                stream_settings_str = json.dumps(stream_settings)
+            
+            sniffing = inbound.get('sniffing', {})
+            if isinstance(sniffing, str):
+                sniffing_str = sniffing
+            else:
+                sniffing_str = json.dumps(sniffing)
+            
+            # Логируем что отправляется в settings
+            try:
+                settings_dict = json.loads(settings_str) if isinstance(settings_str, str) else settings
+                clients_in_settings = settings_dict.get('clients', [])
+                for c in clients_in_settings:
+                    if c.get('id') == client_uuid or c.get('email') == client_email:
+                        logger.info(
+                            f"Client {client_uuid} in settings before update:\n"
+                            f"  - total: {c.get('total')}\n"
+                            f"  - totalGb: {c.get('totalGb')}\n"
+                            f"  - totalGB: {c.get('totalGB')}\n"
+                            f"  - All keys: {list(c.keys())}"
+                        )
+                        break
+            except Exception as e:
+                logger.debug(f"Could not log settings before update: {e}")
+            
+            # Обновляем inbound через API
+            update_url = f"{self.base_url.rstrip('/')}/panel/api/inbounds/update/{inbound_id}"
+            update_data = {
+                'settings': settings_str,
+                'streamSettings': stream_settings_str,
+                'sniffing': sniffing_str,
+                'remark': inbound.get('remark', ''),
+                'listen': inbound.get('listen', ''),
+                'port': inbound.get('port', 0),
+                'protocol': inbound.get('protocol', 'vless'),
+                'enable': inbound.get('enable', True),
+                'expiryTime': inbound.get('expiryTime', 0),
+                'tag': inbound.get('tag', '')
+            }
+            
+            logger.info(f"Sending update request to {update_url} with settings length: {len(settings_str)}")
+            
+            # Используем pooled клиент с retry для надежности
+            response = await self._request_with_retry('POST', update_url, cookies=cookies, json=update_data)
+            if response and response.status_code == 200:
+                result = response.json()
+                logger.info(f"API response: {result}")
+                if result.get('success', False):
+                    logger.info(f"Successfully updated client {client_uuid} traffic via direct HTTP")
+                    # Проверяем что клиент действительно обновился
+                    # Минимальная задержка для обеспечения консистентности данных
+                    await asyncio.sleep(0.1)
+                    updated_inbound = await self._get_raw_inbound_direct_async(inbound_id)
+                    if updated_inbound:
+                        updated_settings = updated_inbound.get('settings', {})
+                        if isinstance(updated_settings, str):
+                            updated_settings = json.loads(updated_settings)
+                        updated_clients = updated_settings.get('clients', [])
+                        for c in updated_clients:
+                            if c.get('id') == client_uuid or c.get('email') == client_email:
+                                total_bytes = c.get('total')
+                                total_gb_calc = total_bytes / (1024 ** 3) if total_bytes else 0
+                                logger.info(
+                                    f"Verified client {client_uuid} after update:\n"
+                                    f"  - total (bytes): {total_bytes}\n"
+                                    f"  - total (GB calculated): {total_gb_calc:.3f} GB\n"
+                                    f"  - totalGb: {c.get('totalGb', 'not set')}\n"
+                                    f"  - totalGB: {c.get('totalGB', 'not set')}"
+                                )
+                                # Проверяем что total установлен правильно
+                                if total_bytes != traffic_limit:
+                                    logger.warning(
+                                        f"WARNING: total mismatch! Expected {traffic_limit} bytes, "
+                                        f"got {total_bytes} bytes"
+                                    )
+                                break
+                    return True
+                else:
+                    logger.warning(
+                        f"API returned success=false: {result.get('msg', 'Unknown error')}"
+                    )
+                    return False
+            else:
+                status = response.status_code if response else 'No response'
+                text = response.text[:500] if response else 'N/A'
+                logger.warning(
+                    f"Failed to update traffic via direct HTTP: "
+                    f"status={status}, response={text}"
+                )
+                return False
+                    
+        except Exception as e:
+            logger.error(f"Error updating client traffic via direct HTTP: {e}", exc_info=True)
+            return False
+    
+    async def _get_raw_inbound_direct_async(self, inbound_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Gets raw inbound directly from 3X-UI API via HTTP (bypassing py3xui models).
+        Uses HTTPS with connection pooling.
+        """
+        if not HTTPX_AVAILABLE:
+            return None
+
+        cookies = await self._ensure_direct_http_cookies_async()
+        if not cookies:
+            return None
+
+        url = f"{self.base_url.rstrip('/')}/panel/api/inbounds/get/{inbound_id}"
+        try:
+            # Используем pooled клиент с retry
+            response = await self._request_with_retry('GET', url, cookies=cookies)
+            if not response or response.status_code != 200:
+                status = response.status_code if response else 'No response'
+                logger.warning(
+                    f"Direct HTTP get inbound failed: status={status}, url={url}"
+                )
+                return None
+            data = response.json()
+        except Exception as e:
+            logger.warning(f"Direct HTTP get inbound failed: {e}")
+            return None
+
+        inbound_obj = _extract_api_obj(data)
+        if isinstance(inbound_obj, dict):
+            return inbound_obj
+        return None
     
     def login(self) -> bool:
         """
@@ -670,50 +1357,69 @@ class XUIClient:
         email: Optional[str] = None,
         username: Optional[str] = None
     ) -> bool:
-        """Добавляет клиента в inbound (асинхронно)"""
-        await self._ensure_logged_in_async()
+        """
+        Добавляет клиента в inbound (асинхронно).
         
-        try:
-            # В 3X-UI email должен быть уникальным глобально во всех inbounds
-            # Используем формат: username_inbound_id для обеспечения уникальности
-            if not email:
-                if username:
-                    # Формат: username_inbound_id (например: admin_1, admin_2)
-                    email = f"{username}_{inbound_id}"
-                else:
-                    # Fallback: используем UUID_inbound_id
-                    email = f"{uuid}_{inbound_id}"
-                    logger.warning(f"Email and username not provided for client {uuid}, using UUID_inbound_id as email")
-            
-            client = Client(
-                id=uuid,
-                email=email,
-                enable=enable
-            )
-            
-            # Устанавливаем лимиты если указаны
-            if expiry_time is not None:
-                # py3xui использует expiry_time в миллисекундах (timestamp)
-                # Проверяем, что это действительно миллисекунды
-                if expiry_time < 1000000000000:  # Если меньше этого, значит секунды, конвертируем
-                    expiry_time = expiry_time * 1000
-                client.expiry_time = expiry_time
-            
-            if traffic_limit is not None:
-                # py3xui использует total_gb для лимита трафика
-                # Конвертируем байты в GB
-                client.total_gb = traffic_limit / (1024 ** 3)
-            
-            # Используем правильный метод: api.client.add(inbound_id, [client])
-            logger.debug(f"Calling py3xui api.client.add(inbound_id={inbound_id}, clients=[{client}])")
-            await self.py3xui_api.client.add(inbound_id, [client])
-            
-            logger.info(f"Successfully added client {uuid} (email: {email}) to inbound {inbound_id}")
+        Использует только официальные эндпоинты из документации Postman 3X-UI API,
+        без использования py3xui для создания клиента.
+        """
+        # В 3X-UI email должен быть уникальным глобально во всех inbounds
+        # Используем формат: username_inbound_id для обеспечения уникальности
+        if not email:
+            if username:
+                # Формат: username_inbound_id (например: admin_1, admin_2)
+                email = f"{username}_{inbound_id}"
+            else:
+                # Fallback: используем UUID_inbound_id
+                email = f"{uuid}_{inbound_id}"
+                logger.warning(f"Email and username not provided for client {uuid}, using UUID_inbound_id as email")
+        
+        # Используем прямой HTTP запрос к официальному API (из документации Postman)
+        # Это гарантирует правильную установку total (байты) и totalGB (GB)
+        logger.info(f"Creating client {uuid} via direct HTTP API (Postman documentation)")
+        success = await self._add_client_direct_http_async(
+            inbound_id=inbound_id,
+            uuid=uuid,
+            expiry_time=expiry_time,
+            traffic_limit=traffic_limit,
+            enable=enable,
+            email=email
+        )
+        
+        if success:
+            logger.info(f"Successfully added client {uuid} (email: {email}) to inbound {inbound_id} via direct HTTP API")
             return True
+        else:
+            # Fallback: если прямой HTTP не сработал, пробуем через py3xui (для совместимости)
+            logger.warning(f"Direct HTTP API failed, falling back to py3xui for client {uuid}")
+            await self._ensure_logged_in_async()
             
-        except Exception as e:
-            logger.error(f"Failed to add client {uuid} to inbound {inbound_id}: {e}", exc_info=True)
-            raise XUIClientError(f"Failed to add client: {str(e)}")
+            try:
+                client_params = {
+                    'id': uuid,
+                    'email': email,
+                    'enable': enable
+                }
+                
+                if expiry_time is not None:
+                    if expiry_time < 1000000000000:
+                        expiry_time = expiry_time * 1000
+                    client_params['expiry_time'] = expiry_time
+                
+                # НЕ устанавливаем total_gb - будем обновлять через прямой HTTP
+                client = Client(**client_params)
+                await self.py3xui_api.client.add(inbound_id, [client])
+                
+                # Обновляем трафик через прямой HTTP
+                if traffic_limit is not None:
+                    # Минимальная задержка не требуется, так как клиент уже создан
+                    await self._update_client_traffic_direct_async(inbound_id, uuid, traffic_limit, email)
+                
+                logger.info(f"Successfully added client {uuid} via py3xui fallback")
+                return True
+            except Exception as e:
+                logger.error(f"Failed to add client via py3xui fallback: {e}", exc_info=True)
+                return False
     
     def add_client(
         self,
@@ -884,25 +1590,41 @@ class XUIClient:
                             # Перебрасываем другие ошибки
                             raise XUIClientError(f"Failed to add client: {str(add_error)}")
                     
-                    # Создаем обновленный клиент
-                    updated_client = Client(
-                        id=actual_client.id,  # Используем реальный ID из 3X-UI
-                        email=actual_client.email,  # Сохраняем существующий email
-                        enable=enable if enable is not None else actual_client.enable
-                    )
+                    # Подготавливаем параметры для обновленного клиента
+                    update_params = {
+                        'id': actual_client.id,  # Используем реальный ID из 3X-UI
+                        'email': actual_client.email,  # Сохраняем существующий email
+                        'enable': enable if enable is not None else actual_client.enable
+                    }
                     
                     # Устанавливаем лимиты
                     if expiry_time is not None:
                         if expiry_time < 1000000000000:
                             expiry_time = expiry_time * 1000
-                        updated_client.expiry_time = expiry_time
+                        update_params['expiry_time'] = expiry_time
                     elif hasattr(actual_client, 'expiry_time'):
-                        updated_client.expiry_time = actual_client.expiry_time
+                        update_params['expiry_time'] = actual_client.expiry_time
                     
                     if traffic_limit is not None:
-                        updated_client.total_gb = traffic_limit / (1024 ** 3)
-                    elif hasattr(actual_client, 'total_gb'):
-                        updated_client.total_gb = actual_client.total_gb
+                        # Конвертируем байты в GB с округлением до 3 знаков после запятой
+                        total_gb = traffic_limit / (1024 ** 3)
+                        update_params['total_gb'] = round(total_gb, 3)
+                        # Также устанавливаем total в байтах
+                        update_params['total'] = traffic_limit
+                        logger.debug(
+                            f"Updating client {uuid}: traffic_limit={traffic_limit} bytes, "
+                            f"total={traffic_limit} bytes, "
+                            f"total_gb={update_params['total_gb']} (calculated: {total_gb:.6f})"
+                        )
+                    else:
+                        # Сохраняем существующие значения трафика
+                        if hasattr(actual_client, 'total'):
+                            update_params['total'] = actual_client.total
+                        if hasattr(actual_client, 'total_gb'):
+                            update_params['total_gb'] = actual_client.total_gb
+                    
+                    # Создаем обновленный клиент с параметрами
+                    updated_client = Client(**update_params)
                     
                     # Обновляем используя реальный client.id из 3X-UI
                     await self.py3xui_api.client.update(actual_client.id, updated_client)
@@ -1118,6 +1840,7 @@ class XUIClient:
             # Это гарантирует корректность всех параметров, включая serviceName для gRPC
             # py3xui знает, где находятся все настройки, включая grpcSettings
             share_link = None
+            parsed_params_from_3xui = None
             
             try:
                 # Вариант 1: client.get_share_link(inbound_id, uuid) - основной метод py3xui
@@ -1194,17 +1917,17 @@ class XUIClient:
             elif hasattr(inbound, 'streamSettings'):
                 stream_settings_raw = inbound.streamSettings
             
-            # Нормализуем stream_settings в dict (обязательно парсим строку, если пришла)
-            # _normalize_stream_settings обрабатывает JSON-строки, объекты Pydantic и dict
-            stream_settings = _normalize_stream_settings(stream_settings_raw)
+            # Парсим streamSettings из СЫРЫХ данных БЕЗ преобразований ключей
+            # Используем parse_raw_stream_settings для работы с данными КАК ОНИ ПРИШЛИ ИЗ API
+            stream_settings = parse_raw_stream_settings(stream_settings_raw, inbound_id)
             
-            # Валидация: проверяем что stream_settings это dict после нормализации
+            # Валидация: проверяем что stream_settings это dict после парсинга
             if not isinstance(stream_settings, dict):
                 logger.error(
-                    f"Inbound {inbound_id}: stream_settings is not a dict after normalization. "
+                    f"Inbound {inbound_id}: stream_settings is not a dict after parsing. "
                     f"Type: {type(stream_settings)}, value: {stream_settings}"
                 )
-                raise XUIClientError(f"Inbound {inbound_id}: Failed to normalize stream_settings")
+                raise XUIClientError(f"Inbound {inbound_id}: Failed to parse RAW stream_settings")
             
             # Логируем для диагностики
             network = stream_settings.get('network', '').lower() if isinstance(stream_settings, dict) else ''
@@ -1510,69 +2233,151 @@ class XUIClient:
         
         return filtered
     
-    async def _get_inbound_async(self, inbound_id: int) -> Optional[Dict[str, Any]]:
-        """Получает inbound по ID (асинхронно)"""
+    async def _get_raw_inbound_from_api(self, inbound_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Получает СЫРОЙ inbound напрямую из API 3X-UI БЕЗ pydantic моделей.
+        
+        Использует прямой HTTP запрос к /panel/api/inbounds/get/{id} для получения
+        сырого JSON ответа, минуя преобразования py3xui.
+        
+        Args:
+            inbound_id: ID inbound
+            
+        Returns:
+            Сырой dict из API или None
+        """
         await self._ensure_logged_in_async()
         
         try:
+            # ПРИОРИТЕТ 0: Прямой HTTP запрос к API (обходит модели py3xui)
+            raw_direct = await self._get_raw_inbound_direct_async(inbound_id)
+            if raw_direct:
+                logger.debug(
+                    f"Direct HTTP: Got raw inbound {inbound_id}, "
+                    f"keys: {list(raw_direct.keys())}"
+                )
+                return raw_direct
+
+            # Получаем список всех inbounds напрямую из API
+            # Используем py3xui для авторизации, но получаем сырые данные
+            inbounds_list = await self.py3xui_api.inbound.get_list()
+            
+            # Ищем нужный inbound по ID
+            for inbound in inbounds_list:
+                inbound_dict = None
+                
+                # Преобразуем в dict если это объект
+                if isinstance(inbound, Inbound):
+                    # Получаем сырые данные через API напрямую
+                    # py3xui может преобразовывать данные, поэтому используем прямой запрос
+                    try:
+                        # Пытаемся получить сырые данные через __dict__ или другие методы
+                        if hasattr(inbound, '__dict__'):
+                            inbound_dict = inbound.__dict__.copy()
+                            # Извлекаем streamSettings как есть
+                            if hasattr(inbound, 'streamSettings'):
+                                stream_settings_raw = inbound.streamSettings
+                            elif hasattr(inbound, 'stream_settings'):
+                                stream_settings_raw = inbound.stream_settings
+                            else:
+                                stream_settings_raw = inbound_dict.get('streamSettings') or inbound_dict.get('stream_settings')
+                            
+                            # Сохраняем сырой streamSettings
+                            if stream_settings_raw is not None:
+                                inbound_dict['streamSettings'] = stream_settings_raw
+                                inbound_dict['stream_settings'] = stream_settings_raw
+                        else:
+                            # Fallback: используем методы объекта
+                            inbound_dict = {
+                                'id': inbound.id,
+                                'remark': inbound.remark or '',
+                                'protocol': inbound.protocol or '',
+                                'port': inbound.port,
+                                'enable': getattr(inbound, 'enable', True),
+                            }
+                            if hasattr(inbound, 'streamSettings'):
+                                inbound_dict['streamSettings'] = inbound.streamSettings
+                            elif hasattr(inbound, 'stream_settings'):
+                                inbound_dict['streamSettings'] = inbound.stream_settings
+                    except Exception as e:
+                        logger.debug(f"Failed to extract raw data from Inbound object: {e}")
+                        continue
+                elif isinstance(inbound, dict):
+                    inbound_dict = inbound.copy()
+                else:
+                    continue
+                
+                # Проверяем ID
+                inbound_dict_id = inbound_dict.get('id')
+                if inbound_dict_id == inbound_id:
+                    logger.debug(
+                        f"Found raw inbound {inbound_id} in list, "
+                        f"has streamSettings: {'streamSettings' in inbound_dict or 'stream_settings' in inbound_dict}"
+                    )
+                    return inbound_dict
+            
+            logger.warning(f"Raw inbound {inbound_id} not found in API list")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Failed to get raw inbound {inbound_id} from API: {e}", exc_info=True)
+            return None
+    
+    async def _get_inbound_async(self, inbound_id: int) -> Optional[Dict[str, Any]]:
+        """
+        Получает inbound по ID (асинхронно).
+        
+        Сначала пытается получить СЫРЫЕ данные из API напрямую.
+        Если не удалось - использует py3xui как fallback.
+        """
+        await self._ensure_logged_in_async()
+        
+        try:
+            # ПРИОРИТЕТ 1: Получаем сырые данные из API
+            raw_inbound = await self._get_raw_inbound_from_api(inbound_id)
+            if raw_inbound:
+                # Парсим streamSettings БЕЗ преобразований
+                stream_settings_raw = raw_inbound.get('streamSettings') or raw_inbound.get('stream_settings')
+                stream_settings = parse_raw_stream_settings(stream_settings_raw, inbound_id)
+                
+                logger.debug(
+                    f"get_inbound: Using RAW data from API for inbound {inbound_id}, "
+                    f"stream_settings keys: {list(stream_settings.keys()) if isinstance(stream_settings, dict) else 'not a dict'}"
+                )
+                
+                return {
+                    'id': raw_inbound.get('id', inbound_id),
+                    'remark': raw_inbound.get('remark', ''),
+                    'protocol': raw_inbound.get('protocol', ''),
+                    'port': raw_inbound.get('port', 0),
+                    'listen': raw_inbound.get('listen', ''),
+                    'enable': raw_inbound.get('enable', True),
+                    'settings': raw_inbound.get('settings', {}),
+                    'stream_settings': stream_settings,
+                    'streamSettings': stream_settings  # Для совместимости
+                }
+            
+            # ПРИОРИТЕТ 2: Fallback к py3xui (если сырые данные недоступны)
             inbound = await self.py3xui_api.inbound.get_by_id(inbound_id)
             if not inbound:
                 return None
             
             if isinstance(inbound, Inbound):
-                # Извлекаем stream_settings и нормализуем
-                # Источник истины - ТОЛЬКО streamSettings из 3X-UI
+                # Извлекаем stream_settings
                 stream_settings_raw = None
-                if hasattr(inbound, 'stream_settings'):
-                    stream_settings_raw = inbound.stream_settings
-                elif hasattr(inbound, 'streamSettings'):
+                if hasattr(inbound, 'streamSettings'):
                     stream_settings_raw = inbound.streamSettings
+                elif hasattr(inbound, 'stream_settings'):
+                    stream_settings_raw = inbound.stream_settings
                 
-                # Нормализуем stream_settings в dict (обязательно парсим строку, если пришла)
-                stream_settings = _normalize_stream_settings(stream_settings_raw)
+                # Парсим БЕЗ преобразований ключей
+                stream_settings = parse_raw_stream_settings(stream_settings_raw, inbound_id)
                 
-                # Для gRPC: проверяем объект stream_settings_raw напрямую после нормализации
-                # py3xui может не возвращать grpcSettings в нормализованном dict
-                network = stream_settings.get('network', '').lower() if isinstance(stream_settings, dict) else ''
-                if network == 'grpc' and stream_settings_raw:
-                    logger.info(f"get_inbound: gRPC inbound - checking stream_settings_raw for grpcSettings")
-                    # Проверяем через dir() для всех атрибутов
-                    all_attrs = [attr for attr in dir(stream_settings_raw) if not attr.startswith('_')]
-                    grpc_attrs = [attr for attr in all_attrs if 'grpc' in attr.lower()]
-                    if grpc_attrs:
-                        logger.info(f"get_inbound: Found grpc-related attributes: {grpc_attrs}")
-                        for attr_name in grpc_attrs:
-                            try:
-                                attr_value = getattr(stream_settings_raw, attr_name)
-                                logger.info(f"get_inbound: {attr_name} = {type(attr_value)}, value: {attr_value}")
-                                # Нормализуем и добавляем
-                                grpc_ss_normalized = _normalize_stream_settings(attr_value)
-                                if isinstance(grpc_ss_normalized, dict):
-                                    if 'grpcSettings' not in stream_settings:
-                                        stream_settings['grpcSettings'] = grpc_ss_normalized
-                                        logger.info(f"get_inbound: Added grpcSettings from {attr_name}: {grpc_ss_normalized}")
-                            except Exception as e:
-                                logger.debug(f"get_inbound: Failed to get {attr_name}: {e}")
-                
-                # Логируем для отладки
-                network = stream_settings.get('network', 'unknown') if isinstance(stream_settings, dict) else 'unknown'
-                logger.info(
-                    f"get_inbound: inbound_id={inbound_id}, protocol={inbound.protocol or 'unknown'}, "
-                    f"network={network}, remark={inbound.remark or 'no remark'}"
+                logger.debug(
+                    f"get_inbound: Using py3xui fallback for inbound {inbound_id}, "
+                    f"stream_settings keys: {list(stream_settings.keys()) if isinstance(stream_settings, dict) else 'not a dict'}"
                 )
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(f"get_inbound: extracted stream_settings keys: {list(stream_settings.keys()) if isinstance(stream_settings, dict) else 'not a dict'}")
-                    if isinstance(stream_settings, dict):
-                        if 'xhttpSettings' in stream_settings:
-                            xhttp_ss = stream_settings['xhttpSettings']
-                            if isinstance(xhttp_ss, dict):
-                                logger.debug(f"get_inbound: xhttpSettings keys: {list(xhttp_ss.keys())}, path: {xhttp_ss.get('path', 'NOT FOUND')}")
-                        if 'grpcSettings' in stream_settings:
-                            grpc_ss = stream_settings['grpcSettings']
-                            if isinstance(grpc_ss, dict):
-                                logger.debug(f"get_inbound: grpcSettings keys: {list(grpc_ss.keys())}, serviceName: {grpc_ss.get('serviceName', 'NOT FOUND')}")
                 
-                # Извлекаем listen адрес
                 listen = ''
                 if hasattr(inbound, 'listen'):
                     listen = inbound.listen or ''
@@ -1590,7 +2395,7 @@ class XUIClient:
                 }
             return None
         except Exception as e:
-            logger.error(f"Failed to get inbound {inbound_id}: {e}")
+            logger.error(f"Failed to get inbound {inbound_id}: {e}", exc_info=True)
             return None
     
     def get_inbound(self, inbound_id: int) -> Optional[Dict[str, Any]]:
@@ -1651,15 +2456,33 @@ class XUIClient:
                     # По умолчанию используем 127.0.0.1 для работы с reverse proxy
                     server_host = '127.0.0.1'
             
-            # Извлекаем и нормализуем stream_settings
-            # Источник истины - ТОЛЬКО streamSettings из 3X-UI
-            stream_settings_raw = inbound.get('stream_settings', inbound.get('streamSettings', {}))
-            # Нормализуем stream_settings в dict (обязательно парсим строку, если пришла)
-            stream_settings = _normalize_stream_settings(stream_settings_raw)
+            # Извлекаем и парсим stream_settings из СЫРЫХ данных БЕЗ преобразований ключей
+            # Источник истины - ТОЛЬКО streamSettings из 3X-UI API
+            inbound_id = inbound.get('id', 'unknown')
+            stream_settings_raw = inbound.get('streamSettings') or inbound.get('stream_settings')
+            if not stream_settings_raw:
+                logger.warning(f"build_vless_uri: stream_settings is missing for inbound {inbound_id}")
+                return None
             
-            # Извлекаем параметры
-            network = stream_settings.get('network', 'tcp')
+            # Парсим БЕЗ преобразований ключей (camelCase сохраняется как есть)
+            stream_settings = parse_raw_stream_settings(stream_settings_raw, inbound_id)
+            if not stream_settings:
+                logger.warning(f"build_vless_uri: Failed to parse RAW stream_settings for inbound {inbound_id}")
+                return None
+            
+            logger.debug(
+                f"build_vless_uri: Parsed RAW stream_settings for inbound {inbound_id}, "
+                f"keys: {list(stream_settings.keys())}, network: {stream_settings.get('network', 'unknown')}"
+            )
+            
+            # СТРОГО определяем network перед обработкой
+            network = (stream_settings.get('network') or 'tcp').lower()
             security = stream_settings.get('security', 'none')
+            
+            logger.debug(
+                f"build_vless_uri: Processing inbound {inbound_id} with network='{network}', "
+                f"stream_settings keys: {list(stream_settings.keys())}"
+            )
             
             # Собираем query параметры
             query_params = []
@@ -1681,79 +2504,55 @@ class XUIClient:
                 inbound_id_for_error = inbound.get('id', 'unknown')
                 logger.debug(f"build_vless_uri: Extracting grpc serviceName for inbound {inbound_id_for_error}")
                 
-                try:
-                    service_name = _extract_grpc_service_name(stream_settings, inbound_id_for_error)
-                    logger.debug(f"build_vless_uri: Successfully extracted grpc serviceName='{service_name}' for inbound {inbound_id_for_error}")
-                except ValueError as e:
-                    # serviceName не найден - логируем WARNING с dump stream_settings
-                    import json
-                    try:
-                        ss_dump = json.dumps(stream_settings, indent=2, default=str)[:500]
-                    except:
-                        ss_dump = str(stream_settings)[:500]
-                    
-                    logger.warning(
-                        f"build_vless_uri: gRPC inbound {inbound_id_for_error}: serviceName is EMPTY or not found. "
-                        f"Cannot generate valid gRPC VLESS link. "
-                        f"stream_settings: {ss_dump}"
-                    )
-                    return None
+                service_name = _extract_grpc_service_name(stream_settings, inbound_id_for_error)
                 
                 # ВАЛИДАЦИЯ: serviceName ОБЯЗАТЕЛЬНО должен быть не пустым
                 if not service_name or not service_name.strip():
                     logger.warning(
-                        f"build_vless_uri: gRPC inbound {inbound_id_for_error}: serviceName is EMPTY. "
+                        f"build_vless_uri: gRPC inbound {inbound_id_for_error}: serviceName is EMPTY or not found. "
                         f"Skipping gRPC link generation."
                     )
                     return None
                 
+                logger.debug(f"build_vless_uri: Successfully extracted grpc serviceName='{service_name}' for inbound {inbound_id_for_error}")
                 query_params.append(f"serviceName={service_name}")
                 
-                # Извлекаем grpcSettings для mode и authority (опциональные)
-                grpc_settings = stream_settings.get('grpcSettings') or stream_settings.get('grpc_settings')
-                if grpc_settings:
-                    if not isinstance(grpc_settings, dict):
-                        grpc_settings = _normalize_stream_settings(grpc_settings)
+                # Извлекаем mode и authority из СЫРЫХ данных (camelCase как в API)
+                grpc_settings = stream_settings.get('grpcSettings')  # camelCase как в API
+                if grpc_settings and isinstance(grpc_settings, dict):
+                    # Извлекаем mode (multi/gun) если есть
+                    grpc_mode = grpc_settings.get('multiMode')  # camelCase как в API
+                    if grpc_mode is not None:
+                        mode_value = 'multi' if grpc_mode else 'gun'
+                        query_params.append(f"mode={mode_value}")
                     
-                    if isinstance(grpc_settings, dict):
-                        # Извлекаем mode (multi/gun) если есть
-                        grpc_mode = grpc_settings.get('multiMode') or grpc_settings.get('multi_mode')
-                        if grpc_mode is not None:
-                            mode_value = 'multi' if grpc_mode else 'gun'
-                            query_params.append(f"mode={mode_value}")
-                        
-                        # Извлекаем authority (опциональный)
-                        authority = grpc_settings.get('authority')
-                        if authority and isinstance(authority, str) and authority.strip():
-                            query_params.append(f"authority={authority}")
+                    # Извлекаем authority (опциональный)
+                    authority = grpc_settings.get('authority')
+                    if authority and isinstance(authority, str) and authority.strip():
+                        query_params.append(f"authority={authority}")
             elif network in ('xhttp', 'splithttp'):
-                # Извлекаем path с альтернативами и проверками
-                inbound_id = inbound.get('id', 'unknown')
-                try:
-                    path = _extract_xhttp_path(stream_settings, inbound_id)
-                    query_params.append(f"path={self._url_encode(path)}")
-                except ValueError as e:
+                # Извлекаем path из СЫРЫХ данных
+                path = _extract_xhttp_path(stream_settings, inbound_id)
+                if not path:
                     # Если path не найден или равен "/" - возвращаем None
-                    logger.error(f"build_vless_uri: Failed to extract xhttp path: {e}")
+                    logger.warning(f"build_vless_uri: xhttp path missing or invalid for inbound {inbound_id}, skipping xhttp link")
                     return None
                 
-                # Извлекаем host и mode (опциональные)
-                xhttp_keys = ['xhttpSettings', 'xhttp_settings', 'splithttpSettings', 'splithttp_settings']
+                query_params.append(f"path={self._url_encode(path)}")
+                
+                # Извлекаем host и mode из СЫРЫХ данных (camelCase как в API)
+                xhttp_settings = stream_settings.get('xhttpSettings') or stream_settings.get('splithttpSettings')
                 xhttp_host = None
                 mode = 'auto'
                 
-                for key in xhttp_keys:
-                    xhttp_settings = stream_settings.get(key)
-                    if xhttp_settings:
-                        if not isinstance(xhttp_settings, dict):
-                            xhttp_settings = _normalize_stream_settings(xhttp_settings)
-                        if isinstance(xhttp_settings, dict):
-                            if not xhttp_host:
-                                xhttp_host = xhttp_settings.get('host')
-                            if mode == 'auto':
-                                mode_val = xhttp_settings.get('mode')
-                                if mode_val:
-                                    mode = mode_val
+                if xhttp_settings and isinstance(xhttp_settings, dict):
+                    # Извлекаем mode (camelCase как в API)
+                    mode_val = xhttp_settings.get('mode')
+                    if mode_val and isinstance(mode_val, str):
+                        mode = mode_val.strip() if mode_val.strip() else 'auto'
+                    
+                    # Извлекаем host (опциональный)
+                    xhttp_host = xhttp_settings.get('host')
                 
                 if xhttp_host and isinstance(xhttp_host, str) and xhttp_host.strip():
                     query_params.append(f"host={xhttp_host}")

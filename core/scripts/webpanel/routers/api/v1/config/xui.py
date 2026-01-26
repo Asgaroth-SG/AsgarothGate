@@ -21,6 +21,10 @@ sys.path.insert(0, HYSTERIA_CORE_DIR)
 router = APIRouter()
 
 XUI_CONFIG_PATH = Path("/etc/hysteria/xui_config.json")
+try:
+    from xui.config import normalize_xui_server_config
+except Exception:
+    normalize_xui_server_config = None
 
 
 def load_xui_config() -> Dict[str, Any]:
@@ -71,10 +75,38 @@ def load_xui_config() -> Dict[str, Any]:
                 if 'plans' not in server or not server.get('plans'):
                     server['plans'] = ['standard', 'premium']
                     migrated = True
+                # Если нет public_port - добавляем дефолт 443
+                if 'public_port' not in server:
+                    server['public_port'] = 443
+                    migrated = True
+                # Если нет link_host_rewrite_from - добавляем дефолт 127.0.0.1
+                if 'link_host_rewrite_from' not in server:
+                    server['link_host_rewrite_from'] = '127.0.0.1'
+                    migrated = True
+                # Если нет sni - берем public_host как дефолт
+                if 'sni' not in server and server.get('public_host'):
+                    server['sni'] = server.get('public_host')
+                    migrated = True
+                # Если нет xhttp_* - добавляем дефолтные значения
+                if 'xhttp_alpn' not in server:
+                    server['xhttp_alpn'] = 'h2'
+                    migrated = True
+                if 'xhttp_fp' not in server:
+                    server['xhttp_fp'] = 'chrome'
+                    migrated = True
+                if 'xhttp_mode' not in server:
+                    server['xhttp_mode'] = 'auto'
+                    migrated = True
             
             # Сохраняем мигрированный конфиг
             if migrated:
                 save_xui_config(config)
+        
+        # Автоматически нормализуем публичные параметры (без записи в файл)
+        if normalize_xui_server_config:
+            config['xui_servers'] = [
+                normalize_xui_server_config(s) for s in config.get('xui_servers', [])
+            ]
         
         # Миграция: удаляем устаревшие поля (cron и стратегия конфликтов)
         if 'sync_period_type' in config or 'sync_cron' in config or 'conflict_strategy' in config:
@@ -177,6 +209,12 @@ async def update_xui_config_api(body: XUIConfigInputBody):
         if 'sync_interval' not in config_dict or not config_dict.get('sync_interval'):
             config_dict['sync_interval'] = old_config.get('sync_interval', 60)
         
+        # Автоматически нормализуем публичные параметры перед сохранением
+        if normalize_xui_server_config:
+            config_dict['xui_servers'] = [
+                normalize_xui_server_config(s) for s in config_dict.get('xui_servers', [])
+            ]
+        
         save_xui_config(config_dict)
         
         return DetailResponse(detail='X-UI configuration updated successfully.')
@@ -213,7 +251,13 @@ async def check_xui_server_health_api(server_index: int):
                 message="Server is disabled"
             )
         
-        from xui.xui_client import XUIClient, XUIAuthError, XUIConnectionError
+        from xui.xui_api_wrapper import XUIAPIWrapper
+        from xui.xui_api_client import XUIAPIAuthError, XUIAPIConnectionError
+        
+        # Для обратной совместимости
+        XUIClient = XUIAPIWrapper
+        XUIAuthError = XUIAPIAuthError
+        XUIConnectionError = XUIAPIConnectionError
         import logging
         
         logger = logging.getLogger(__name__)
@@ -245,6 +289,25 @@ async def check_xui_server_health_api(server_index: int):
             timeout=server.get('timeout', 10)
         )
         
+        # Измеряем пинг до сервера
+        ping_ms = None
+        try:
+            parsed_host = urlparse(server.get('host', ''))
+            hostname = parsed_host.hostname
+            if hostname:
+                # Пингуем хост
+                start_time = time.time()
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)  # Таймаут 2 секунды
+                port = parsed_host.port or (443 if parsed_host.scheme == 'https' else 80)
+                result = sock.connect_ex((hostname, port))
+                sock.close()
+                if result == 0:
+                    ping_ms = (time.time() - start_time) * 1000  # Конвертируем в миллисекунды
+        except Exception:
+            # Игнорируем ошибки пинга
+            pass
+        
         try:
             healthy, message = client.check_health()
             if healthy:
@@ -252,12 +315,14 @@ async def check_xui_server_health_api(server_index: int):
                 return XUIServerHealthResponse(
                     healthy=True,
                     message=message,
-                    inbounds_count=len(inbounds)
+                    inbounds_count=len(inbounds),
+                    ping_ms=ping_ms
                 )
             else:
                 return XUIServerHealthResponse(
                     healthy=False,
-                    message=message
+                    message=message,
+                    ping_ms=ping_ms
                 )
         except Exception as e:
             # НЕ логируем детали с паролем
@@ -289,7 +354,14 @@ async def test_xui_connection_api(body: XUITestConnectionBody):
     ВАЖНО: Пароли НЕ логируются в целях безопасности.
     """
     try:
-        from xui.xui_client import XUIClient, XUIClientError, XUIAuthError, XUIConnectionError
+        from xui.xui_api_wrapper import XUIAPIWrapper
+        from xui.xui_api_client import XUIAPIError, XUIAPIAuthError, XUIAPIConnectionError
+        
+        # Для обратной совместимости
+        XUIClient = XUIAPIWrapper
+        XUIClientError = XUIAPIError
+        XUIAuthError = XUIAPIAuthError
+        XUIConnectionError = XUIAPIConnectionError
         import logging
         
         logger = logging.getLogger(__name__)
@@ -508,6 +580,56 @@ async def sync_user_xui_api(body: XUISyncUserBody):
     except HTTPException:
         raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Error: {str(e)}')
+
+
+@router.get('/logs', summary='Get X-UI Logs', name='get_xui_logs_api')
+async def get_xui_logs_api(lines: int = 50):
+    """
+    Получает логи синхронизации X-UI.
+    
+    Args:
+        lines: Количество последних строк логов (по умолчанию 50, максимум 1000)
+    
+    Returns:
+        JSON с логами
+    """
+    try:
+        from xui.logging_config import XUI_LOG_FILE
+        
+        # Ограничиваем количество строк
+        lines = max(10, min(1000, lines))
+        
+        if not XUI_LOG_FILE.exists():
+            return {
+                "success": True,
+                "logs": "Файл логов не найден. Логирование еще не началось.",
+                "lines_count": 0
+            }
+        
+        # Читаем последние N строк из файла
+        try:
+            with open(XUI_LOG_FILE, 'r', encoding='utf-8') as f:
+                all_lines = f.readlines()
+                # Берем последние N строк
+                log_lines = all_lines[-lines:] if len(all_lines) > lines else all_lines
+                logs_text = ''.join(log_lines)
+                
+                return {
+                    "success": True,
+                    "logs": logs_text,
+                    "lines_count": len(log_lines),
+                    "total_lines": len(all_lines)
+                }
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to read log file: {str(e)}"
+            )
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error getting X-UI logs: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f'Error: {str(e)}')
 
 

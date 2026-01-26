@@ -176,6 +176,212 @@ async def bulk_remove_users_api(body: UsernamesRequest):
         raise HTTPException(status_code=400, detail=f'Error: {str(e)}')
 
 
+@router.get('/{username}/xui-online-status', summary='Get X-UI Online Status', name='get_user_xui_online_status_api')
+async def get_user_xui_online_status_api(username: str):
+    """
+    Получает статус онлайна пользователя из 3X-UI.
+    
+    Args:
+        username: Имя пользователя Hysteria 2
+    
+    Returns:
+        JSON с информацией о статусе онлайна
+    """
+    try:
+        import sys
+        import logging
+        from pathlib import Path
+        
+        logger = logging.getLogger(__name__)
+        
+        # Добавляем путь только если его еще нет
+        core_scripts_path = '/etc/hysteria/core/scripts'
+        if core_scripts_path not in sys.path:
+            sys.path.insert(0, core_scripts_path)
+        
+        try:
+            from db.database import db
+            from xui.config import load_xui_config
+        except ImportError as import_err:
+            return {
+                "online": False,
+                "error": f"Failed to import required modules: {str(import_err)}"
+            }
+        
+        if not db:
+            return {
+                "online": False,
+                "error": "Database not available"
+            }
+        
+        # Получаем маппинг пользователя
+        mapping = db.get_xui_mapping(username)
+        if not mapping:
+            return {
+                "online": False,
+                "error": "User not synced with X-UI"
+            }
+        
+        client_uuid = mapping.get('xui_client_uuid')
+        xui_host = mapping.get('xui_host')
+        
+        if not client_uuid:
+            return {
+                "online": False,
+                "error": "No client UUID in mapping"
+            }
+        
+        # Загружаем конфигурацию X-UI
+        config = load_xui_config()
+        if not config.get('enabled', False):
+            return {
+                "online": False,
+                "error": "X-UI sync is disabled"
+            }
+        
+        servers = config.get('xui_servers', [])
+        if not servers:
+            return {
+                "online": False,
+                "error": "No X-UI servers configured"
+            }
+        
+        # Находим сервер для этого пользователя
+        target_server = None
+        if xui_host:
+            # Если указан хост, ищем по нему
+            for server in servers:
+                if server.get('host') == xui_host and server.get('enabled', True):
+                    target_server = server
+                    break
+        
+        if not target_server:
+            # Если хост не указан или не найден, берем первый включенный сервер
+            for server in servers:
+                if server.get('enabled', True):
+                    target_server = server
+                    break
+        
+        if not target_server:
+            return {
+                "online": False,
+                "error": "No enabled X-UI server found"
+            }
+        
+        # Создаем клиент для проверки статуса
+        try:
+            from xui.xui_api_wrapper import XUIAPIWrapper
+        except ImportError as import_err:
+            return {
+                "online": False,
+                "error": f"Failed to import XUIAPIWrapper: {str(import_err)}"
+            }
+        
+        auth_type = target_server.get('auth_type', 'username')
+        if auth_type == 'token':
+            xui_username = 'admin'  # Заглушка для token
+        else:
+            xui_username = target_server.get('username', '')
+        
+        xui_password = target_server.get('password', '')
+        
+        if not xui_password:
+            return {
+                "online": False,
+                "error": "X-UI server password not configured"
+            }
+        
+        client = XUIAPIWrapper(
+            host=target_server.get('host'),
+            username=xui_username,
+            password=xui_password,
+            base_path=target_server.get('base_path', '/'),
+            timeout=target_server.get('timeout', 10)
+        )
+        
+        try:
+            # Пробуем найти клиента по UUID или email
+            # Email обычно в формате: hysteria_username_inbound_id
+            inbound_ids = mapping.get('inbound_ids', [])
+            is_online = False
+            client_ips = []
+            
+            # Пробуем проверить по UUID
+            try:
+                is_online = client.is_client_online(client_uuid)
+                logger.debug(f"XUI online check for {username} (UUID {client_uuid}): {is_online}")
+            except Exception as e:
+                logger.warning(f"Error checking online status by UUID for {username}: {e}")
+                is_online = False
+            
+            if not is_online and inbound_ids:
+                # Если не нашли по UUID, пробуем по email
+                for inbound_id in inbound_ids:
+                    client_email = f"{username}_{inbound_id}"
+                    try:
+                        if client.is_client_online(client_email):
+                            is_online = True
+                            logger.debug(f"XUI online check for {username} (email {client_email}): {is_online}")
+                            break
+                    except Exception as e:
+                        logger.warning(f"Error checking online status by email {client_email} for {username}: {e}")
+                        continue
+            
+            # Получаем IP адреса если клиент онлайн
+            if is_online:
+                try:
+                    client_ips = client.get_client_ips(client_uuid) or []
+                    if not client_ips and inbound_ids:
+                        # Пробуем по email
+                        for inbound_id in inbound_ids:
+                            client_email = f"{username}_{inbound_id}"
+                            try:
+                                client_ips = client.get_client_ips(client_email) or []
+                                if client_ips:
+                                    break
+                            except Exception as e:
+                                logger.warning(f"Error getting IPs by email {client_email} for {username}: {e}")
+                                continue
+                except Exception as e:
+                    logger.warning(f"Error getting client IPs for {username}: {e}")
+                    client_ips = []
+            
+            result = {
+                "online": is_online,
+                "client_uuid": client_uuid,
+                "client_ips": client_ips,
+                "xui_host": xui_host or target_server.get('host')
+            }
+            logger.debug(f"XUI online status result for {username}: {result}")
+            return result
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error checking X-UI online status for {username}: {e}", exc_info=True)
+            return {
+                "online": False,
+                "error": f"Error checking status: {str(e)}"
+            }
+        finally:
+            # XUIAPIWrapper не имеет метода close(), но api_client может иметь
+            try:
+                if hasattr(client, 'close'):
+                    client.close()
+                elif hasattr(client, 'api_client') and hasattr(client.api_client, 'close'):
+                    client.api_client.close()
+            except:
+                pass
+    
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Unexpected error in get_user_xui_online_status: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f'Error: {str(e)}'
+        )
+
+
 @router.get('/{username}', response_model=UserInfoResponse)
 async def get_user_api(username: str):
     """

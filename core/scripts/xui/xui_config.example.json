@@ -1,41 +1,77 @@
 {
   "enabled": true,
   "mode": "multi-xui",
+  "_comment_https": "=== ВАЖНО: Используйте только HTTPS для безопасности ===",
+  "_comment_api": "=== use_official_api: true - использовать только официальное API из Postman коллекции ===",
   "xui_servers": [
     {
-      "host": "http://standard-server.example.com:54321",
+      "name": "server-main",
+      "host": "https://panel.example.com:5560",
       "username": "admin",
       "password": "your_password",
       "base_path": "/",
       "timeout": 10,
       "max_retries": 3,
-      "plans": ["standard"],
+      "verify_ssl": true,
+      "force_https": true,
+      "use_official_api": true,
+      "plans": ["standard", "premium"],
+      
+      "_comment_public": "=== ПУБЛИЧНЫЕ ПАРАМЕТРЫ ДЛЯ ГЕНЕРАЦИИ ССЫЛОК ===",
+      "public_host": "gateway.example.com",
+      "public_port": 443,
+      "sni": "gateway.example.com",
+      "link_host_rewrite_from": "127.0.0.1",
+      "xhttp_mode": "auto",
+      "xhttp_alpn": "h2",
+      "xhttp_fp": "chrome",
+      "grpc_authority": "",
+      
       "inbound_filter": {
-        "protocol": "vless",
-        "remark": "VLESS-Standard"
+        "protocol": "vless"
       }
     },
     {
-      "host": "http://premium-server.example.com:54321",
+      "name": "server-premium",
+      "host": "https://panel-premium.example.com:5560",
       "username": "admin",
       "password": "your_password",
       "base_path": "/",
       "timeout": 10,
       "max_retries": 3,
       "plans": ["premium"],
+      
+      "public_host": "premium.example.com",
+      "public_port": 443,
+      "sni": "premium.example.com",
+      "xhttp_mode": "auto",
+      "xhttp_alpn": "h2",
+      "xhttp_fp": "chrome",
+      "grpc_authority": "",
+      
       "inbound_filter": {
         "protocol": "vless",
         "remark": "VLESS-Premium"
       }
     },
     {
-      "host": "http://shared-server.example.com:54321",
+      "name": "server-standard",
+      "host": "https://panel-standard.example.com:5560",
       "username": "admin",
       "password": "your_password",
       "base_path": "/",
       "timeout": 10,
       "max_retries": 3,
-      "plans": ["standard", "premium"],
+      "plans": ["standard"],
+      
+      "public_host": "standard.example.com",
+      "public_port": 443,
+      "sni": "standard.example.com",
+      "xhttp_mode": "auto",
+      "xhttp_alpn": "h2",
+      "xhttp_fp": "chrome",
+      "grpc_authority": "",
+      
       "inbound_filter": {
         "protocol": "vless"
       }
