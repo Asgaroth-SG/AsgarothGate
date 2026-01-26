@@ -6,8 +6,8 @@ trap 'echo -e "\n❌ Произошла ошибка. Прерывание."; ex
 # ========== Переменные ==========
 HYSTERIA_INSTALL_DIR="/etc/hysteria"
 HYSTERIA_VENV_DIR="$HYSTERIA_INSTALL_DIR/hysteria2_venv"
-GEOSITE_URL="https://cdn.jsdelivr.net/gh/runetfreedom/russia-blocked-geosite@release/geosite.dat"
-GEOIP_URL="https://cdn.jsdelivr.net/gh/runetfreedom/russia-blocked-geoip@release/geoip.dat"
+GEOSITE_URL="https://raw.githubusercontent.com/runetfreedom/russia-blocked-geosite/release/geosite.dat"
+GEOIP_URL="https://raw.githubusercontent.com/runetfreedom/russia-blocked-geoip/release/geoip.dat"
 MIGRATE_SCRIPT_PATH="$HYSTERIA_INSTALL_DIR/core/scripts/db/migrate_users.py"
 
 # ========== Настройка цветов ==========
