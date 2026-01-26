@@ -782,7 +782,9 @@ class SubscriptionManager:
                 f"total={user_info.max_download_bytes}; "
                 f"expire={user_info.expiration_timestamp}\n"
             )
-            profile_lines = "//profile-title: Asgaroth Gate\n//profile-update-interval: 1\n"
+            # Кодируем сообщение в base64 для параметра announce
+            message_base64 = base64.b64encode(message.encode('utf-8')).decode('utf-8')
+            profile_lines = f"//profile-title: Asgaroth Gate\n//profile-update-interval: 1\n//announce: base64:{message_base64}\n"
             result = profile_lines + subscription_info + fake_uri
             logger.info(f"Generated blocked subscription for {username} with message: {message}")
             return result
@@ -1255,7 +1257,9 @@ class HysteriaServer:
                 f"total={user_info.max_download_bytes}; "
                 f"expire={user_info.expiration_timestamp}\n"
             )
-            profile_lines = "//profile-title: Asgaroth Gate\n//profile-update-interval: 1\n"
+            # Кодируем сообщение в base64 для параметра announce
+            message_base64 = base64.b64encode(message.encode('utf-8')).decode('utf-8')
+            profile_lines = f"//profile-title: Asgaroth Gate\n//profile-update-interval: 1\n//announce: base64:{message_base64}\n"
             subscription = profile_lines + subscription_info + fake_uri
             logger.info(f"Returning blocked subscription for Happ client: {message}")
             return web.Response(text=subscription, content_type='text/plain')
