@@ -98,6 +98,32 @@ EOL
     cat <<EOL >> "$CADDY_CONFIG_FILE"
 
 $DOMAIN:$PORT {
+EOL
+
+    # Добавляем XHTTP маршрут, если настроен
+    if [ -n "$XHTTP_PATH" ] && [ -n "$XHTTP_PORT" ]; then
+        cat <<EOL >> "$CADDY_CONFIG_FILE"
+    #XHTTP
+    route $XHTTP_PATH/* {
+        reverse_proxy 127.0.0.1:$XHTTP_PORT
+    }
+EOL
+    fi
+
+    # Добавляем gRPC маршрут, если настроен
+    if [ -n "$GRPC_PORT" ]; then
+        cat <<EOL >> "$CADDY_CONFIG_FILE"
+    # gRPC
+    @grpc {
+        header Content-Type application/grpc*
+    }
+    handle @grpc {
+        reverse_proxy h2c://127.0.0.1:$GRPC_PORT
+    }
+EOL
+    fi
+
+    cat <<EOL >> "$CADDY_CONFIG_FILE"
     # Веб-панель
     route /$ROOT_PATH/* {
         reverse_proxy http://127.0.0.1:28260
@@ -126,6 +152,13 @@ EOL
     @otherPaths {
         not path /$ROOT_PATH/*
 EOL
+    
+    # Исключаем XHTTP путь из @otherPaths, если настроен
+    if [ -n "$XHTTP_PATH" ]; then
+        # Убираем начальный слэш если есть, для сравнения
+        local xhttp_path_clean="${XHTTP_PATH#/}"
+        echo "        not path $XHTTP_PATH/*" >> "$CADDY_CONFIG_FILE"
+    fi
     
     if [ "$MERGE_SUBS" = true ]; then
         echo "        not path /$SUB_PATH/*" >> "$CADDY_CONFIG_FILE"
@@ -568,6 +601,92 @@ show_webpanel_api_token() {
     echo "$API_TOKEN"
 }
 
+set_xui_proxy() {
+    local xhttp_path=$1
+    local xhttp_port=$2
+    local grpc_port=$3
+
+    if [ ! -f "$WEBPANEL_ENV_FILE" ]; then
+        echo -e "${red}Ошибка: Файл .env веб-панели не найден. Веб-панель настроена?${NC}"
+        exit 1
+    fi
+
+    local changes_made=false
+
+    if [ -n "$xhttp_path" ] && [ -n "$xhttp_port" ]; then
+        # Убеждаемся, что путь начинается с /
+        if [[ ! "$xhttp_path" =~ ^/ ]]; then
+            xhttp_path="/$xhttp_path"
+        fi
+        # Убираем завершающий слэш если есть
+        xhttp_path="${xhttp_path%/}"
+        
+        echo "Настройка XHTTP: путь=$xhttp_path, порт=$xhttp_port"
+        # Удаляем старые значения
+        sed -i "/^XHTTP_PATH=/d" "$WEBPANEL_ENV_FILE"
+        sed -i "/^XHTTP_PORT=/d" "$WEBPANEL_ENV_FILE"
+        # Добавляем новые
+        echo "XHTTP_PATH=$xhttp_path" >> "$WEBPANEL_ENV_FILE"
+        echo "XHTTP_PORT=$xhttp_port" >> "$WEBPANEL_ENV_FILE"
+        changes_made=true
+    fi
+
+    if [ -n "$grpc_port" ]; then
+        echo "Настройка gRPC: порт=$grpc_port"
+        # Удаляем старое значение
+        sed -i "/^GRPC_PORT=/d" "$WEBPANEL_ENV_FILE"
+        # Добавляем новое
+        echo "GRPC_PORT=$grpc_port" >> "$WEBPANEL_ENV_FILE"
+        changes_made=true
+    fi
+
+    if [ "$changes_made" = true ]; then
+        echo "Обновление конфигурации Caddy..."
+        update_caddy_file
+        if [ $? -ne 0 ]; then
+            echo -e "${red}Ошибка: Не удалось обновить Caddyfile.${NC}"
+            exit 1
+        fi
+
+        echo "Перезапуск службы Caddy для применения изменений..."
+        if systemctl restart hysteria-caddy.service; then
+            echo -e "${green}Параметры XHTTP/gRPC успешно обновлены.${NC}"
+        else
+            echo -e "${red}Не удалось перезапустить Caddy. Пожалуйста, перезапустите его вручную.${NC}"
+        fi
+    else
+        echo -e "${yellow}Не указаны параметры для обновления.${NC}"
+        echo -e "${yellow}Использование: $0 setxui <XHTTP_PATH> <XHTTP_PORT> [GRPC_PORT]${NC}"
+        echo -e "${yellow}Пример: $0 setxui /xhttp/9f3a1cfba29df6b437aed633b158d0e9 20000 20001${NC}"
+    fi
+}
+
+remove_xui_proxy() {
+    if [ ! -f "$WEBPANEL_ENV_FILE" ]; then
+        echo -e "${red}Ошибка: Файл .env веб-панели не найден. Веб-панель настроена?${NC}"
+        exit 1
+    fi
+
+    echo "Удаление параметров XHTTP/gRPC..."
+    sed -i "/^XHTTP_PATH=/d" "$WEBPANEL_ENV_FILE"
+    sed -i "/^XHTTP_PORT=/d" "$WEBPANEL_ENV_FILE"
+    sed -i "/^GRPC_PORT=/d" "$WEBPANEL_ENV_FILE"
+
+    echo "Обновление конфигурации Caddy..."
+    update_caddy_file
+    if [ $? -ne 0 ]; then
+        echo -e "${red}Ошибка: Не удалось обновить Caddyfile.${NC}"
+        exit 1
+    fi
+
+    echo "Перезапуск службы Caddy для применения изменений..."
+    if systemctl restart hysteria-caddy.service; then
+        echo -e "${green}Параметры XHTTP/gRPC успешно удалены.${NC}"
+    else
+        echo -e "${red}Не удалось перезапустить Caddy. Пожалуйста, перезапустите его вручную.${NC}"
+    fi
+}
+
 stop_service() {
     echo "Остановка Caddy..."
     systemctl disable hysteria-caddy.service > /dev/null 2>&1
@@ -627,9 +746,20 @@ case "$1" in
         ;;
     genconfig)
         update_caddy_file
-        ;;	
+        ;;
+    setxui)
+        if [ -z "$2" ] || [ -z "$3" ]; then
+            echo -e "${red}Использование: $0 setxui <XHTTP_PATH> <XHTTP_PORT> [GRPC_PORT]${NC}"
+            echo -e "${yellow}Пример: $0 setxui /xhttp/9f3a1cfba29df6b437aed633b158d0e9 20000 20001${NC}"
+            exit 1
+        fi
+        set_xui_proxy "$2" "$3" "$4"
+        ;;
+    removexui)
+        remove_xui_proxy
+        ;;
 	*)
-        echo -e "${red}Использование: $0 {start|stop|decoy|stopdecoy|resetcreds|changeexp|changeroot|changedomain|url|api-token} [опции]${NC}"
+        echo -e "${red}Использование: $0 {start|stop|decoy|stopdecoy|resetcreds|changeexp|changeroot|changedomain|url|api-token|setxui|removexui|genconfig} [опции]${NC}"
         echo -e "${yellow}start <DOMAIN> <PORT> [ADMIN_USERNAME] [ADMIN_PASSWORD] [EXPIRATION_MINUTES] [DEBUG] [DECOY_PATH]${NC}"
         echo -e "${yellow}stop${NC}"
         echo -e "${yellow}decoy <DOMAIN> <PATH_TO_DECOY_SITE>${NC}"
@@ -640,6 +770,9 @@ case "$1" in
         echo -e "${yellow}changedomain [-d new_domain] [-p new_port]${NC}"
         echo -e "${yellow}url${NC}"
         echo -e "${yellow}api-token${NC}"
+        echo -e "${yellow}setxui <XHTTP_PATH> <XHTTP_PORT> [GRPC_PORT] # Настройка прокси для 3X-UI${NC}"
+        echo -e "${yellow}removexui # Удаление настроек прокси для 3X-UI${NC}"
+        echo -e "${yellow}genconfig # Пересоздать Caddyfile из .env${NC}"
         exit 1
         ;;
 esac

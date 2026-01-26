@@ -276,6 +276,21 @@ if id -u hysteria >/dev/null 2>&1; then
 fi
 chmod +x "$HYSTERIA_INSTALL_DIR/core/scripts/hysteria2/kick.py"
 chmod +x "$HYSTERIA_INSTALL_DIR/core/scripts/auth/user_auth"
+# Установка прав на выполнение для основных скриптов
+if [[ -f "$HYSTERIA_INSTALL_DIR/install.sh" ]]; then
+    chmod +x "$HYSTERIA_INSTALL_DIR/install.sh"
+    info "Права на выполнение установлены для install.sh"
+fi
+if [[ -f "$HYSTERIA_INSTALL_DIR/menu.sh" ]]; then
+    chmod +x "$HYSTERIA_INSTALL_DIR/menu.sh"
+    info "Права на выполнение установлены для menu.sh"
+fi
+if [[ -f "$HYSTERIA_INSTALL_DIR/upgrade.sh" ]]; then
+    chmod +x "$HYSTERIA_INSTALL_DIR/upgrade.sh"
+    info "Права на выполнение установлены для upgrade.sh"
+fi
+# Установка прав на выполнение для скриптов в core/scripts
+find "$HYSTERIA_INSTALL_DIR/core/scripts" -type f -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
 success "Права доступа обновлены."
 
 # ========== Виртуальное окружение ==========

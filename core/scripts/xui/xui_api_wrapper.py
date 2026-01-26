@@ -503,3 +503,12 @@ class XUIAPIWrapper:
     def close(self):
         """Закрывает все соединения"""
         self.api_client.close()
+    
+    def restart_xray_service(self) -> Dict[str, Any]:
+        """
+        Перезапускает X-Ray сервис в 3X-UI.
+        
+        Returns:
+            dict с результатом перезапуска
+        """
+        return self._run_async_in_sync_context(self.api_client.restart_xray_service())

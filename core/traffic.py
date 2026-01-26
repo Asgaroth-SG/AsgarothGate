@@ -604,8 +604,30 @@ class TrafficManager:
             except (ValueError, TypeError): continue
         
         if users_to_block:
-            for username in users_to_block:
-                self.db.update_user(username, {'blocked': True, 'status': STATUS_OFFLINE, 'online_count': 0})
+            xray_restart_needed = False
+            for user in all_users:
+                username = user.get('_id')
+                if username not in users_to_block:
+                    continue
+                
+                # Определяем причину блокировки
+                total_bytes = user.get('download_bytes', 0) + user.get('upload_bytes', 0)
+                expired_by_date = (user.get('expiration_days', 0) > 0 and now >= datetime.datetime.strptime(user['account_creation_date'], "%Y-%m-%d") + datetime.timedelta(days=user['expiration_days']))
+                expired_by_traffic = (user.get('max_download_bytes', 0) > 0 and total_bytes >= user.get('max_download_bytes', 0))
+                
+                block_reason = None
+                if expired_by_traffic:
+                    block_reason = "traffic"
+                elif expired_by_date:
+                    block_reason = "expiration"
+                
+                # Обновляем пользователя с причиной блокировки
+                update_data = {'blocked': True, 'status': STATUS_OFFLINE, 'online_count': 0}
+                if block_reason:
+                    update_data['block_reason'] = block_reason
+                
+                self.db.update_user(username, update_data)
+                
                 # Синхронизируем блокировку с 3X-UI
                 try:
                     from xui.sync_helper import sync_user_update
@@ -613,9 +635,21 @@ class TrafficManager:
                         username=username,
                         enable=False  # enable=False означает отключение пользователя в 3X-UI
                     )
-                    logging.info(f"Synced user {username} block status to 3X-UI (disabled)")
+                    logging.info(f"Synced user {username} block status to 3X-UI (disabled, reason: {block_reason})")
+                    xray_restart_needed = True
                 except Exception as e:
                     logging.warning(f"Failed to sync user {username} block status to 3X-UI: {e}")
+            
+            # Перезапускаем X-Ray после блокировки пользователей
+            if xray_restart_needed:
+                try:
+                    from xui.sync_helper import restart_xray_services
+                    if restart_xray_services():
+                        logging.info("X-Ray services restarted successfully after blocking users")
+                    else:
+                        logging.warning("Some X-Ray services failed to restart after blocking users")
+                except Exception as e:
+                    logging.warning(f"Failed to restart X-Ray services: {e}")
         
         if users_to_kick:
             for i in range(0, len(users_to_kick), 50):

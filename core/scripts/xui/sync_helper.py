@@ -124,3 +124,83 @@ def sync_user_delete(username: str) -> bool:
     except Exception as e:
         logger.error(f"X-UI sync error for user {username}: {e}")
         return True
+
+
+def restart_xray_services() -> bool:
+    """
+    Перезапускает X-Ray сервисы во всех настроенных 3X-UI панелях.
+    
+    Returns:
+        True если перезапуск успешен или отключен
+    """
+    try:
+        sync_manager = get_xui_sync_manager()
+        if not sync_manager:
+            return True  # Синхронизация отключена
+        
+        # Получаем все серверы из конфигурации
+        from xui.config import load_xui_config
+        config = load_xui_config()
+        
+        if not config.get('enabled') or not config.get('xui_servers'):
+            return True
+        
+        restarted_count = 0
+        errors = []
+        
+        for server_config in config.get('xui_servers', []):
+            if not server_config.get('enabled', True):
+                continue
+            
+            try:
+                from xui.xui_api_wrapper import XUIAPIWrapper
+                
+                # Определяем тип авторизации
+                auth_type = server_config.get('auth_type', 'username')
+                if auth_type == 'token':
+                    # Для token используем специальную логику
+                    password = server_config.get('password', '')  # password может быть token
+                else:
+                    password = server_config.get('password', '')
+                
+                client = XUIAPIWrapper(
+                    host=server_config['host'],
+                    username=server_config.get('username', ''),
+                    password=password,
+                    base_path=server_config.get('base_path', '/'),
+                    timeout=server_config.get('timeout', 10),
+                    verify_ssl=server_config.get('verify_ssl', True),
+                    force_https=server_config.get('force_https', True)
+                )
+                
+                # Авторизуемся
+                if not client.login():
+                    errors.append(f"Failed to login to {server_config.get('name', server_config['host'])}")
+                    continue
+                
+                # Перезапускаем X-Ray
+                result = client.restart_xray_service()
+                if result.get('success'):
+                    restarted_count += 1
+                    logger.info(f"X-Ray restarted on {server_config.get('name', server_config['host'])}: {result.get('msg', '')}")
+                else:
+                    errors.append(f"Failed to restart X-Ray on {server_config.get('name', server_config['host'])}: {result.get('msg', 'Unknown error')}")
+                
+                client.close()
+                
+            except Exception as e:
+                server_name = server_config.get('name', server_config.get('host', 'unknown'))
+                logger.error(f"Error restarting X-Ray on {server_name}: {e}")
+                errors.append(f"{server_name}: {str(e)}")
+        
+        if errors:
+            logger.warning(f"Some X-Ray services failed to restart: {errors}")
+        
+        if restarted_count > 0:
+            logger.info(f"Successfully restarted X-Ray on {restarted_count} server(s)")
+        
+        return restarted_count > 0 or len(errors) == 0
+    
+    except Exception as e:
+        logger.error(f"Error restarting X-Ray services: {e}")
+        return True  # Не блокируем процесс

@@ -105,6 +105,7 @@ class UserInfo:
     expiration_days: int
     blocked: bool = False
     plan: str = "standard"
+    block_reason: Optional[str] = None  # "traffic" или "expiration"
 
     @property
     def total_usage(self) -> int:
@@ -276,6 +277,7 @@ class HysteriaCLI:
             expiration_days=user_doc.get('expiration_days', 0),
             blocked=user_doc.get('blocked', False),
             plan=user_doc.get('plan', 'standard'),
+            block_reason=user_doc.get('block_reason', None),
         )
 
     def get_all_uris(self, username: str) -> List[str]:
@@ -1188,11 +1190,29 @@ class HysteriaServer:
             return web.Response(status=500, text="Error: Internal server error")
 
     async def _handle_blocked_user(self, request: web.Request, user_info: UserInfo) -> web.Response:
-        fake_uri = "hysteria2://x@end.com:443?sni=support.me#⛔Подписка истекла⚠️"
+        # Определяем сообщение в зависимости от причины блокировки
+        if user_info.block_reason == "traffic":
+            message = "⚠️ Трафик исчерпан"
+        elif user_info.block_reason == "expiration":
+            message = "⛔️ Подписка истекла"
+        else:
+            # По умолчанию, если причина не указана, определяем по данным пользователя
+            import time
+            from datetime import datetime, timedelta
+            now = datetime.now()
+            total_bytes = user_info.upload_bytes + user_info.download_bytes
+            expired_by_traffic = (user_info.max_download_bytes > 0 and total_bytes >= user_info.max_download_bytes)
+            
+            if expired_by_traffic:
+                message = "⚠️ Трафик исчерпан"
+            else:
+                message = "⛔️ Подписка истекла"
+        
+        fake_uri = f"hysteria2://x@end.com:443?sni=support.me#{message}"
         user_agent = request.headers.get('User-Agent', '').lower()
 
         if any(browser in user_agent for browser in ['chrome', 'firefox', 'safari', 'edge', 'opera']):
-            context = self._get_blocked_template_context(fake_uri, user_info)
+            context = self._get_blocked_template_context(fake_uri, user_info, message)
             return web.Response(text=self.template_renderer.render(context), content_type='text/html')
 
         fragment = request.query.get('fragment', '')
@@ -1202,11 +1222,11 @@ class HysteriaServer:
 
         return web.Response(text=fake_uri, content_type='text/plain')
 
-    def _get_blocked_template_context(self, fake_uri: str, user_info: UserInfo) -> TemplateContext:
+    def _get_blocked_template_context(self, fake_uri: str, user_info: UserInfo, message: str = "⛔️ Подписка истекла") -> TemplateContext:
         return TemplateContext(
             username=user_info.username,
             usage=user_info.usage_human_readable,
-            usage_raw="This account has been suspended.",
+            usage_raw=message,
             expiration_date=user_info.expiration_date,
             sublink_qrcode="",
             sub_link="#blocked",

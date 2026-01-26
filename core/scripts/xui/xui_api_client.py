@@ -1026,3 +1026,55 @@ class XUIAPIClient:
         
         logger.warning(f"Unexpected response format for client traffics {client_uuid}: {type(obj)}")
         return []
+    
+    async def restart_xray_service(self) -> Dict[str, Any]:
+        """
+        Перезапускает X-Ray сервис в 3X-UI.
+        
+        Эндпоинт: POST /panel/api/server/restartXrayService
+        
+        Returns:
+            dict с результатом перезапуска:
+            {
+                "success": true,
+                "msg": "Xray has been successfully relaunched.",
+                "obj": null
+            }
+            
+        Raises:
+            XUIAPIError: При ошибке API
+            XUIAPIConnectionError: При ошибке подключения
+        """
+        await self._ensure_logged_in()
+        
+        url = self._build_api_url("panel/api/server/restartXrayService")
+        logger.info(f"Restarting X-Ray service via: {url}")
+        
+        response = await self._request_with_retry('POST', url, cookies=self._cookies)
+        
+        if not response:
+            raise XUIAPIConnectionError("No response from server when restarting X-Ray")
+        
+        if response.status_code != 200:
+            error_msg = f"Failed to restart X-Ray service: status={response.status_code}"
+            try:
+                error_data = response.json()
+                if isinstance(error_data, dict) and 'msg' in error_data:
+                    error_msg += f", msg={error_data['msg']}"
+            except:
+                error_msg += f", response={response.text[:200]}"
+            logger.error(error_msg)
+            raise XUIAPIError(error_msg)
+        
+        data = response.json()
+        obj = self._extract_api_obj(data)
+        
+        if isinstance(obj, dict) and obj.get('success'):
+            logger.info(f"X-Ray service restarted successfully: {obj.get('msg', '')}")
+            return obj
+        elif isinstance(data, dict) and data.get('success'):
+            logger.info(f"X-Ray service restarted successfully: {data.get('msg', '')}")
+            return data
+        else:
+            logger.warning(f"Unexpected response format for restart X-Ray: {type(obj)}")
+            return data if isinstance(data, dict) else {"success": True, "msg": "X-Ray restarted", "obj": None}
