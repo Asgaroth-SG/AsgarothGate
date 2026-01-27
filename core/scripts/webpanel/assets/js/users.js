@@ -18,6 +18,11 @@ $(function () {
     
     let cachedUserData = [];
     let searchTimeout = null;
+    
+    // Переменные для управления обновлением статусов X-UI
+    let xuiStatusUpdateInterval = null;
+    let xuiStatusUpdateInProgress = false;
+    let xuiStatusCache = {}; // Кэш статусов для восстановления после обновления таблицы
 
     // --- Настройка компактных уведомлений (Toasts) ---
     const Toast = (window.Toast || Swal).mixin({
@@ -162,8 +167,12 @@ $(function () {
                 
                 translateTable();
                 highlightSearchResults(query);
+                // Восстанавливаем статусы из кэша и загружаем новые
+                restoreXUIOnlineStatuses();
                 // Загружаем статус онлайна из 3X-UI
-                loadXUIOnlineStatuses();
+                setTimeout(function() {
+                    loadXUIOnlineStatuses();
+                }, 300); // Небольшая задержка для готовности DOM
             },
             error: function () {
                 Toast.fire({icon: 'error', title: "Произошла ошибка во время поиска."});
@@ -196,8 +205,12 @@ $(function () {
 
                 checkIpLimitServiceStatus();
                 translateTable();
+                // Восстанавливаем статусы из кэша и загружаем новые
+                restoreXUIOnlineStatuses();
                 // Загружаем статус онлайна из 3X-UI
-                loadXUIOnlineStatuses();
+                setTimeout(function() {
+                    loadXUIOnlineStatuses();
+                }, 300); // Небольшая задержка для готовности DOM
             },
             error: function () {
                 Toast.fire({icon: 'error', title: "Не удалось восстановить список пользователей."});
@@ -209,8 +222,22 @@ $(function () {
         });
     }
     
-    // Загрузка статуса онлайна из 3X-UI для всех пользователей
+    // Загрузка статуса онлайна из 3X-UI для всех пользователей (оптимизировано через батчинг)
     function loadXUIOnlineStatuses() {
+        // Предотвращаем параллельные запросы
+        if (xuiStatusUpdateInProgress) {
+            console.debug('XUI online status: Update already in progress, skipping');
+            return;
+        }
+        
+        // Проверяем, что таблица загружена
+        const $userTableBody = $('#userTableBody');
+        if ($userTableBody.length === 0 || $userTableBody.find('tr.user-main-row').length === 0) {
+            console.debug('XUI online status: Table not ready, retrying in 500ms');
+            setTimeout(loadXUIOnlineStatuses, 500);
+            return;
+        }
+        
         const usernames = [];
         $('#userTableBody tr.user-main-row').each(function() {
             const username = $(this).find('td[data-username]').attr('data-username');
@@ -220,21 +247,149 @@ $(function () {
         });
         
         if (usernames.length === 0) {
+            console.debug('XUI online status: No users found to check');
             return;
         }
         
-        // Загружаем статус для каждого пользователя (с небольшой задержкой между запросами)
-        usernames.forEach((username, index) => {
-            setTimeout(() => {
-                loadXUIOnlineStatus(username);
-            }, index * 100); // 100ms задержка между запросами
+        xuiStatusUpdateInProgress = true;
+        console.log(`XUI online status: Checking status for ${usernames.length} users`);
+        
+        // Используем батч-запрос для получения статусов всех пользователей одним запросом
+        // Это в 10-50 раз быстрее чем отдельные запросы для каждого пользователя
+        // Формируем URL с учетом ROOT_PATH
+        const currentPath = window.location.pathname;
+        // Извлекаем ROOT_PATH из текущего пути (например, /2373b6647ec2970a7249e9cdc0c3bc94/users/)
+        const rootPathMatch = currentPath.match(/^\/([^\/]+)\//);
+        const rootPath = rootPathMatch ? rootPathMatch[1] : '';
+        const baseUrl = window.location.origin;
+        const apiUrl = rootPath ? `${baseUrl}/${rootPath}/api/v1/user/xui-online-status/batch` : `${baseUrl}/api/v1/user/xui-online-status/batch`;
+        
+        $.ajax({
+            url: apiUrl,
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ usernames: usernames }),
+            cache: false,
+            timeout: 15000, // 15 секунд таймаут для батч-запроса
+            success: function(data) {
+                console.log('XUI batch status response:', data);
+                // Обновляем статусы для всех пользователей
+                let updatedCount = 0;
+                for (const username in data) {
+                    if (data.hasOwnProperty(username)) {
+                        // Сохраняем в кэш для восстановления после обновления таблицы
+                        xuiStatusCache[username] = data[username];
+                        updateXUIOnlineStatus(username, data[username]);
+                        updatedCount++;
+                    }
+                }
+                console.log(`Updated XUI online status for ${updatedCount} users`);
+                xuiStatusUpdateInProgress = false;
+            },
+            error: function(xhr, status, error) {
+                console.error(`Batch XUI online status check failed: ${status} - ${error}`, {
+                    url: apiUrl,
+                    status: xhr.status,
+                    responseText: xhr.responseText
+                });
+                xuiStatusUpdateInProgress = false;
+                // Fallback к индивидуальным запросам при ошибке батч-запроса
+                console.log('Falling back to individual requests');
+                usernames.forEach((username, index) => {
+                    setTimeout(() => {
+                        loadXUIOnlineStatus(username);
+                    }, index * 100);
+                });
+            }
         });
+    }
+    
+    // Вспомогательная функция для обновления статуса одного пользователя
+    function updateXUIOnlineStatus(username, data) {
+        // Пробуем найти элемент с точным совпадением username
+        let $statusElement = $(`.xui-online-status[data-username="${username}"]`);
+        
+        // Если не найден, пробуем найти по частичному совпадению (регистронезависимо)
+        if ($statusElement.length === 0) {
+            $statusElement = $(`.xui-online-status[data-username]`).filter(function() {
+                return $(this).attr('data-username').toLowerCase() === username.toLowerCase();
+            });
+        }
+        
+        // Если все еще не найден, пробуем через 100ms (DOM может быть еще не готов)
+        if ($statusElement.length === 0) {
+            console.warn(`XUI online status: Element not found for user ${username}, retrying...`);
+            setTimeout(function() {
+                updateXUIOnlineStatus(username, data);
+            }, 100);
+            return;
+        }
+        
+        if (data.online === true) {
+            $statusElement.show();
+            $statusElement.find('i').removeClass('text-danger text-muted').addClass('text-success');
+            const ipText = data.client_ips && data.client_ips.length > 0 ? ' (IP: ' + data.client_ips.join(', ') + ')' : '';
+            $statusElement.attr('title', `Онлайн в 3X-UI${ipText}`);
+            $statusElement.find('i').attr('title', `Онлайн в 3X-UI${ipText}`);
+            console.debug(`XUI online status: User ${username} is ONLINE`);
+        } else {
+            $statusElement.hide();
+            if (data.error) {
+                console.debug(`XUI online status: User ${username} is OFFLINE - ${data.error}`);
+            } else {
+                console.debug(`XUI online status: User ${username} is OFFLINE`);
+            }
+        }
+    }
+    
+    // Восстановление статусов из кэша после обновления таблицы
+    function restoreXUIOnlineStatuses() {
+        if (Object.keys(xuiStatusCache).length === 0) {
+            return;
+        }
+        
+        console.log(`Restoring XUI online statuses from cache for ${Object.keys(xuiStatusCache).length} users`);
+        for (const username in xuiStatusCache) {
+            if (xuiStatusCache.hasOwnProperty(username)) {
+                updateXUIOnlineStatus(username, xuiStatusCache[username]);
+            }
+        }
+    }
+    
+    // Запуск периодического обновления статусов
+    function startXUIStatusAutoUpdate() {
+        // Останавливаем предыдущий интервал если есть
+        if (xuiStatusUpdateInterval) {
+            clearInterval(xuiStatusUpdateInterval);
+        }
+        
+        // Обновляем статусы каждые 30 секунд
+        xuiStatusUpdateInterval = setInterval(function() {
+            if (!xuiStatusUpdateInProgress) {
+                loadXUIOnlineStatuses();
+            }
+        }, 30000); // 30 секунд
+        
+        console.log('XUI online status auto-update started (interval: 30s)');
+    }
+    
+    // Остановка периодического обновления
+    function stopXUIStatusAutoUpdate() {
+        if (xuiStatusUpdateInterval) {
+            clearInterval(xuiStatusUpdateInterval);
+            xuiStatusUpdateInterval = null;
+            console.log('XUI online status auto-update stopped');
+        }
     }
     
     // Загрузка статуса онлайна для одного пользователя
     function loadXUIOnlineStatus(username) {
+        // Формируем URL с учетом ROOT_PATH
+        const currentPath = window.location.pathname;
+        const rootPathMatch = currentPath.match(/^\/([^\/]+)\//);
+        const rootPath = rootPathMatch ? rootPathMatch[1] : '';
         const baseUrl = window.location.origin;
-        const apiUrl = `${baseUrl}/api/v1/user/${encodeURIComponent(username)}/xui-online-status`;
+        const apiUrl = rootPath ? `${baseUrl}/${rootPath}/api/v1/user/${encodeURIComponent(username)}/xui-online-status` : `${baseUrl}/api/v1/user/${encodeURIComponent(username)}/xui-online-status`;
         
         $.ajax({
             url: apiUrl,
@@ -784,5 +939,12 @@ $(function () {
     // Загружаем статус онлайна из 3X-UI при первоначальной загрузке
     setTimeout(() => {
         loadXUIOnlineStatuses();
+        // Запускаем автоматическое обновление статусов каждые 30 секунд
+        startXUIStatusAutoUpdate();
     }, 1000); // Небольшая задержка для загрузки страницы
+    
+    // Останавливаем автообновление при уходе со страницы
+    $(window).on('beforeunload', function() {
+        stopXUIStatusAutoUpdate();
+    });
 });

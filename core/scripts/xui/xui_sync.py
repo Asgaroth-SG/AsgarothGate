@@ -7,6 +7,7 @@ import logging
 import uuid as uuid_lib
 import sys
 import asyncio
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
@@ -575,8 +576,19 @@ class XUISyncManager:
                     if error:
                         errors.append(error)
         
-        # Запускаем параллельное выполнение
+        # Запускаем параллельное выполнение с таймаутом
         # Используем nest_asyncio если уже есть event loop
+        sync_timeout = 30  # секунд - общий таймаут для всей операции синхронизации
+        
+        async def sync_all_servers_with_timeout():
+            """Обертка для sync_all_servers с таймаутом"""
+            try:
+                await asyncio.wait_for(sync_all_servers(), timeout=sync_timeout)
+            except asyncio.TimeoutError:
+                logger.warning(f"Sync operation timed out after {sync_timeout} seconds for user {hysteria_username}")
+                errors.append(f"Sync operation timed out after {sync_timeout} seconds")
+                raise
+        
         try:
             # Пробуем получить существующий event loop
             try:
@@ -586,16 +598,16 @@ class XUISyncManager:
                     try:
                         import nest_asyncio
                         nest_asyncio.apply()
-                        loop.run_until_complete(sync_all_servers())
+                        loop.run_until_complete(sync_all_servers_with_timeout())
                     except ImportError:
                         logger.warning("nest_asyncio not available, falling back to sequential execution")
                         raise RuntimeError("No event loop available")
                 else:
                     # Loop существует, но не запущен
-                    loop.run_until_complete(sync_all_servers())
+                    loop.run_until_complete(sync_all_servers_with_timeout())
             except RuntimeError:
                 # Нет event loop, создаем новый
-                asyncio.run(sync_all_servers())
+                asyncio.run(sync_all_servers_with_timeout())
         except Exception as e:
             logger.error(f"Error in parallel sync: {e}, falling back to sequential execution", exc_info=True)
             # Fallback к последовательному выполнению
@@ -645,24 +657,51 @@ class XUISyncManager:
             error_message=error_message
         )
         
-        # Предзагружаем ссылки в кэш normalsub для мгновенной выдачи подписки
-        # Делаем СИНХРОННО, чтобы при первом запросе подписки ссылки уже были готовы
+        # Предзагружаем ссылки в кэш normalsub асинхронно в фоне
+        # Это не блокирует создание пользователя, ссылки будут готовы при первом запросе подписки
+        # или сгенерируются при первом запросе (lazy loading)
         if not errors:
-            try:
-                logger.info(f"Pre-loading links for user {hysteria_username} (plan: {user_plan}) into normalsub cache...")
-                links = self.get_user_vless_uris(hysteria_username)
-                logger.debug(f"Pre-loading: get_user_vless_uris returned {len(links) if links else 0} links")
-                if links:
-                    # Сохраняем в файл кэша normalsub
-                    success = self._save_links_to_normalsub_cache(hysteria_username, user_plan, links)
-                    if success:
-                        logger.info(f"Pre-loaded {len(links)} links for user {hysteria_username} into normalsub cache")
-                    else:
-                        logger.warning(f"Failed to save links to cache for {hysteria_username}")
-                else:
-                    logger.warning(f"No links generated for user {hysteria_username} during pre-loading - check X-UI configuration")
-            except Exception as e:
-                logger.error(f"Pre-loading failed for {hysteria_username}: {e}", exc_info=True)
+            def preload_links_background():
+                """Фоновая предзагрузка ссылок"""
+                try:
+                    logger.info(f"Background: Pre-loading links for user {hysteria_username} (plan: {user_plan}) into normalsub cache...")
+                    # Используем таймаут для предзагрузки (максимум 10 секунд)
+                    import signal
+                    
+                    def timeout_handler(signum, frame):
+                        raise TimeoutError("Pre-loading links timeout after 10 seconds")
+                    
+                    # Устанавливаем таймаут только на Unix системах
+                    if hasattr(signal, 'SIGALRM'):
+                        signal.signal(signal.SIGALRM, timeout_handler)
+                        signal.alarm(10)  # 10 секунд таймаут
+                    
+                    try:
+                        links = self.get_user_vless_uris(hysteria_username)
+                        logger.debug(f"Background: Pre-loading returned {len(links) if links else 0} links")
+                        if links:
+                            # Сохраняем в файл кэша normalsub
+                            success = self._save_links_to_normalsub_cache(hysteria_username, user_plan, links)
+                            if success:
+                                logger.info(f"Background: Pre-loaded {len(links)} links for user {hysteria_username} into normalsub cache")
+                            else:
+                                logger.warning(f"Background: Failed to save links to cache for {hysteria_username}")
+                        else:
+                            logger.warning(f"Background: No links generated for user {hysteria_username} during pre-loading - check X-UI configuration")
+                    finally:
+                        # Отменяем таймаут
+                        if hasattr(signal, 'SIGALRM'):
+                            signal.alarm(0)
+                except TimeoutError:
+                    logger.warning(f"Background: Pre-loading links for {hysteria_username} timed out after 10 seconds. Links will be generated on first subscription request.")
+                except Exception as e:
+                    logger.error(f"Background: Pre-loading failed for {hysteria_username}: {e}", exc_info=True)
+            
+            # Запускаем предзагрузку в фоновом потоке
+            import threading
+            thread = threading.Thread(target=preload_links_background, daemon=True)
+            thread.start()
+            logger.debug(f"Started background pre-loading thread for user {hysteria_username}")
         
         if errors:
             return False, error_message

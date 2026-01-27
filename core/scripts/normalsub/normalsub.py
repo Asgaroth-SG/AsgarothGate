@@ -8,9 +8,11 @@ import shlex
 import base64
 import sys
 import logging
+import asyncio
 from typing import Dict, List, Optional, Tuple, Any
 from dataclasses import dataclass, field
 from io import BytesIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from aiohttp import web
 from aiohttp.web_middlewares import middleware
@@ -184,6 +186,10 @@ class Utils:
 
     @staticmethod
     def generate_qrcode_base64(data: str) -> str:
+        """
+        Синхронная версия генерации QR-кода.
+        Для использования в async контексте используйте generate_qrcode_base64_async.
+        """
         if not data:
             return None
         qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
@@ -193,6 +199,21 @@ class Utils:
         buffered = BytesIO()
         img.save(buffered, format="PNG")
         return "data:image/png;base64," + base64.b64encode(buffered.getvalue()).decode()
+    
+    @staticmethod
+    async def generate_qrcode_base64_async(data: str) -> str:
+        """
+        Асинхронная версия генерации QR-кода.
+        Выполняет генерацию в executor для неблокирующего выполнения.
+        """
+        if not data:
+            return None
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(
+            None,
+            Utils.generate_qrcode_base64,
+            data
+        )
 
     @staticmethod
     def human_readable_bytes(bytes_value: int) -> str:
@@ -225,6 +246,10 @@ class Utils:
 class HysteriaCLI:
     def __init__(self, cli_path: str):
         self.cli_path = cli_path
+        # Кэш для результатов get_all_labeled_uris (TTL: 5 минут)
+        self._labeled_uris_cache: Dict[str, Tuple[float, List[Dict[str, str]]]] = {}
+        self._labeled_uris_cache_ttl = 300  # 5 минут
+        self._labeled_uris_cache_lock = threading.Lock()
 
     def _run_command(self, args: List[str]) -> str:
         try:
@@ -279,6 +304,39 @@ class HysteriaCLI:
             plan=user_doc.get('plan', 'standard'),
             block_reason=user_doc.get('block_reason', None),
         )
+    
+    def get_user_info_with_mapping(self, username: str) -> Tuple[Optional[UserInfo], Optional[Dict[str, Any]]]:
+        """
+        Получает данные пользователя и его X-UI маппинг одним запросом к БД.
+        Оптимизирует работу с БД, уменьшая количество запросов.
+        
+        Args:
+            username: Имя пользователя в Hysteria2
+        
+        Returns:
+            Tuple (UserInfo, xui_mapping) или (None, None) если пользователь не найден
+        """
+        if not db:
+            return None, None
+        
+        user_doc, xui_mapping = db.get_user_with_mapping(username)
+        if not user_doc:
+            return None, None
+        
+        user_info = UserInfo(
+            username=user_doc.get('_id'),
+            password=user_doc.get('password'),
+            upload_bytes=user_doc.get('upload_bytes', 0),
+            download_bytes=user_doc.get('download_bytes', 0),
+            max_download_bytes=user_doc.get('max_download_bytes', 0),
+            account_creation_date=user_doc.get('account_creation_date', ''),
+            expiration_days=user_doc.get('expiration_days', 0),
+            blocked=user_doc.get('blocked', False),
+            plan=user_doc.get('plan', 'standard'),
+            block_reason=user_doc.get('block_reason', None),
+        )
+        
+        return user_info, xui_mapping
 
     def get_all_uris(self, username: str) -> List[str]:
         output = self._run_command(['show-user-uri', '-u', username, '-a'])
@@ -286,12 +344,95 @@ class HysteriaCLI:
             return []
         return re.findall(r'hy2://.*', output)
 
+    async def get_all_labeled_uris_async(self, username: str) -> List[Dict[str, str]]:
+        """
+        Асинхронная версия get_all_labeled_uris с кэшированием.
+        Использует executor для выполнения subprocess без блокировки event loop.
+        """
+        # Проверяем кэш
+        now = time.time()
+        with self._labeled_uris_cache_lock:
+            cached = self._labeled_uris_cache.get(username)
+            if cached:
+                cached_at, cached_result = cached
+                age = now - cached_at
+                if age < self._labeled_uris_cache_ttl:
+                    logger.debug(f"Using cached labeled URIs for {username} (age={int(age)}s)")
+                    return cached_result
+        
+        # Выполняем команду в executor (не блокирует event loop)
+        loop = asyncio.get_event_loop()
+        output = await loop.run_in_executor(
+            None,
+            self._run_command,
+            ['show-user-uri', '-u', username, '-a']
+        )
+        
+        if not output:
+            logger.warning(f"No output from show-user-uri for user {username}")
+            return []
+        
+        # Парсим результат
+        result = self._parse_labeled_uris_output(output, username)
+        
+        # Сохраняем в кэш
+        with self._labeled_uris_cache_lock:
+            self._labeled_uris_cache[username] = (now, result)
+            # Очищаем старые записи (если больше 1000)
+            if len(self._labeled_uris_cache) > 1000:
+                expired_keys = [
+                    key for key, (cached_at, _) in self._labeled_uris_cache.items()
+                    if now - cached_at > self._labeled_uris_cache_ttl
+                ]
+                for key in expired_keys:
+                    del self._labeled_uris_cache[key]
+        
+        return result
+    
     def get_all_labeled_uris(self, username: str) -> List[Dict[str, str]]:
+        """
+        Синхронная версия для обратной совместимости.
+        Использует кэш, но выполняет команду синхронно.
+        """
         logger.info(f"Getting labeled URIs for user {username}")
+        
+        # Проверяем кэш
+        now = time.time()
+        with self._labeled_uris_cache_lock:
+            cached = self._labeled_uris_cache.get(username)
+            if cached:
+                cached_at, cached_result = cached
+                age = now - cached_at
+                if age < self._labeled_uris_cache_ttl:
+                    logger.debug(f"Using cached labeled URIs for {username} (age={int(age)}s)")
+                    return cached_result
+        
         output = self._run_command(['show-user-uri', '-u', username, '-a'])
         if not output:
             logger.warning(f"No output from show-user-uri for user {username}")
             return []
+        
+        result = self._parse_labeled_uris_output(output, username)
+        
+        # Сохраняем в кэш
+        with self._labeled_uris_cache_lock:
+            self._labeled_uris_cache[username] = (now, result)
+            # Очищаем старые записи
+            if len(self._labeled_uris_cache) > 1000:
+                expired_keys = [
+                    key for key, (cached_at, _) in self._labeled_uris_cache.items()
+                    if now - cached_at > self._labeled_uris_cache_ttl
+                ]
+                for key in expired_keys:
+                    del self._labeled_uris_cache[key]
+        
+        return result
+    
+    def _parse_labeled_uris_output(self, output: str, username: str) -> List[Dict[str, str]]:
+        """
+        Парсит вывод show-user-uri и возвращает список labeled URIs.
+        Вынесено в отдельный метод для переиспользования.
+        """
         
         logger.info(f"show-user-uri output length: {len(output)} chars, preview: {output[:200]}")
 
@@ -357,6 +498,24 @@ class HysteriaCLI:
         else:
             logger.warning(f"No valid URIs parsed from {len(matches)} matches for {username}")
         return result
+    
+    def clear_labeled_uris_cache(self, username: Optional[str] = None) -> None:
+        """
+        Очищает кэш labeled URIs.
+        
+        Args:
+            username: Если указан, очищает кэш только для этого пользователя.
+                     Если None, очищает весь кэш.
+        """
+        with self._labeled_uris_cache_lock:
+            if username:
+                if username in self._labeled_uris_cache:
+                    del self._labeled_uris_cache[username]
+                    logger.debug(f"Cleared labeled URIs cache for {username}")
+            else:
+                count = len(self._labeled_uris_cache)
+                self._labeled_uris_cache.clear()
+                logger.debug(f"Cleared all labeled URIs cache ({count} entries)")
 
 
 class UriParser:
@@ -496,10 +655,58 @@ class SubscriptionManager:
         self._xui_links_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
         self._xui_links_cache_lock = threading.Lock()
         self._xui_links_refreshing: set[str] = set()
+        # Кэш нормализованных подписок для ускорения выдачи
+        self._normalized_subscription_cache: Dict[str, Tuple[float, str]] = {}
+        self._normalized_subscription_cache_lock = threading.Lock()
+        try:
+            self._normalized_subscription_cache_ttl = int(os.getenv('NORMALIZED_SUB_CACHE_TTL', '300'))
+        except Exception:
+            self._normalized_subscription_cache_ttl = 300  # 5 минут по умолчанию
+        # ThreadPoolExecutor для параллельной нормализации ссылок
+        self._normalization_executor = ThreadPoolExecutor(max_workers=min(32, (os.cpu_count() or 1) + 4), thread_name_prefix="link_norm")
+        # Кэш дефолтной конфигурации сервера
+        self._default_server_config: Optional[LinkRewriterServerConfig] = None
+        self._default_server_config_lock = threading.Lock()
+        # Кэш файлов конфигурации (nodes.json, extra.json)
+        self._nodes_types_cache: Optional[Tuple[float, Dict[str, str]]] = None
+        self._nodes_types_cache_lock = threading.Lock()
+        self._extra_configs_cache: Optional[Tuple[float, List[Dict[str, Any]]]] = None
+        self._extra_configs_cache_lock = threading.Lock()
+        self._config_files_cache_ttl = 60  # 1 минута TTL для файлов конфигурации
         self._load_xui_links_cache()
 
     def _xui_links_cache_key(self, username: str, user_plan: str) -> str:
         return f"{username}:{user_plan}"
+    
+    def clear_normalized_subscription_cache(self, username: Optional[str] = None) -> None:
+        """
+        Очищает кэш нормализованных подписок.
+        
+        Args:
+            username: Если указан, очищает кэш только для этого пользователя.
+                     Если None, очищает весь кэш.
+        """
+        with self._normalized_subscription_cache_lock:
+            if username:
+                # Удаляем все записи для указанного пользователя
+                keys_to_remove = [
+                    key for key in self._normalized_subscription_cache.keys()
+                    if key.startswith(f"{username}:")
+                ]
+                for key in keys_to_remove:
+                    del self._normalized_subscription_cache[key]
+                logger.info(f"Cleared normalized subscription cache for {username} ({len(keys_to_remove)} entries)")
+            else:
+                # Очищаем весь кэш
+                count = len(self._normalized_subscription_cache)
+                self._normalized_subscription_cache.clear()
+                logger.info(f"Cleared all normalized subscription cache ({count} entries)")
+    
+    def clear_default_server_config_cache(self) -> None:
+        """Очищает кэш дефолтной конфигурации сервера."""
+        with self._default_server_config_lock:
+            self._default_server_config = None
+            logger.debug("Cleared default server config cache")
 
     def _load_xui_links_cache(self) -> None:
         if not self._xui_links_cache_path:
@@ -578,11 +785,30 @@ class SubscriptionManager:
             "📶 LTE": "premium",
             ...
         }
+        Использует кэш для уменьшения количества операций чтения файла.
         """
+        now = time.time()
+        
+        # Проверяем кэш
+        with self._nodes_types_cache_lock:
+            if self._nodes_types_cache:
+                cached_at, cached_map = self._nodes_types_cache
+                age = now - cached_at
+                # Проверяем mtime файла для инвалидации кэша
+                try:
+                    file_mtime = os.path.getmtime(self.config.nodes_json_path)
+                    if age < self._config_files_cache_ttl and file_mtime <= cached_at:
+                        logger.debug(f"Using cached nodes_types (age={int(age)}s)")
+                        return cached_map
+                except OSError:
+                    # Файл не существует или недоступен
+                    pass
+        
         nodes_map: Dict[str, str] = {}
         try:
             if not os.path.exists(self.config.nodes_json_path):
                 return nodes_map
+            file_mtime = os.path.getmtime(self.config.nodes_json_path)
             with open(self.config.nodes_json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             if isinstance(data, list):
@@ -592,6 +818,10 @@ class SubscriptionManager:
                         continue
                     node_type = Utils.normalize_plan(node.get("type", "standard"))
                     nodes_map[name] = node_type
+            
+            # Сохраняем в кэш с mtime файла
+            with self._nodes_types_cache_lock:
+                self._nodes_types_cache = (file_mtime, nodes_map)
         except Exception as e:
             print(f"Warning: failed to load nodes from {self.config.nodes_json_path}: {e}")
         return nodes_map
@@ -600,18 +830,53 @@ class SubscriptionManager:
         """
         Читает extra.json как список объектов.
         Допускает пустой файл/отсутствие.
+        Использует кэш для уменьшения количества операций чтения файла.
         """
+        now = time.time()
+        
+        # Проверяем кэш
+        with self._extra_configs_cache_lock:
+            if self._extra_configs_cache:
+                cached_at, cached_configs = self._extra_configs_cache
+                age = now - cached_at
+                # Проверяем mtime файла для инвалидации кэша
+                try:
+                    if os.path.exists(self.config.extra_config_path):
+                        file_mtime = os.path.getmtime(self.config.extra_config_path)
+                        if age < self._config_files_cache_ttl and file_mtime <= cached_at:
+                            logger.debug(f"Using cached extra_configs (age={int(age)}s)")
+                            return cached_configs
+                    else:
+                        # Файл не существует - возвращаем пустой список из кэша
+                        if age < self._config_files_cache_ttl:
+                            return cached_configs
+                except OSError:
+                    pass
+        
         if not os.path.exists(self.config.extra_config_path):
+            # Сохраняем пустой список в кэш
+            with self._extra_configs_cache_lock:
+                self._extra_configs_cache = (now, [])
             return []
+        
         try:
+            file_mtime = os.path.getmtime(self.config.extra_config_path)
             with open(self.config.extra_config_path, 'r', encoding='utf-8') as f:
                 content = f.read()
                 if not content:
-                    return []
-                data = json.loads(content)
-                if isinstance(data, list):
-                    return [x for x in data if isinstance(x, dict)]
-                return []
+                    result = []
+                else:
+                    data = json.loads(content)
+                    if isinstance(data, list):
+                        result = [x for x in data if isinstance(x, dict)]
+                    else:
+                        result = []
+            
+            # Сохраняем в кэш с mtime файла
+            with self._extra_configs_cache_lock:
+                self._extra_configs_cache = (file_mtime, result)
+            
+            return result
         except (json.JSONDecodeError, IOError) as e:
             print(f"Warning: Could not read or parse extra configs from {self.config.extra_config_path}: {e}")
             return []
@@ -716,9 +981,13 @@ class SubscriptionManager:
         if not uri:
             return uri
         
-        # Если нет конфигурации сервера, пытаемся получить дефолтную
+        # Если нет конфигурации сервера, используем кэшированную дефолтную
         if not server_cfg:
-            server_cfg = self._get_default_server_config()
+            if self._default_server_config is None:
+                with self._default_server_config_lock:
+                    if self._default_server_config is None:
+                        self._default_server_config = self._get_default_server_config()
+            server_cfg = self._default_server_config
         
         # Если всё равно нет конфигурации или public_host не задан, возвращаем как есть
         if not server_cfg or not server_cfg.public_host:
@@ -742,13 +1011,15 @@ class SubscriptionManager:
             logger.warning(f"Failed to rewrite link {uri[:50]}...: {e}", exc_info=True)
             return uri
 
-    def get_normal_subscription(self, username: str, user_agent: str) -> str:
+    async def get_normal_subscription(self, username: str, user_agent: str) -> str:
         """
         Получает нормализованную подписку для пользователя.
         
         Все ссылки проходят через единый pipeline нормализации через LinkRewriter.
         """
-        user_info = self.hysteria_cli.get_user_info(username)
+        start_time = time.time()
+        # Используем батчинг для получения пользователя и маппинга одним запросом
+        user_info, xui_mapping = self.hysteria_cli.get_user_info_with_mapping(username)
         if user_info is None:
             return "User not found"
         
@@ -761,7 +1032,6 @@ class SubscriptionManager:
                 message = "⛔️ Подписка истекла"
             else:
                 # По умолчанию, если причина не указана, определяем по данным пользователя
-                import time
                 from datetime import datetime, timedelta
                 now = datetime.now()
                 total_bytes = user_info.upload_bytes + user_info.download_bytes
@@ -772,8 +1042,8 @@ class SubscriptionManager:
                 else:
                     message = "⛔️ Подписка истекла"
             
-            # Формируем fake URI с сообщением
-            fake_uri = f"hysteria2://x@end.com:443?sni=support.me#{message}"
+            # Формируем fake URI с сообщением (VLESS для Happ)
+            fake_uri = f"vless://00000000-0000-0000-0000-000000000000@end.com:443?security=tls&sni=support.me&type=tcp#{message}"
             
             # Для Happ клиента возвращаем подписку с fake URI
             subscription_info = (
@@ -782,7 +1052,9 @@ class SubscriptionManager:
                 f"total={user_info.max_download_bytes}; "
                 f"expire={user_info.expiration_timestamp}\n"
             )
-            profile_lines = "//profile-title: Asgaroth Gate\n//profile-update-interval: 1\n"
+            # Кодируем сообщение в base64 для параметра announce
+            message_base64 = base64.b64encode(message.encode('utf-8')).decode('utf-8')
+            profile_lines = f"#profile-title: Asgaroth Gate\n#profile-update-interval: 1\n#announce: base64:{message_base64}\n"
             result = profile_lines + subscription_info + fake_uri
             logger.info(f"Generated blocked subscription for {username} with message: {message}")
             return result
@@ -791,7 +1063,8 @@ class SubscriptionManager:
         is_premium_user = (user_plan == "premium")
 
         nodes_types = self._load_nodes_types()
-        labeled_uris = self.hysteria_cli.get_all_labeled_uris(username)
+        # Используем асинхронную версию для неблокирующего выполнения
+        labeled_uris = await self.hysteria_cli.get_all_labeled_uris_async(username)
         
         logger.info(f"Retrieved {len(labeled_uris)} labeled URIs for {username}")
         if labeled_uris:
@@ -852,6 +1125,28 @@ class SubscriptionManager:
                         f'pinSHA256=sha256/{match.group(1)}',
                         f'pinSHA256={formatted}'
                     )
+
+            # Заменяем fragment в URI на полное название из label
+            # Это исправляет проблему, когда в ссылке только эмодзи вместо полного названия
+            if label and "#" in uri:
+                # Извлекаем URI без fragment
+                uri_parts = uri.split("#", 1)
+                if len(uri_parts) == 2:
+                    uri_base = uri_parts[0]
+                    # Используем label как новый fragment (URL-encoded)
+                    encoded_label = quote(label, safe='')
+                    uri = f"{uri_base}#{encoded_label}"
+                    logger.debug(f"Replaced fragment with label: '{label}' -> URI fragment updated")
+                elif not uri_parts[0].endswith("#"):
+                    # Если нет fragment, добавляем label
+                    encoded_label = quote(label, safe='')
+                    uri = f"{uri}#{encoded_label}"
+                    logger.debug(f"Added label as fragment: '{label}'")
+            elif label and "#" not in uri:
+                # Если нет fragment вообще, добавляем label
+                encoded_label = quote(label, safe='')
+                uri = f"{uri}#{encoded_label}"
+                logger.debug(f"Added label as fragment (no existing fragment): '{label}'")
 
             # Hysteria ссылки без явного контекста сервера (используется дефолтный)
             links_with_context.append((uri, None))
@@ -982,14 +1277,17 @@ class SubscriptionManager:
                                             self._xui_links_refreshing.discard(cache_key)
                     
                     if vless_nodes:
+                        logger.info(f"Processing {len(vless_nodes)} VLESS nodes for {username}")
                         for node in vless_nodes:
                             uri = node.get("uri", "")
                             if not uri:
+                                logger.warning(f"Skipping node with empty URI: {node.get('name', 'unknown')}")
                                 continue
                             
                             # Получаем конфигурацию сервера для переписывания
                             server_config_dict = node.get("server_config", {})
                             server_id = server_config_dict.get("name", "unknown")
+                            logger.debug(f"Processing VLESS node: server_id={server_id}, uri_length={len(uri)}")
                             
                             # Создаем конфигурацию для LinkRewriter
                             public_host = server_config_dict.get("public_host")
@@ -1034,27 +1332,91 @@ class SubscriptionManager:
                             
                             # X-UI ссылки с явным контекстом сервера
                             links_with_context.append((uri, server_cfg))
+                            logger.debug(f"Added VLESS link to subscription: server_id={server_id}, has_server_cfg={server_cfg is not None}")
+                    else:
+                        logger.warning(f"No VLESS nodes found for {username} after get_user_vless_uris")
         except Exception as e:
             # Не блокируем выдачу подписки при ошибке получения VLESS URIs
             logger.warning(f"Failed to get X-UI VLESS URIs for {username}: {e}", exc_info=True)
 
+        # Проверяем кэш нормализованной подписки
+        # Используем LRU-подобную логику: ограничиваем размер кэша и очищаем старые записи
+        cache_key = f"{username}:{user_plan}:{user_info.upload_bytes}:{user_info.download_bytes}:{user_info.max_download_bytes}:{user_info.expiration_timestamp}"
+        now = time.time()
+        max_cache_size = 500  # Максимальный размер кэша (снижен с 1000)
+        
+        with self._normalized_subscription_cache_lock:
+            # Очищаем устаревшие записи периодически (не только при превышении лимита)
+            if len(self._normalized_subscription_cache) > max_cache_size * 0.8:  # Очищаем при 80% заполнения
+                expired_keys = [
+                    key for key, (cached_at, _) in self._normalized_subscription_cache.items()
+                    if now - cached_at > self._normalized_subscription_cache_ttl
+                ]
+                for key in expired_keys:
+                    del self._normalized_subscription_cache[key]
+                logger.debug(f"Cleaned {len(expired_keys)} expired entries from normalized subscription cache")
+            
+            cached = self._normalized_subscription_cache.get(cache_key)
+            if cached:
+                cached_at, cached_result = cached
+                age = now - cached_at
+                if age < self._normalized_subscription_cache_ttl:
+                    logger.debug(f"Using cached normalized subscription for {username} (age={int(age)}s)")
+                    return cached_result
+        
         # Единый pipeline нормализации: все ссылки проходят через rewrite_proxy_links
+        # Параллельная нормализация ссылок для ускорения обработки
+        # Порог снижен до 2 ссылок для лучшей производительности
         normalized_uris: List[str] = []
         hysteria_normalized = 0
         vless_normalized = 0
         
-        for uri, server_cfg in links_with_context:
-            normalized_uri = self._normalize_link(uri, server_cfg)
-            if normalized_uri:
-                normalized_uris.append(normalized_uri)
-                if normalized_uri.startswith('hy2://'):
-                    hysteria_normalized += 1
-                elif normalized_uri.startswith('vless://'):
-                    vless_normalized += 1
-
-        logger.info(f"Normalized URIs: {len(normalized_uris)} total (Hysteria: {hysteria_normalized}, VLESS: {vless_normalized})")
+        # Для небольшого количества ссылок используем последовательную обработку (меньше overhead)
+        # Порог снижен с 5 до 2 для оптимизации
+        if len(links_with_context) <= 2:
+            for uri, server_cfg in links_with_context:
+                normalized_uri = self._normalize_link(uri, server_cfg)
+                if normalized_uri:
+                    normalized_uris.append(normalized_uri)
+                    if normalized_uri.startswith('hy2://'):
+                        hysteria_normalized += 1
+                    elif normalized_uri.startswith('vless://'):
+                        vless_normalized += 1
+        else:
+            # Параллельная нормализация через ThreadPoolExecutor для большого количества ссылок
+            normalized_uris_list: List[Optional[str]] = [None] * len(links_with_context)
+            
+            def normalize_single_link(index: int, uri: str, server_cfg: Optional[LinkRewriterServerConfig]) -> Tuple[int, str]:
+                normalized = self._normalize_link(uri, server_cfg)
+                return (index, normalized)
+            
+            # Запускаем нормализацию параллельно
+            futures = []
+            for idx, (uri, server_cfg) in enumerate(links_with_context):
+                future = self._normalization_executor.submit(normalize_single_link, idx, uri, server_cfg)
+                futures.append(future)
+            
+            # Собираем результаты в правильном порядке
+            for future in as_completed(futures):
+                try:
+                    idx, normalized_uri = future.result()
+                    if normalized_uri:
+                        normalized_uris_list[idx] = normalized_uri
+                        if normalized_uri.startswith('hy2://'):
+                            hysteria_normalized += 1
+                        elif normalized_uri.startswith('vless://'):
+                            vless_normalized += 1
+                except Exception as e:
+                    logger.warning(f"Error normalizing link at index: {e}", exc_info=True)
+            
+            # Фильтруем None значения
+            normalized_uris = [uri for uri in normalized_uris_list if uri]
         
-        if not normalized_uris:
+        filtered_uris = normalized_uris
+        
+        logger.info(f"Normalized URIs: {len(filtered_uris)} total (Hysteria: {hysteria_normalized}, VLESS: {vless_normalized})")
+        
+        if not filtered_uris:
             logger.error(f"No normalized URIs available for {username}")
             return "No URI available"
 
@@ -1064,9 +1426,26 @@ class SubscriptionManager:
             f"total={user_info.max_download_bytes}; "
             f"expire={user_info.expiration_timestamp}\n"
         )
-        profile_lines = "//profile-title: Asgaroth Gate\n//profile-update-interval: 1\n"
-        result = profile_lines + subscription_info + "\n".join(normalized_uris)
-        logger.info(f"Generated subscription for {username}: {len(normalized_uris)} URIs, length={len(result)} chars")
+        profile_lines = "#profile-title: Asgaroth Gate\n#profile-update-interval: 1\n"
+        # Оптимизированная сборка результата
+        result = profile_lines + subscription_info + "\n".join(filtered_uris)
+        
+        # Кэшируем результат
+        with self._normalized_subscription_cache_lock:
+            self._normalized_subscription_cache[cache_key] = (now, result)
+            # Очищаем старые записи из кэша если превышен лимит (LRU-подобная логика)
+            if len(self._normalized_subscription_cache) > max_cache_size:
+                # Сортируем по времени и удаляем самые старые
+                entries = [(key, cached_at) for key, (cached_at, _) in self._normalized_subscription_cache.items()]
+                entries.sort(key=lambda x: x[1])  # Сортируем по времени
+                # Удаляем 20% самых старых записей
+                to_remove = int(len(entries) * 0.2)
+                for key, _ in entries[:to_remove]:
+                    del self._normalized_subscription_cache[key]
+                logger.debug(f"Cleaned {to_remove} oldest entries from normalized subscription cache (LRU-like)")
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"Generated subscription for {username}: {len(filtered_uris)} URIs, length={len(result)} chars, time={elapsed_time:.3f}s")
         return result
 
 
@@ -1243,7 +1622,8 @@ class HysteriaServer:
             else:
                 message = "⛔️ Подписка истекла"
         
-        fake_uri = f"hysteria2://x@end.com:443?sni=support.me#{message}"
+        # Формируем fake URI с сообщением (VLESS для Happ)
+        fake_uri = f"vless://00000000-0000-0000-0000-000000000000@end.com:443?security=tls&sni=support.me&type=tcp#{message}"
         user_agent = request.headers.get('User-Agent', '').lower()
 
         # Обработка для Happ клиента
@@ -1255,7 +1635,9 @@ class HysteriaServer:
                 f"total={user_info.max_download_bytes}; "
                 f"expire={user_info.expiration_timestamp}\n"
             )
-            profile_lines = "//profile-title: Asgaroth Gate\n//profile-update-interval: 1\n"
+            # Кодируем сообщение в base64 для параметра announce
+            message_base64 = base64.b64encode(message.encode('utf-8')).decode('utf-8')
+            profile_lines = f"#profile-title: Asgaroth Gate\n#profile-update-interval: 1\n#announce: base64:{message_base64}\n"
             subscription = profile_lines + subscription_info + fake_uri
             logger.info(f"Returning blocked subscription for Happ client: {message}")
             return web.Response(text=subscription, content_type='text/plain')
@@ -1268,6 +1650,21 @@ class HysteriaServer:
         if not user_agent.startswith('hiddifynext') and ('singbox' in user_agent or 'sing' in user_agent):
             combined_config = self.singbox_generator.combine_configs([fake_uri], "blocked", fragment)
             return web.Response(text=json.dumps(combined_config, indent=4, sort_keys=True), content_type='application/json')
+
+        # Обработка для Hiddify Next клиента
+        if user_agent.startswith('hiddifynext') or 'hiddify' in user_agent:
+            subscription_info = (
+                f"//subscription-userinfo: upload={user_info.upload_bytes}; "
+                f"download={user_info.download_bytes}; "
+                f"total={user_info.max_download_bytes}; "
+                f"expire={user_info.expiration_timestamp}\n"
+            )
+            profile_lines = f"#profile-title: Asgaroth Gate\n#profile-update-interval: 1\n"
+            subscription = profile_lines + subscription_info + fake_uri
+            response = web.Response(text=subscription, content_type='text/plain')
+            response.headers['profile-title'] = 'Asgaroth Gate'
+            logger.info(f"Returning blocked subscription for Hiddify client: {message}")
+            return response
 
         return web.Response(text=fake_uri, content_type='text/plain')
 
@@ -1304,13 +1701,20 @@ class HysteriaServer:
 
     async def _handle_normalsub(self, request: web.Request, username: str, user_info: UserInfo) -> web.Response:
         user_agent = request.headers.get('User-Agent', '').lower()
-        subscription = self.subscription_manager.get_normal_subscription(username, user_agent)
+        subscription = await self.subscription_manager.get_normal_subscription(username, user_agent)
         if subscription == "User not found":
             return web.Response(status=404, text=f"User '{username}' not found.")
-        return web.Response(text=subscription, content_type='text/plain')
+        
+        # Добавляем HTTP заголовок profile-title для Hiddify Next
+        response = web.Response(text=subscription, content_type='text/plain')
+        if user_agent.startswith('hiddifynext') or 'hiddify' in user_agent:
+            response.headers['profile-title'] = 'Asgaroth Gate'
+        
+        return response
 
     async def _get_template_context(self, username: str, user_info: UserInfo) -> TemplateContext:
-        labeled_uris = self.hysteria_cli.get_all_labeled_uris(username)
+        # Используем асинхронную версию для неблокирующего выполнения
+        labeled_uris = await self.hysteria_cli.get_all_labeled_uris_async(username)
         port_str = f":{self.config.external_port}" if self.config.external_port not in [80, 443, 0] else ""
         base_url = f"https://{self.config.domain}{port_str}"
 
@@ -1319,12 +1723,13 @@ class HysteriaServer:
 
         sub_link = f"{base_url}/{self.config.subpath}/sub/normal/{user_info.password}"
         sub_link_encoded = quote(sub_link, safe='')
-        sublink_qrcode = Utils.generate_qrcode_base64(sub_link)
+        # Используем асинхронную версию для неблокирующего выполнения
+        sublink_qrcode = await Utils.generate_qrcode_base64_async(sub_link)
 
-        singbox_qrcode = Utils.generate_qrcode_base64(f"sing-box://import-remote-profile?url={sub_link}")
-        hiddify_qrcode = Utils.generate_qrcode_base64(f"hiddify://import/{sub_link}")
-        streisand_qrcode = Utils.generate_qrcode_base64(f"streisand://import/sub?url={sub_link}")
-        nekobox_qrcode = Utils.generate_qrcode_base64(f"nekobox://import?url={sub_link}")
+        singbox_qrcode = await Utils.generate_qrcode_base64_async(f"sing-box://import-remote-profile?url={sub_link}")
+        hiddify_qrcode = await Utils.generate_qrcode_base64_async(f"hiddify://import/{sub_link}")
+        streisand_qrcode = await Utils.generate_qrcode_base64_async(f"streisand://import/sub?url={sub_link}")
+        nekobox_qrcode = await Utils.generate_qrcode_base64_async(f"nekobox://import?url={sub_link}")
 
         local_uris: List[NodeURI] = []
         node_uris: List[NodeURI] = []
@@ -1359,10 +1764,12 @@ class HysteriaServer:
                 if (not is_premium_user) and node_type == "premium":
                     continue
 
+            # Генерируем QR-код асинхронно
+            qrcode_data = await Utils.generate_qrcode_base64_async(uri)
             node_uri = NodeURI(
                 label=label,
                 uri=uri,
-                qrcode=Utils.generate_qrcode_base64(uri)
+                qrcode=qrcode_data
             )
 
             if label.startswith('Node:'):
@@ -1379,10 +1786,12 @@ class HysteriaServer:
 
             label = f"{name}"
 
+            # Генерируем QR-код асинхронно
+            qrcode_data = await Utils.generate_qrcode_base64_async(uri)
             local_uris.append(NodeURI(
                 label=label,
                 uri=uri,
-                qrcode=Utils.generate_qrcode_base64(uri)
+                qrcode=qrcode_data
             ))
 
         return TemplateContext(

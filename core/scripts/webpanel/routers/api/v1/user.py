@@ -1,5 +1,6 @@
 import json
 from typing import List
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from fastapi import APIRouter, HTTPException
 from .schema.user import (
     UserListResponse,
@@ -174,6 +175,201 @@ async def bulk_remove_users_api(body: UsernamesRequest):
         return DetailResponse(detail='Users have been removed.')
     except Exception as e:
         raise HTTPException(status_code=400, detail=f'Error: {str(e)}')
+
+
+@router.post('/xui-online-status/batch', summary='Get X-UI Online Status for Multiple Users', name='get_users_xui_online_status_batch_api')
+async def get_users_xui_online_status_batch_api(request: UsernamesRequest):
+    """
+    Получает статус онлайна для нескольких пользователей одним запросом (батчинг).
+    Оптимизирует загрузку страницы пользователей.
+    
+    Args:
+        request: Список имен пользователей
+    
+    Returns:
+        JSON с информацией о статусе онлайна для каждого пользователя
+    """
+    if not request.usernames:
+        return {}
+    
+    try:
+        import sys
+        import logging
+        from pathlib import Path
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
+        logger = logging.getLogger(__name__)
+        
+        # Добавляем путь только если его еще нет
+        core_scripts_path = '/etc/hysteria/core/scripts'
+        if core_scripts_path not in sys.path:
+            sys.path.insert(0, core_scripts_path)
+        
+        try:
+            from db.database import db
+            from xui.config import load_xui_config
+        except ImportError as import_err:
+            return {
+                username: {"online": False, "error": f"Failed to import modules: {str(import_err)}"}
+                for username in request.usernames
+            }
+        
+        if not db:
+            return {
+                username: {"online": False, "error": "Database not available"}
+                for username in request.usernames
+            }
+        
+        # Загружаем конфигурацию X-UI один раз
+        config = load_xui_config()
+        if not config.get('enabled', False):
+            return {
+                username: {"online": False, "error": "X-UI sync is disabled"}
+                for username in request.usernames
+            }
+        
+        servers = config.get('xui_servers', [])
+        if not servers:
+            return {
+                username: {"online": False, "error": "No X-UI servers configured"}
+                for username in request.usernames
+            }
+        
+        # Получаем все маппинги одним запросом (батчинг)
+        mappings_dict = db.get_users_mappings_batch(request.usernames)
+        
+        # Группируем пользователей по серверам для оптимизации запросов
+        results = {}
+        
+        def check_user_status(username: str) -> tuple:
+            """Проверяет статус одного пользователя"""
+            mapping = mappings_dict.get(username.lower())
+            if not mapping:
+                return username, {"online": False, "error": "User not synced with X-UI"}
+            
+            client_uuid = mapping.get('xui_client_uuid')
+            xui_host = mapping.get('xui_host')
+            
+            if not client_uuid:
+                return username, {"online": False, "error": "No client UUID in mapping"}
+            
+            # Находим сервер для этого пользователя
+            target_server = None
+            if xui_host:
+                for server in servers:
+                    if server.get('host') == xui_host and server.get('enabled', True):
+                        target_server = server
+                        break
+            
+            if not target_server:
+                for server in servers:
+                    if server.get('enabled', True):
+                        target_server = server
+                        break
+            
+            if not target_server:
+                return username, {"online": False, "error": "No enabled X-UI server found"}
+            
+            # Создаем клиент для проверки статуса
+            try:
+                from xui.xui_api_wrapper import XUIAPIWrapper
+            except ImportError as import_err:
+                return username, {"online": False, "error": f"Failed to import XUIAPIWrapper: {str(import_err)}"}
+            
+            auth_type = target_server.get('auth_type', 'username')
+            if auth_type == 'token':
+                xui_username = 'admin'
+            else:
+                xui_username = target_server.get('username', '')
+            
+            xui_password = target_server.get('password', '')
+            
+            if not xui_password:
+                return username, {"online": False, "error": "X-UI server password not configured"}
+            
+            client = XUIAPIWrapper(
+                host=target_server.get('host'),
+                username=xui_username,
+                password=xui_password,
+                base_path=target_server.get('base_path', '/'),
+                timeout=target_server.get('timeout', 10)
+            )
+            
+            try:
+                inbound_ids = mapping.get('inbound_ids', [])
+                is_online = False
+                client_ips = []
+                
+                # Пробуем проверить по UUID
+                try:
+                    is_online = client.is_client_online(client_uuid)
+                except Exception as e:
+                    logger.debug(f"Error checking online status by UUID for {username}: {e}")
+                    is_online = False
+                
+                if not is_online and inbound_ids:
+                    # Пробуем по email
+                    for inbound_id in inbound_ids:
+                        client_email = f"{username}_{inbound_id}"
+                        try:
+                            if client.is_client_online(client_email):
+                                is_online = True
+                                break
+                        except Exception:
+                            continue
+                
+                # Получаем IP адреса если клиент онлайн
+                if is_online:
+                    try:
+                        client_ips = client.get_client_ips(client_uuid) or []
+                        if not client_ips and inbound_ids:
+                            for inbound_id in inbound_ids:
+                                client_email = f"{username}_{inbound_id}"
+                                try:
+                                    client_ips = client.get_client_ips(client_email) or []
+                                    if client_ips:
+                                        break
+                                except Exception:
+                                    continue
+                    except Exception:
+                        client_ips = []
+                
+                return username, {
+                    "online": is_online,
+                    "client_uuid": client_uuid,
+                    "client_ips": client_ips,
+                    "xui_host": xui_host or target_server.get('host')
+                }
+            except Exception as e:
+                logger.error(f"Error checking X-UI online status for {username}: {e}", exc_info=True)
+                return username, {"online": False, "error": f"Error checking status: {str(e)}"}
+            finally:
+                try:
+                    if hasattr(client, 'close'):
+                        client.close()
+                    elif hasattr(client, 'api_client') and hasattr(client.api_client, 'close'):
+                        client.api_client.close()
+                except:
+                    pass
+        
+        # Параллельная проверка статусов для всех пользователей
+        with ThreadPoolExecutor(max_workers=min(10, len(request.usernames))) as executor:
+            futures = {executor.submit(check_user_status, username): username for username in request.usernames}
+            for future in as_completed(futures):
+                username, result = future.result()
+                # Используем оригинальный username (не lowercase) для совместимости с DOM
+                results[username] = result
+        
+        return results
+    
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Unexpected error in batch X-UI online status check: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f'Error: {str(e)}'
+        )
 
 
 @router.get('/{username}/xui-online-status', summary='Get X-UI Online Status', name='get_user_xui_online_status_api')

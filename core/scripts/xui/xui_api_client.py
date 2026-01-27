@@ -963,13 +963,34 @@ class XUIAPIClient:
             try:
                 online_clients = await self.get_online_clients()
                 logger.debug(f"Checking {len(online_clients)} online clients for {client_id}")
-                for client in online_clients:
-                    client_email = client.get('email', '')
-                    client_id_value = client.get('id', '')
-                    # Проверяем по email и по ID
-                    if client_email == client_id or client_id_value == client_id:
-                        logger.debug(f"Client {client_id} found in online clients list")
-                        return True
+                
+                # Проверяем, если это список строк (например, ["🇹🇷 Турция"])
+                if online_clients and isinstance(online_clients[0], str):
+                    # Если API вернул строки вместо объектов, используем детальный метод
+                    logger.debug("get_online_clients returned strings, using detailed method")
+                    online_clients_detailed = await self.get_online_clients_detailed()
+                    # Проверяем во всех inbounds
+                    for inbound_id, clients in online_clients_detailed.items():
+                        for client in clients:
+                            if isinstance(client, dict):
+                                client_email = client.get('email', '')
+                                client_id_value = client.get('id', '')
+                                if client_email == client_id or client_id_value == client_id:
+                                    logger.debug(f"Client {client_id} found in online clients list (detailed)")
+                                    return True
+                else:
+                    # Обычный список объектов
+                    for client in online_clients:
+                        # Проверяем тип перед использованием .get()
+                        if not isinstance(client, dict):
+                            continue
+                        
+                        client_email = client.get('email', '')
+                        client_id_value = client.get('id', '')
+                        # Проверяем по email и по ID
+                        if client_email == client_id or client_id_value == client_id:
+                            logger.debug(f"Client {client_id} found in online clients list")
+                            return True
             except Exception as e:
                 logger.warning(f"Could not get online clients list: {e}")
             

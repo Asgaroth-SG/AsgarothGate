@@ -74,14 +74,21 @@ def main():
             pass
 
     # Получаем онлайн статус из 3X-UI
+    # ОПТИМИЗАЦИЯ: Используем батчинг для получения маппингов
+    # Это критично для производительности при большом количестве пользователей
     try:
         from xui.config import load_xui_config
         config = load_xui_config()
         
-        if config.get('enabled', False):
+        if config.get('enabled', False) and db:
             from xui.xui_api_wrapper import XUIAPIWrapper
             
             servers = config.get('xui_servers', [])
+            
+            # Батчинг: получаем все маппинги одним запросом
+            usernames_list = list(users_dict.keys())
+            all_mappings = db.get_users_mappings_batch(usernames_list) if usernames_list else {}
+            
             for server in servers:
                 if not server.get('enabled', True):
                     continue
@@ -98,16 +105,38 @@ def main():
                 
                 client = None
                 try:
+                    # Проверяем кэш для этого сервера
+                    server_host = server.get('host')
+                    now = time.time()
+                    cached_clients = None
+                    
+                    with _online_clients_cache_lock:
+                        if _online_clients_cache:
+                            cached_at, cached_data = _online_clients_cache
+                            age = now - cached_at
+                            if age < _online_clients_cache_ttl:
+                                cached_clients = cached_data.get(server_host)
+                    
                     client = XUIAPIWrapper(
-                        host=server.get('host'),
+                        host=server_host,
                         username=xui_username,
                         password=xui_password,
                         base_path=server.get('base_path', '/'),
                         timeout=server.get('timeout', 10)
                     )
                     
-                    # Получаем список онлайн клиентов
-                    online_clients = client.get_online_clients()
+                    # Используем кэш или получаем список онлайн клиентов
+                    if cached_clients is not None:
+                        online_clients = cached_clients
+                    else:
+                        online_clients = client.get_online_clients()
+                        # Сохраняем в кэш
+                        with _online_clients_cache_lock:
+                            if _online_clients_cache is None:
+                                _online_clients_cache = (now, {})
+                            cached_at, cached_data = _online_clients_cache
+                            cached_data[server_host] = online_clients
+                            _online_clients_cache = (now, cached_data)
                     
                     # Если это массив строк, используем детальный метод
                     if online_clients and isinstance(online_clients[0], str):
@@ -119,8 +148,9 @@ def main():
                         all_online_clients = online_clients if isinstance(online_clients, list) else []
                     
                     # Сопоставляем онлайн клиентов с пользователями Hysteria 2
+                    # Используем предзагруженные маппинги (батчинг)
                     for username in users_dict.keys():
-                        mapping = db.get_xui_mapping(username) if db else None
+                        mapping = all_mappings.get(username.lower())
                         if not mapping:
                             continue
                         
