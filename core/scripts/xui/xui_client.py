@@ -571,19 +571,32 @@ class XUIClient:
         if not parsed.scheme:
             # По умолчанию используем HTTPS для безопасности
             host = f"https://{host}"
+            parsed = urlparse(host)  # Перепарсим после добавления схемы
         elif parsed.scheme == 'http' and force_https:
             # Принудительно переключаем на HTTPS
             host = host.replace('http://', 'https://', 1)
+            parsed = urlparse(host)  # Перепарсим после замены схемы
             logger.info(f"Forced HTTPS for host: {host}")
         
-        # Сохраняем оригинальный host без base_path
-        self.base_url = host.rstrip('/')
-        self.base_path = base_path.rstrip('/') if base_path else '/'
+        # Нормализуем base_path
+        base_path_normalized = base_path.rstrip('/') if base_path else '/'
         
-        # Если указан base_path, добавляем его к host для py3xui
-        # py3xui требует полный путь в host, если используется custom URI path
-        if self.base_path and self.base_path != '/':
-            self.base_url = self.base_url.rstrip('/') + '/' + self.base_path.lstrip('/')
+        # Проверяем, не включен ли base_path уже в host
+        host_path = parsed.path.rstrip('/') if parsed.path else ''
+        if base_path_normalized != '/' and host_path.endswith(base_path_normalized):
+            # base_path уже включен в host, не добавляем его повторно
+            logger.info(f"base_path '{base_path_normalized}' already included in host path '{host_path}', not adding again")
+            self.base_url = host.rstrip('/')
+            self.base_path = '/'
+        else:
+            # Сохраняем оригинальный host без base_path
+            self.base_url = host.rstrip('/')
+            self.base_path = base_path_normalized
+            
+            # Если указан base_path, добавляем его к host для py3xui
+            # py3xui требует полный путь в host, если используется custom URI path
+            if self.base_path and self.base_path != '/':
+                self.base_url = self.base_url.rstrip('/') + '/' + self.base_path.lstrip('/')
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_delay = retry_delay

@@ -192,8 +192,10 @@ def update_sni(sni):
     
     # Calculate PIN regardless of how the cert was obtained
     sha256 = run_command(
-        "openssl x509 -noout -fingerprint -sha256 -inform pem -in /etc/hysteria/ca.crt | sed 's/.*=//;s///g'"
+        "openssl x509 -noout -fingerprint -sha256 -inform pem -in /etc/hysteria/ca.crt | sed 's/.*=//'"
     )
+    # Ensure uppercase format (openssl usually returns uppercase, but just in case)
+    sha256 = sha256.strip().upper()
     print(f"SHA-256 fingerprint generated: {sha256}")
 
     if os.path.isfile(CONFIG_FILE):

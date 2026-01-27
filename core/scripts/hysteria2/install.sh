@@ -65,9 +65,9 @@ EOFSERVICE
     wget -O /etc/hysteria/geosite.dat https://raw.githubusercontent.com/Chocolate4U/Iran-v2ray-rules/release/geosite.dat >/dev/null 2>&1 || true
     wget -O /etc/hysteria/geoip.dat https://raw.githubusercontent.com/Chocolate4U/Iran-v2ray-rules/release/geoip.dat >/dev/null 2>&1 || true
         
-    echo "Генерация SHA-256 отпечатка (base64)..."
+    echo "Генерация SHA-256 отпечатка..."
 
-    sha256=$(openssl x509 -noout -fingerprint -sha256 -inform pem -in ca.crt | sed 's/.*=//;s/://g' | tr '[:upper:]' '[:lower:]')
+    sha256=$(openssl x509 -noout -fingerprint -sha256 -inform pem -in ca.crt | sed 's/.*=//' | tr '[:lower:]' '[:upper:]')
     
     if [[ $port =~ ^[0-9]+$ ]] && (( port >= 1 && port <= 65535 )); then
         if ss -tuln | grep -q ":$port\b"; then

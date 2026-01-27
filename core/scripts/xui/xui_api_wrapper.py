@@ -108,6 +108,10 @@ class XUIAPIWrapper:
             result = self._run_async_in_sync_context(self.api_client.login())
             self._logged_in = result
             return result
+        except XUIAPIConnectionError as e:
+            logger.error(f"Login failed: {e}")
+            self._logged_in = False
+            return False
         except XUIAPIAuthError as e:
             logger.error(f"Login failed: {e}")
             self._logged_in = False

@@ -95,20 +95,37 @@ class XUIAPIClient:
         parsed = urlparse(host)
         if not parsed.scheme:
             host = f"https://{host}"
+            parsed = urlparse(host)  # Перепарсим после добавления схемы
         elif parsed.scheme == 'http' and force_https:
             host = host.replace('http://', 'https://', 1)
+            parsed = urlparse(host)  # Перепарсим после замены схемы
             logger.info(f"Forced HTTPS for host: {host}")
         
-        # Сохраняем оригинальный host без base_path
-        self.original_host = host.rstrip('/')
-        self.base_path = base_path.rstrip('/') if base_path else '/'
+        # Сохраняем parsed для использования в обработке ошибок
+        self._parsed_host = parsed
         
-        # Формируем base_url с учётом base_path
-        # Если base_path указан и не равен "/", добавляем его к host
-        if self.base_path and self.base_path != '/':
-            self.base_url = self.original_host.rstrip('/') + '/' + self.base_path.lstrip('/')
-        else:
+        # Нормализуем base_path
+        base_path_normalized = base_path.rstrip('/') if base_path else '/'
+        
+        # Проверяем, не включен ли base_path уже в host
+        host_path = parsed.path.rstrip('/') if parsed.path else ''
+        if base_path_normalized != '/' and host_path.endswith(base_path_normalized):
+            # base_path уже включен в host, не добавляем его повторно
+            logger.info(f"base_path '{base_path_normalized}' already included in host path '{host_path}', not adding again")
+            self.original_host = host.rstrip('/')
+            self.base_path = '/'
             self.base_url = self.original_host
+        else:
+            # Сохраняем оригинальный host без base_path
+            self.original_host = host.rstrip('/')
+            self.base_path = base_path_normalized
+            
+            # Формируем base_url с учётом base_path
+            # Если base_path указан и не равен "/", добавляем его к host
+            if self.base_path and self.base_path != '/':
+                self.base_url = self.original_host.rstrip('/') + '/' + self.base_path.lstrip('/')
+            else:
+                self.base_url = self.original_host
         
         self.username = username
         self.password = password
@@ -320,9 +337,36 @@ class XUIAPIClient:
             
         except XUIAPIAuthError:
             raise
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            # DNS или сетевые ошибки
+            error_str = str(e).lower()
+            hostname = self._parsed_host.hostname if self._parsed_host.hostname else self.original_host.split('://')[-1].split(':')[0]
+            netloc = self._parsed_host.netloc if self._parsed_host.netloc else self.original_host.split('://')[-1]
+            
+            if "name resolution" in error_str or "temporary failure" in error_str or "errno -3" in error_str or "-3" in error_str:
+                error_msg = f"DNS resolution failed for '{hostname}'. Please check:\n" \
+                           f"1. Domain name is correct: {hostname}\n" \
+                           f"2. DNS server is accessible: try 'nslookup {hostname}'\n" \
+                           f"3. Network connectivity is available"
+                logger.error(f"Login error: {error_msg}")
+                raise XUIAPIConnectionError(error_msg) from e
+            else:
+                error_msg = f"Connection error to {self.original_host}: {e}"
+                logger.error(error_msg)
+                raise XUIAPIConnectionError(error_msg) from e
+        except httpx.TimeoutException as e:
+            error_msg = f"Connection timeout to {self.original_host} (timeout={self.timeout}s)"
+            logger.error(error_msg)
+            raise XUIAPIConnectionError(error_msg) from e
         except Exception as e:
             error_msg = f"Login error: {e}"
             logger.error(error_msg)
+            # Проверяем, не является ли это DNS ошибкой
+            error_str = str(e).lower()
+            if "name resolution" in error_str or "temporary failure" in error_str or "errno -3" in error_str or "-3" in error_str:
+                hostname = self._parsed_host.hostname if self._parsed_host.hostname else self.original_host.split('://')[-1].split(':')[0]
+                error_msg = f"DNS resolution failed for '{hostname}'. Please check domain name and DNS settings."
+                raise XUIAPIConnectionError(error_msg) from e
             raise XUIAPIAuthError(error_msg) from e
     
     async def _ensure_logged_in(self):

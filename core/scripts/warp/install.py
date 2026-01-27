@@ -19,8 +19,19 @@ def is_service_active(service_name: str) -> bool:
 
 def install_warp():
     print("Installing WARP...")
-    result = subprocess.run([sys.executable, str(WARP_SCRIPT_PATH), "install"])
-    return result.returncode == 0
+    result = subprocess.run(
+        [sys.executable, str(WARP_SCRIPT_PATH), "install"],
+        capture_output=True,
+        text=True
+    )
+    if result.returncode != 0:
+        error_msg = result.stderr.strip() if result.stderr.strip() else result.stdout.strip()
+        if error_msg:
+            print(f"WARP installation error: {error_msg}", file=sys.stderr)
+        else:
+            print(f"WARP installation failed with exit code {result.returncode}", file=sys.stderr)
+        return False
+    return True
 
 
 def add_warp_outbound_to_config():
@@ -65,12 +76,21 @@ def main():
         add_warp_outbound_to_config()
         restart_hysteria()
     else:
-        if install_warp() and is_service_active(warp_service):
-            print("WARP installation successful.")
-            add_warp_outbound_to_config()
-            restart_hysteria()
+        if install_warp():
+            # Wait a bit for service to start
+            import time
+            time.sleep(2)
+            if is_service_active(warp_service):
+                print("WARP installation successful.")
+                add_warp_outbound_to_config()
+                restart_hysteria()
+            else:
+                print("WARP installation completed but service is not active. Please check logs:", file=sys.stderr)
+                print(f"Run: journalctl -u {warp_service} --no-pager", file=sys.stderr)
+                sys.exit(1)
         else:
-            print("WARP installation failed.")
+            print("WARP installation failed. Check error messages above.", file=sys.stderr)
+            sys.exit(1)
 
 
 if __name__ == "__main__":

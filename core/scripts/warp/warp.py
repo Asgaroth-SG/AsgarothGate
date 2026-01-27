@@ -22,12 +22,16 @@ WG_ALLOWED_IPS = "0.0.0.0/0,::/0"
 TEST_IPV4 = ["1.0.0.1", "9.9.9.9"]
 TEST_IPV6 = ["2606:4700:4700::1001", "2620:fe::fe"]
 CF_TRACE_URL = "https://www.cloudflare.com/cdn-cgi/trace"
+CF_API_URL = "https://api.cloudflareclient.com"
 
 
-def run(cmd, capture=False, check=False, shell=True):
+def run(cmd, capture=False, check=False, shell=True, timeout=None):
     try:
-        r = subprocess.run(cmd, shell=shell, capture_output=capture, text=True)
+        r = subprocess.run(cmd, shell=shell, capture_output=capture, text=True, timeout=timeout)
         return r.stdout.strip() if capture else r.returncode == 0
+    except subprocess.TimeoutExpired:
+        logging.warning("Command timed out: %s", cmd if isinstance(cmd, str) else ' '.join(cmd))
+        return "" if capture else False
     except:
         return "" if capture else False
 
@@ -74,6 +78,23 @@ def check_ipv6():
     return any(ping6(ip) for ip in TEST_IPV6)
 
 
+def check_cloudflare_api_access():
+    """Check if Cloudflare API is accessible"""
+    logging.info("Checking Cloudflare API accessibility...")
+    # Try to connect to Cloudflare API endpoint
+    result = run(f"curl -s --connect-timeout 10 --max-time 15 {CF_API_URL} >/dev/null 2>&1")
+    if result:
+        logging.info("Cloudflare API is accessible.")
+        return True
+    else:
+        logging.warning("Cloudflare API may be blocked or unreachable. Registration may fail.")
+        # Try alternative check via DNS
+        dns_result = run(f"nslookup api.cloudflareclient.com >/dev/null 2>&1", timeout=5)
+        if not dns_result:
+            logging.error("Cannot resolve api.cloudflareclient.com. Check your DNS settings.")
+        return False
+
+
 def check_warp_client():
     return run("systemctl is-active warp-svc", capture=True) == "active"
 
@@ -88,9 +109,12 @@ def install_wireguard_tools(info):
     logging.info("Installing wireguard-tools...")
     os_name = info["os"]
     if "debian" in os_name or "ubuntu" in os_name:
-        run("apt update && apt install -y iproute2 resolvconf wireguard-tools --no-install-recommends")
+        result = run("apt update && apt install -y iproute2 resolvconf wireguard-tools --no-install-recommends")
+        if not result:
+            logging.error("Failed to install wireguard-tools. Please check your internet connection and try: apt update && apt install -y wireguard-tools")
+            sys.exit(1)
     else:
-        logging.error("OS not supported. Only Debian and Ubuntu are supported.")
+        logging.error("OS not supported. Only Debian and Ubuntu are supported. Detected OS: %s", os_name)
         sys.exit(1)
 
 
@@ -111,22 +135,79 @@ def install_wireguard(info):
 
 
 def install_wgcf():
-    run("curl -fsSL https://raw.githubusercontent.com/ReturnFI/Warp/main/wgcf.sh | bash")
+    logging.info("Downloading and installing wgcf...")
+    result = run("curl -fsSL https://raw.githubusercontent.com/ReturnFI/Warp/main/wgcf.sh | bash")
+    if not result:
+        logging.error("Failed to download or install wgcf. Please check your internet connection and try again.")
+        sys.exit(1)
 
 
 def register_warp_account():
-    while not Path("wgcf-account.toml").exists():
-        install_wgcf()
-        logging.info("Registering WARP account...")
-        run("yes | wgcf register")
-        run("sleep 5")
+    # Check if account file already exists
+    if Path("wgcf-account.toml").exists():
+        logging.info("WARP account file already exists. Skipping registration.")
+        return
+    
+    # Check API accessibility before attempting registration
+    if not check_cloudflare_api_access():
+        logging.warning("Cloudflare API may be blocked. Registration will be attempted anyway.")
+    
+    max_attempts = 5
+    attempt = 0
+    while not Path("wgcf-account.toml").exists() and attempt < max_attempts:
+        attempt += 1
+        # Only reinstall wgcf if it's the first attempt or if previous attempt failed
+        if attempt == 1 or not cmd_exists("wgcf"):
+            install_wgcf()
+        
+        logging.info("Registering WARP account (attempt %d/%d)...", attempt, max_attempts)
+        # Use timeout for the registration command (30 seconds should be enough)
+        # Note: wgcf doesn't support timeout directly, but we can use timeout command
+        result = run("timeout 30 bash -c 'yes | wgcf register'", timeout=35)
+        if result:
+            run("sleep 3")
+            if Path("wgcf-account.toml").exists():
+                logging.info("WARP account registered successfully!")
+                break
+        else:
+            logging.warning("WARP account registration failed (attempt %d/%d)", attempt, max_attempts)
+            if attempt < max_attempts:
+                wait_time = min(5 + attempt * 2, 15)  # Progressive backoff: 5, 7, 9, 11, 13 seconds
+                logging.info("Retrying in %d seconds...", wait_time)
+                run(f"sleep {wait_time}")
+    
+    if not Path("wgcf-account.toml").exists():
+        logging.error("Failed to register WARP account after %d attempts.", max_attempts)
+        logging.error("Possible reasons:")
+        logging.error("1. Cloudflare API is blocked in your region")
+        logging.error("2. Network connectivity issues")
+        logging.error("3. Firewall blocking HTTPS connections to api.cloudflareclient.com")
+        logging.error("4. DNS resolution problems")
+        logging.error("\nTroubleshooting steps:")
+        logging.error("- Check internet connectivity: curl -I https://www.cloudflare.com")
+        logging.error("- Check DNS: nslookup api.cloudflareclient.com")
+        logging.error("- Try manual registration: cd /tmp && wgcf register")
+        sys.exit(1)
 
 
 def generate_wgcf_profile():
-    while not Path(WGCF_PROFILE).exists():
-        register_warp_account()
-        logging.info("Generating WGCF profile...")
-        run("wgcf generate")
+    max_attempts = 3
+    attempt = 0
+    while not Path(WGCF_PROFILE).exists() and attempt < max_attempts:
+        attempt += 1
+        if not Path("wgcf-account.toml").exists():
+            register_warp_account()
+        logging.info("Generating WGCF profile (attempt %d/%d)...", attempt, max_attempts)
+        result = run("wgcf generate")
+        if result and Path(WGCF_PROFILE).exists():
+            break
+        elif attempt < max_attempts:
+            logging.warning("WGCF profile generation failed (attempt %d/%d). Retrying...", attempt, max_attempts)
+            run("sleep 2")
+    
+    if not Path(WGCF_PROFILE).exists():
+        logging.error("Failed to generate WGCF profile after %d attempts.", max_attempts)
+        sys.exit(1)
 
 
 def backup_wgcf_profile():
@@ -161,9 +242,24 @@ def read_wgcf_profile():
 
 
 def load_wgcf_profile():
+    # Check if profile exists in current directory first
     if Path(WGCF_PROFILE).exists():
         backup_wgcf_profile()
-    elif not WGCF_PROFILE_PATH.exists():
+    # Check if profile exists in /etc/warp
+    elif WGCF_PROFILE_PATH.exists():
+        logging.info("Using existing WARP profile from %s", WGCF_PROFILE_PATH)
+        # Copy to current directory for reading
+        import shutil
+        shutil.copy(WGCF_PROFILE_PATH, WGCF_PROFILE)
+    # Check if account exists in /etc/warp
+    elif (WGCF_PROFILE_DIR / "wgcf-account.toml").exists():
+        logging.info("Found existing WARP account in %s", WGCF_PROFILE_DIR)
+        # Copy account to current directory
+        import shutil
+        shutil.copy(WGCF_PROFILE_DIR / "wgcf-account.toml", "wgcf-account.toml")
+        generate_wgcf_profile()
+        backup_wgcf_profile()
+    else:
         generate_wgcf_profile()
         backup_wgcf_profile()
     return read_wgcf_profile()
@@ -305,8 +401,14 @@ def install_wgx(info):
     active, _ = check_wireguard()
     if active:
         systemctl("stop", f"wg-quick@{WG_INTERFACE}")
+    
+    # Check network connectivity before proceeding
     ipv4_ok = check_ipv4()
     ipv6_ok = check_ipv6()
+    if not ipv4_ok and not ipv6_ok:
+        logging.error("No network connectivity detected. Please check your internet connection.")
+        sys.exit(1)
+    
     profile = load_wgcf_profile()
     mtu = get_mtu(ipv4_ok, ipv6_ok)
     endpoint = get_endpoint()
@@ -348,24 +450,33 @@ COMMANDS:
 def main():
     logging.basicConfig(level=logging.INFO, format='[%(levelname)s] %(message)s')
     if platform.system() != "Linux":
-        logging.error("Linux required.")
+        logging.error("Linux required. Current system: %s", platform.system())
         sys.exit(1)
     if os.geteuid() != 0:
-        logging.error("Root required.")
+        logging.error("Root privileges required. Please run with sudo.")
         sys.exit(1)
     if not cmd_exists("curl"):
-        logging.error("cURL required.")
+        logging.error("cURL is required but not found. Please install it: apt install curl")
         sys.exit(1)
     info = get_system_info()
     cmd = sys.argv[1] if len(sys.argv) > 1 else "help"
-    if cmd in ["install", "wgx"]:
-        install_wgx(info)
-    elif cmd in ["uninstall", "dwg"]:
-        uninstall(info)
-    elif cmd == "status":
-        print_status()
-    else:
-        print_usage()
+    try:
+        if cmd in ["install", "wgx"]:
+            install_wgx(info)
+        elif cmd in ["uninstall", "dwg"]:
+            uninstall(info)
+        elif cmd == "status":
+            print_status()
+        else:
+            print_usage()
+    except KeyboardInterrupt:
+        logging.error("Installation interrupted by user.")
+        sys.exit(130)
+    except Exception as e:
+        logging.error("Unexpected error during WARP installation: %s", str(e))
+        import traceback
+        logging.debug(traceback.format_exc())
+        sys.exit(1)
 
 
 if __name__ == "__main__":

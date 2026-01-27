@@ -264,6 +264,7 @@ class XUISyncManager:
         for item in links:
             uri = item.get('uri')
             if not uri:
+                logger.debug(f"Skipping item with empty URI: {item.get('name', 'unknown')}")
                 continue
             server_config = item.get('server_config', {}) or {}
             server_id = (
@@ -274,13 +275,19 @@ class XUISyncManager:
             )
             server_cfg = self._build_link_rewriter_config(server_config, server_id, server_config.get('host'))
             if not server_cfg:
-                continue
+                # Если нет конфигурации для нормализации, оставляем ссылку как есть (без нормализации)
+                logger.debug(f"No server config for {server_id}, keeping link as-is: {uri[:80]}...")
+                # НЕ используем continue - ссылка должна остаться в списке даже без нормализации
             try:
                 normalized = rewrite_proxy_links(uri, server_cfg)
                 if normalized:
                     item['uri'] = normalized
+                    logger.debug(f"Normalized link for server {server_id}")
+                else:
+                    logger.warning(f"rewrite_proxy_links returned None for server {server_id}, keeping original")
             except Exception as e:
                 logger.warning(f"Failed to normalize link for server {server_id}: {e}", exc_info=True)
+                # При ошибке оставляем оригинальную ссылку
         
         return links
     
