@@ -12,6 +12,7 @@ $(document).ready(function () {
         getAllNodes: contentSection.dataset.getAllNodesUrl,
         addNode: contentSection.dataset.addNodeUrl,
         deleteNode: contentSection.dataset.deleteNodeUrl,
+        reorderNodes: contentSection.dataset.reorderNodesUrl,
         getAllExtraConfigs: contentSection.dataset.getAllExtraConfigsUrl,
         addExtraConfig: contentSection.dataset.addExtraConfigUrl,
         deleteExtraConfig: contentSection.dataset.deleteExtraConfigUrl,
@@ -47,6 +48,7 @@ $(document).ready(function () {
         xuiTestConnection: contentSection.dataset.xuiTestConnectionUrl,
         xuiSyncStatus: contentSection.dataset.xuiSyncStatusUrl,
         xuiSyncUser: contentSection.dataset.xuiSyncUserUrl,
+        xuiClearCache: contentSection.dataset.xuiClearCacheUrl,
         xuiSyncAll: contentSection.dataset.xuiSyncAllUrl,
         xuiGetLogs: contentSection.dataset.xuiGetLogsUrl || '/api/v1/config/xui/logs'
     };
@@ -315,10 +317,12 @@ $(document).ready(function () {
                 fieldValid = isValidSubPath(input.val());
             } else if (id === 'ipv4' || id === 'ipv6') {
                 fieldValid = (input.val().trim() === '') ? true : isValidIPorDomain(input.val());
-            } else if (id === 'node_ip') {
+            } else if (id === 'modal_node_ip' || id === 'node_ip') {
                 fieldValid = isValidIPorDomain(input.val());
-            } else if (id === 'node_name' || id === 'extra_config_name') {
+            } else if (id === 'modal_node_name' || id === 'node_name' || id === 'extra_config_name') {
                 fieldValid = input.val().trim() !== "";
+            } else if (id === 'modal_node_type' || id === 'node_type') {
+                fieldValid = input.val() !== null && input.val() !== '';
             } else if (id === 'extra_config_uri') {
                 fieldValid = isValidURI(input.val());
             } else if (id === 'block_duration' || id === 'max_ips' || id === 'telegram_backup_interval') {
@@ -329,13 +333,13 @@ $(document).ready(function () {
                 }
             } else if (id === 'decoy_path') {
                 fieldValid = isValidPath(input.val());
-            } else if (id === 'node_port') {
+            } else if (id === 'modal_node_port' || id === 'node_port') {
                 fieldValid = (input.val().trim() === '') ? true : isValidPort(input.val());
-            } else if (id === 'node_sni') {
+            } else if (id === 'modal_node_sni' || id === 'node_sni') {
                 fieldValid = (input.val().trim() === '') ? true : isValidDomain(input.val());
-            } else if (id === 'node_pin') {
+            } else if (id === 'modal_node_pin' || id === 'node_pin') {
                 fieldValid = (input.val().trim() === '') ? true : isValidSha256Pin(input.val());
-            } else if (id === 'node_obfs') {
+            } else if (id === 'modal_node_obfs' || id === 'node_obfs') {
                 fieldValid = true;
             } else {
                 if (input.attr('placeholder') && (input.attr('placeholder').includes('Enter') || input.attr('placeholder').includes('Введите')) && !input.attr('id').startsWith('ipv')) {
@@ -384,6 +388,7 @@ $(document).ready(function () {
             url: API_URLS.getAllNodes,
             type: "GET",
             success: function (nodes) {
+                cachedNodes = nodes; // Сохраняем в кэш для быстрого доступа при редактировании
                 renderNodes(nodes);
             },
             error: function (xhr) {
@@ -394,59 +399,114 @@ $(document).ready(function () {
     }
 
     function renderNodes(nodes) {
-        const tableBody = $("#nodes_table tbody");
-        tableBody.empty();
+        const grid = $("#nodes_grid");
+        grid.empty();
 
         if (nodes && nodes.length > 0) {
-            $("#nodes_table").show();
             $("#no_nodes_message").hide();
+            
+            // Инициализируем Sortable после рендеринга
+            setTimeout(() => {
+                initializeNodesSortable();
+            }, 100);
 
-            nodes.forEach(node => {
+            nodes.forEach((node, index) => {
                 const rawType = (node.type || node.node_type || 'standard').toString().toLowerCase();
                 const isPremium = rawType === 'premium';
                 const typeLabel = isPremium ? 'Premium' : 'Standard';
                 const typeClass = isPremium ? 'badge badge-premium' : 'badge badge-standard';
+                const typeIcon = 'fa-server';
 
-                const row = `<tr>
-								<td>${escapeHtml(node.name)}</td>
-								<td><span class="${typeClass}">${typeLabel}</span></td>
-								<td>${escapeHtml(node.ip)}</td>
-								<td>${escapeHtml(node.port || 'Н/Д')}</td>
-								<td>${escapeHtml(node.sni || 'Н/Д')}</td>
-								<td>${escapeHtml(node.obfs || 'Н/Д')}</td>
-								<td>${escapeHtml(node.insecure ? 'Да' : 'Нет')}</td>
-								<td>${escapeHtml(node.pinSHA256 || 'Н/Д')}</td>
-								<td>
-									<button class="btn btn-xs btn-danger delete-node-btn" data-name="${escapeHtml(node.name)}">
-										<i class="fas fa-trash"></i> Удалить
-									</button>
-								</td>
-							</tr>`;
-                tableBody.append(row);
+                const card = `
+                    <div class="col-md-6 col-lg-4 mb-3" style="--index: ${index};">
+                        <div class="card node-card xui-server-tile" data-node-name="${escapeHtml(node.name)}" data-node-index="${index}" style="cursor: move;">
+                            <div class="card-body">
+                                <div class="d-flex justify-content-between align-items-start mb-2">
+                                    <div class="d-flex align-items-center" style="flex: 1;">
+                                        <i class="fas fa-grip-vertical text-muted mr-2" style="cursor: grab; opacity: 0.5;" title="Перетащите для изменения порядка"></i>
+                                        <h6 class="card-title mb-0 emoji-text" style="flex: 1;">${escapeHtml(node.name)}</h6>
+                                    </div>
+                                    <span class="${typeClass}">${typeLabel}</span>
+                                </div>
+                                <p class="card-text text-muted small mb-2 emoji-text">${escapeHtml(node.ip)}</p>
+                                <div class="d-flex justify-content-end" style="gap: 0.25rem;">
+                                    <button type="button" class="btn btn-xs btn-primary edit-node-btn" data-name="${escapeHtml(node.name)}" data-index="${index}" 
+                                            data-toggle="tooltip" data-placement="top" title="Редактировать" aria-label="Редактировать">
+                                        <i class="fas fa-pen"></i>
+                                    </button>
+                                    <button type="button" class="btn btn-xs btn-danger delete-node-btn" data-name="${escapeHtml(node.name)}" 
+                                            data-toggle="tooltip" data-placement="top" title="Удалить" aria-label="Удалить">
+                                        <i class="fas fa-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                grid.append(card);
             });
         } else {
-            $("#nodes_table").hide();
             $("#no_nodes_message").show();
         }
     }
 
-    function addNode() {
-        if (!validateForm('add_node_form')) return;
+    function openNodeModal(editNode = null) {
+        // Очищаем форму
+        const form = $("#node_form")[0];
+        form.reset();
+        form.classList.remove('was-validated');
+        $("#node_form .form-control").removeClass('is-invalid');
+        $("#node_edit_name").val('');
+        
+        if (editNode) {
+            // Режим редактирования
+            $("#nodeModalLabel").text("Редактировать узел");
+            $("#save_node_btn .btn-text").text("Сохранить");
+            $("#node_edit_name").val(editNode.name);
+            $("#modal_node_name").val(editNode.name).prop('disabled', true); // Имя нельзя менять
+            $("#modal_node_type").val((editNode.type || editNode.node_type || 'standard').toLowerCase());
+            $("#modal_node_ip").val(editNode.ip || '');
+            $("#modal_node_port").val(editNode.port || '');
+            $("#modal_node_sni").val(editNode.sni || '');
+            $("#modal_node_obfs").val(editNode.obfs || '');
+            $("#modal_node_pin").val(editNode.pinSHA256 || '');
+            $("#modal_node_insecure").prop('checked', editNode.insecure || false);
+        } else {
+            // Режим добавления
+            $("#nodeModalLabel").text("Добавить узел");
+            $("#save_node_btn .btn-text").text("Добавить");
+            $("#modal_node_name").prop('disabled', false);
+            // Устанавливаем значения по умолчанию
+            $("#modal_node_type").val('standard');
+            $("#modal_node_insecure").prop('checked', false);
+        }
+        
+        $("#nodeModal").modal('show');
+    }
 
-        const name = $("#node_name").val().trim();
-        const ip = $("#node_ip").val().trim();
-        const port = $("#node_port").val().trim();
-        const sni = $("#node_sni").val().trim();
-        const obfs = $("#node_obfs").val().trim();
-        const pinSHA256 = $("#node_pin").val().trim();
-        const insecure = $("#node_insecure").is(':checked');
-        const type = ($("#node_type").val() || 'standard').toLowerCase();
+    function saveNode() {
+        // Валидация формы через validateForm
+        if (!validateForm('node_form')) {
+            return;
+        }
+
+        const editName = $("#node_edit_name").val();
+        const isEdit = editName !== '';
+        
+        const name = $("#modal_node_name").val().trim();
+        const ip = $("#modal_node_ip").val().trim();
+        const port = $("#modal_node_port").val().trim();
+        const sni = $("#modal_node_sni").val().trim();
+        const obfs = $("#modal_node_obfs").val().trim();
+        const pinSHA256 = $("#modal_node_pin").val().trim();
+        const insecure = $("#modal_node_insecure").is(':checked');
+        const type = ($("#modal_node_type").val() || 'standard').toLowerCase();
+        
         const data = {
             name: name,
             ip: ip,
             insecure: insecure,
             node_type: type
-
         };
 
         if (port) data.port = parseInt(port);
@@ -454,20 +514,82 @@ $(document).ready(function () {
         if (obfs) data.obfs = obfs;
         if (pinSHA256) data.pinSHA256 = pinSHA256;
 
-        confirmAction(`добавить узел '${name}'`, function () {
-            sendRequest(
-                API_URLS.addNode,
-                "POST",
-                data,
-                `Узел '${name}' успешно добавлен!`,
-                "#add_node_btn",
-                false,
-                function () {
-                    $("#add_node_form")[0].reset();
-                    $("#add_node_form .form-control").removeClass('is-invalid');
-                    fetchNodes();
-                }
-            );
+        const actionText = isEdit ? `обновить узел '${name}'` : `добавить узел '${name}'`;
+        
+        confirmAction(actionText, function () {
+            const saveBtn = $("#save_node_btn");
+            const spinner = saveBtn.find('.spinner-border');
+            const btnText = saveBtn.find('.btn-text');
+            
+            spinner.show();
+            btnText.hide();
+            saveBtn.prop('disabled', true);
+
+            if (isEdit) {
+                // Редактирование: удаляем старый и добавляем новый
+                $.ajax({
+                    url: API_URLS.deleteNode,
+                    type: "POST",
+                    contentType: "application/json",
+                    data: JSON.stringify({ name: editName }),
+                    success: function() {
+                        // После удаления добавляем обновленный узел
+                        $.ajax({
+                            url: API_URLS.addNode,
+                            type: "POST",
+                            contentType: "application/json",
+                            data: JSON.stringify(data),
+                            success: function() {
+                                if (window.showToast) {
+                                    showToast("success", "Успех!", `Узел '${name}' успешно обновлен!`);
+                                } else {
+                                    Swal.fire("Успех!", `Узел '${name}' успешно обновлен!`, "success");
+                                }
+                                $("#nodeModal").modal('hide');
+                                fetchNodes();
+                            },
+                            error: function(xhr) {
+                                if (window.showToast) {
+                                    showToast("error", "Ошибка!", "Не удалось обновить узел.");
+                                } else {
+                                    Swal.fire("Ошибка!", "Не удалось обновить узел.", "error");
+                                }
+                                console.error("Error updating node:", xhr.responseText);
+                            },
+                            complete: function() {
+                                spinner.hide();
+                                btnText.show();
+                                saveBtn.prop('disabled', false);
+                            }
+                        });
+                    },
+                    error: function(xhr) {
+                        if (window.showToast) {
+                            showToast("error", "Ошибка!", "Не удалось удалить старый узел.");
+                        } else {
+                            Swal.fire("Ошибка!", "Не удалось удалить старый узел.", "error");
+                        }
+                        console.error("Error deleting old node:", xhr.responseText);
+                        spinner.hide();
+                        btnText.show();
+                        saveBtn.prop('disabled', false);
+                    }
+                });
+            } else {
+                // Добавление нового узла
+                sendRequest(
+                    API_URLS.addNode,
+                    "POST",
+                    data,
+                    `Узел '${name}' успешно добавлен!`,
+                    "#save_node_btn",
+                    false,
+                    function () {
+                        $("#nodeModal").modal('hide');
+                        fetchNodes();
+                    }
+                );
+            }
         });
     }
 
@@ -1201,11 +1323,149 @@ $(document).ready(function () {
     $("#ip_limit_change_config").on("click", configIPLimit);
     $("#decoy_setup").on("click", setupDecoy);
     $("#decoy_stop").on("click", stopDecoy);
-    $("#add_node_btn").on("click", addNode);
-    $("#nodes_table").on("click", ".delete-node-btn", function () {
+    // Обработчики для узлов
+    $("#add_node_btn_modal").on("click", function() {
+        openNodeModal();
+    });
+    
+    $("#save_node_btn").on("click", saveNode);
+    
+    // Кэш для узлов (чтобы не делать лишний запрос при редактировании)
+    let cachedNodes = [];
+    
+    $(document).on("click", ".edit-node-btn", function() {
+        const nodeName = $(this).data("name");
+        // Используем кэшированные данные если есть, иначе загружаем
+        if (cachedNodes.length > 0) {
+            const node = cachedNodes.find(n => n.name === nodeName);
+            if (node) {
+                openNodeModal(node);
+                return;
+            }
+        }
+        
+        // Если в кэше нет, загружаем
+        $.ajax({
+            url: API_URLS.getAllNodes,
+            type: "GET",
+            success: function(nodes) {
+                cachedNodes = nodes; // Сохраняем в кэш
+                const node = nodes.find(n => n.name === nodeName);
+                if (node) {
+                    openNodeModal(node);
+                } else {
+                    if (window.showToast) {
+                        showToast("error", "Ошибка!", "Узел не найден.");
+                    }
+                }
+            },
+            error: function() {
+                if (window.showToast) {
+                    showToast("error", "Ошибка!", "Не удалось загрузить данные узла.");
+                }
+            }
+        });
+    });
+    
+    $(document).on("click", ".delete-node-btn", function () {
         const nodeName = $(this).data("name");
         deleteNode(nodeName);
     });
+    
+    // Сброс формы при закрытии модального окна
+    $("#nodeModal").on("hidden.bs.modal", function() {
+        $("#node_form")[0].reset();
+        $("#node_form .form-control").removeClass('is-invalid');
+        $("#node_edit_name").val('');
+        $("#modal_node_name").prop('disabled', false);
+    });
+    
+    // Инициализация Sortable для карточек узлов
+    let nodesSortable = null;
+    function initializeNodesSortable() {
+        const grid = document.getElementById('nodes_grid');
+        if (!grid) return;
+        
+        // Уничтожаем предыдущий экземпляр если есть
+        if (nodesSortable) {
+            nodesSortable.destroy();
+            nodesSortable = null;
+        }
+        
+        // Создаем новый экземпляр Sortable
+        nodesSortable = new Sortable(grid, {
+            animation: 150,
+            handle: '.node-card', // Можно перетаскивать за всю карточку
+            filter: '.btn, .badge', // Исключаем кнопки и бейджи из перетаскивания
+            preventOnFilter: false, // Разрешаем клики по кнопкам
+            ghostClass: 'sortable-ghost',
+            chosenClass: 'sortable-chosen',
+            dragClass: 'sortable-drag',
+            forceFallback: false, // Используем HTML5 drag если доступен
+            fallbackOnBody: true,
+            swapThreshold: 0.65,
+            onStart: function(evt) {
+                // Меняем курсор на grabbing при начале перетаскивания
+                evt.item.style.cursor = 'grabbing';
+            },
+            onEnd: function(evt) {
+                // Восстанавливаем курсор
+                evt.item.style.cursor = '';
+                
+                // Сохраняем новый порядок
+                saveNodesOrder();
+            }
+        });
+    }
+    
+    // Сохранение порядка узлов
+    function saveNodesOrder() {
+        const grid = document.getElementById('nodes_grid');
+        if (!grid) return;
+        
+        const cards = grid.querySelectorAll('.node-card');
+        const nodeNames = Array.from(cards).map(card => card.getAttribute('data-node-name'));
+        
+        if (nodeNames.length === 0) return;
+        
+        // Debounce для избежания множественных запросов
+        if (window.nodesOrderTimeout) {
+            clearTimeout(window.nodesOrderTimeout);
+        }
+        
+        window.nodesOrderTimeout = setTimeout(() => {
+            $.ajax({
+                url: API_URLS.reorderNodes,
+                type: "POST",
+                contentType: "application/json",
+                data: JSON.stringify({ names: nodeNames }),
+                success: function() {
+                    // Обновляем индексы в data-node-index
+                    cards.forEach((card, index) => {
+                        card.setAttribute('data-node-index', index);
+                        const buttons = card.querySelectorAll('[data-index]');
+                        buttons.forEach(btn => {
+                            btn.setAttribute('data-index', index);
+                        });
+                    });
+                    
+                    if (window.showToast) {
+                        showToast("success", "Успех!", "Порядок узлов обновлен.");
+                    }
+                },
+                error: function(xhr) {
+                    if (window.showToast) {
+                        showToast("error", "Ошибка!", "Не удалось обновить порядок узлов.");
+                    } else {
+                        Swal.fire("Ошибка!", "Не удалось обновить порядок узлов.", "error");
+                    }
+                    console.error("Error reordering nodes:", xhr.responseText);
+                    // Перезагружаем узлы для восстановления правильного порядка
+                    fetchNodes();
+                }
+            });
+        }, 300);
+    }
     $("#add_extra_config_btn").on("click", addExtraConfig);
     $("#extra_configs_table").on("click", ".delete-extra-config-btn", function () {
         const configName = $(this).data("name");
@@ -1242,7 +1502,7 @@ $(document).ready(function () {
         }
     });
 
-    $('#ipv4, #ipv6, #node_ip').on('input', function () {
+    $('#ipv4, #ipv6, #modal_node_ip, #node_ip').on('input', function () {
         const isLocalIpField = $(this).attr('id') === 'ipv4' || $(this).attr('id') === 'ipv6';
         if (isLocalIpField && $(this).val().trim() === '') {
             $(this).removeClass('is-invalid');
@@ -1253,7 +1513,7 @@ $(document).ready(function () {
         }
     });
 
-    $('#node_name, #extra_config_name').on('input', function () {
+    $('#modal_node_name, #node_name, #extra_config_name').on('input', function () {
         if ($(this).val().trim() !== "") {
             $(this).removeClass('is-invalid');
         } else {
@@ -1300,7 +1560,7 @@ $(document).ready(function () {
         }
     });
 
-    $('#node_port').on('input', function () {
+    $('#modal_node_port, #node_port').on('input', function () {
         const val = $(this).val().trim();
         if (val === '' || isValidPort(val)) {
             $(this).removeClass('is-invalid');
@@ -1309,7 +1569,7 @@ $(document).ready(function () {
         }
     });
 
-    $('#node_sni').on('input', function () {
+    $('#modal_node_sni, #node_sni').on('input', function () {
         const val = $(this).val().trim();
         if (val === '' || isValidDomain(val)) {
             $(this).removeClass('is-invalid');
@@ -1318,7 +1578,7 @@ $(document).ready(function () {
         }
     });
 
-    $('#node_pin').on('input', function () {
+    $('#modal_node_pin, #node_pin').on('input', function () {
         const val = $(this).val().trim();
         if (val === '' || isValidSha256Pin(val)) {
             $(this).removeClass('is-invalid');
@@ -1455,8 +1715,10 @@ $(document).ready(function () {
 
     // Загрузка конфигурации X-UI и отображение плиток серверов
     function loadXUIConfig() {
+        // Добавляем timestamp для обхода кэша браузера
+        const timestamp = new Date().getTime();
         $.ajax({
-            url: API_URLS.xuiGetConfig,
+            url: API_URLS.xuiGetConfig + (API_URLS.xuiGetConfig.includes('?') ? '&' : '?') + '_t=' + timestamp,
             method: 'GET',
             cache: false, // Отключаем кеширование для получения актуальных данных
             success: function (data) {
@@ -1528,8 +1790,266 @@ $(document).ready(function () {
             }
         }, 100);
         
+        // Инициализируем drag-and-drop для изменения порядка серверов
+        initializeXUIServersSortable();
+        
         // Автоматически проверяем статус всех серверов при загрузке
         checkAllServersStatus(servers);
+    }
+    
+    // Инициализация Sortable для карточек серверов 3X-UI
+    let xuiServersSortable = null;
+    function initializeXUIServersSortable() {
+        const grid = document.getElementById('xui_servers_grid');
+        if (!grid) return;
+        
+        // Уничтожаем предыдущий экземпляр если есть
+        if (xuiServersSortable) {
+            xuiServersSortable.destroy();
+            xuiServersSortable = null;
+        }
+        
+        // Создаем новый экземпляр Sortable
+        xuiServersSortable = new Sortable(grid, {
+            animation: 150,
+            handle: '.xui-server-tile', // Можно перетаскивать за всю карточку
+            filter: '.btn, .badge', // Исключаем кнопки и бейджи из перетаскивания
+            preventOnFilter: false, // Разрешаем клики по кнопкам
+            ghostClass: 'sortable-ghost',
+            chosenClass: 'sortable-chosen',
+            dragClass: 'sortable-drag',
+            forceFallback: false, // Используем HTML5 drag если доступен
+            fallbackOnBody: true,
+            swapThreshold: 0.65,
+            onStart: function(evt) {
+                // Меняем курсор на grabbing при начале перетаскивания
+                evt.item.style.cursor = 'grabbing';
+            },
+            onEnd: function(evt) {
+                // Восстанавливаем курсор
+                evt.item.style.cursor = '';
+                // Обновляем индексы в data-server-index
+                const tiles = grid.querySelectorAll('.xui-server-tile');
+                tiles.forEach((tile, index) => {
+                    tile.setAttribute('data-server-index', index);
+                    // Обновляем data-index в кнопках внутри карточки
+                    const buttons = tile.querySelectorAll('[data-index]');
+                    buttons.forEach(btn => {
+                        btn.setAttribute('data-index', index);
+                    });
+                });
+                
+                // Сохраняем новый порядок
+                saveXUIServersOrder();
+            }
+        });
+    }
+    
+    // Debounce для сохранения порядка (избегаем множественных запросов)
+    let saveOrderTimeout = null;
+    
+    // Сохранение нового порядка серверов
+    function saveXUIServersOrder() {
+        // Отменяем предыдущий таймаут если есть
+        if (saveOrderTimeout) {
+            clearTimeout(saveOrderTimeout);
+        }
+        
+        // Устанавливаем задержку 500ms перед сохранением
+        saveOrderTimeout = setTimeout(function() {
+            const grid = $('#xui_servers_grid');
+            const tiles = grid.find('.xui-server-tile');
+            
+            if (tiles.length === 0) return;
+            
+            // Получаем текущую конфигурацию (с timestamp для обхода кэша)
+            const timestamp = new Date().getTime();
+            $.ajax({
+            url: API_URLS.xuiGetConfig + (API_URLS.xuiGetConfig.includes('?') ? '&' : '?') + '_t=' + timestamp,
+            method: 'GET',
+            cache: false,
+            success: function(data) {
+                const servers = data.xui_servers || [];
+                if (servers.length === 0) return;
+                
+                // Создаем словарь серверов по host и name для быстрого поиска
+                const serversMapByHost = {};
+                const serversMapByName = {};
+                servers.forEach(server => {
+                    const hostKey = (server.host || '').trim();
+                    const nameKey = (server.name || '').trim();
+                    if (hostKey) {
+                        serversMapByHost[hostKey] = server;
+                    }
+                    if (nameKey) {
+                        serversMapByName[nameKey] = server;
+                    }
+                });
+                
+                // Создаем новый массив серверов в порядке карточек (по порядку DOM)
+                const newOrder = [];
+                const usedServers = new Set(); // Отслеживаем уже использованные серверы
+                
+                tiles.each(function() {
+                    const tile = $(this);
+                    // Используем data-server-host для идентификации сервера
+                    const tileHost = (tile.attr('data-server-host') || '').trim();
+                    const tileName = (tile.attr('data-server-name') || '').trim();
+                    
+                    // Ищем сервер по host (приоритет)
+                    let server = null;
+                    if (tileHost && serversMapByHost[tileHost]) {
+                        server = serversMapByHost[tileHost];
+                    } else if (tileHost) {
+                        // Пробуем найти по частичному совпадению host
+                        for (const key in serversMapByHost) {
+                            if (key.includes(tileHost) || tileHost.includes(key)) {
+                                const candidate = serversMapByHost[key];
+                                if (!usedServers.has(candidate)) {
+                                    server = candidate;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Fallback: ищем по name
+                    if (!server && tileName && serversMapByName[tileName]) {
+                        const candidate = serversMapByName[tileName];
+                        if (!usedServers.has(candidate)) {
+                            server = candidate;
+                        }
+                    }
+                    
+                    // Последний fallback: используем индекс из data-server-index
+                    if (!server) {
+                        const index = parseInt(tile.attr('data-server-index'));
+                        if (index >= 0 && index < servers.length) {
+                            const candidate = servers[index];
+                            if (!usedServers.has(candidate)) {
+                                server = candidate;
+                            }
+                        }
+                    }
+                    
+                    if (server && !usedServers.has(server)) {
+                        newOrder.push(server);
+                        usedServers.add(server);
+                    } else if (!server) {
+                        console.warn('Could not find server for tile:', tileHost || tileName);
+                    }
+                });
+                
+                // Если не все серверы найдены, не сохраняем
+                if (newOrder.length !== servers.length) {
+                    console.warn('Could not match all servers, skipping order save');
+                    return;
+                }
+                
+                // Проверяем, изменился ли порядок
+                let orderChanged = false;
+                for (let i = 0; i < servers.length; i++) {
+                    const oldKey = (servers[i].host || servers[i].name || '').trim();
+                    const newKey = (newOrder[i].host || newOrder[i].name || '').trim();
+                    if (oldKey !== newKey) {
+                        orderChanged = true;
+                        break;
+                    }
+                }
+                if (!orderChanged) {
+                    console.log('Server order unchanged, skipping save');
+                    return;
+                }
+                
+                console.log('Saving new server order:', newOrder.map(s => s.host || s.name));
+                
+                // Обновляем конфигурацию с новым порядком
+                data.xui_servers = newOrder;
+                
+                // Сохраняем через API
+                $.ajax({
+                    url: API_URLS.xuiUpdateConfig,
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(data),
+                    success: function() {
+                        console.log('Server order saved successfully');
+                        
+                        // Перезагружаем конфигурацию с сервера для подтверждения сохранения
+                        // Увеличиваем задержку до 500ms, чтобы файл успел записаться на диск
+                        setTimeout(function() {
+                            // Добавляем timestamp для обхода кэша браузера
+                            const timestamp = new Date().getTime();
+                            $.ajax({
+                                url: API_URLS.xuiGetConfig + (API_URLS.xuiGetConfig.includes('?') ? '&' : '?') + '_t=' + timestamp,
+                                method: 'GET',
+                                cache: false,
+                                success: function(savedData) {
+                                    const savedServers = savedData.xui_servers || [];
+                                    console.log('Loaded saved server order:', savedServers.map(s => s.host || s.name));
+                                    
+                                    // Проверяем, что порядок сохранился правильно
+                                    const savedOrderStr = savedServers.map(s => (s.host || s.name || '').trim()).join(', ');
+                                    const expectedOrderStr = newOrder.map(s => (s.host || s.name || '').trim()).join(', ');
+                                    
+                                    if (savedOrderStr !== expectedOrderStr) {
+                                        console.warn('Server order mismatch! Expected:', expectedOrderStr, 'Got:', savedOrderStr);
+                                        // Показываем предупреждение пользователю
+                                        if (window.showToast) {
+                                            showToast('warning', 'Внимание', 'Порядок серверов может не сохраниться. Обновите страницу.', { timer: 5000 });
+                                        }
+                                    }
+                                    
+                                    // Обновляем отображение с сохраненным порядком с сервера
+                                    renderXUIServers(savedServers);
+                                },
+                                error: function(xhr) {
+                                    console.error('Failed to reload config after save:', xhr);
+                                    // Fallback: используем newOrder
+                                    renderXUIServers(newOrder);
+                                }
+                            });
+                        }, 500);
+                        
+                        // Обновляем конфигурацию в памяти для последующих операций
+                        data.xui_servers = newOrder;
+                        
+                        // Очищаем кэш ссылок подписки после изменения порядка серверов
+                        if (API_URLS.xuiClearCache) {
+                            $.ajax({
+                                url: API_URLS.xuiClearCache,
+                                method: 'POST',
+                                success: function() {
+                                    console.log('Subscription cache cleared after server order change');
+                                },
+                                error: function(xhr) {
+                                    console.warn('Failed to clear subscription cache:', xhr);
+                                    // Не критично, просто логируем
+                                }
+                            });
+                        }
+                        
+                        // Показываем уведомление об успешном сохранении
+                        if (window.showToast) {
+                            showToast('success', 'Успешно', 'Порядок серверов сохранён', { timer: 2000 });
+                        }
+                    },
+                    error: function(xhr) {
+                        console.error('Failed to save server order:', xhr);
+                        const error = extractErrorMessage(xhr, 'Не удалось сохранить порядок серверов');
+                        if (window.showToast) {
+                            showToast('error', 'Ошибка', error, { timer: 5000 });
+                        }
+                        // Перезагружаем конфигурацию для восстановления порядка
+                        loadXUIConfig();
+                    }
+                });
+            },
+            error: function(xhr) {
+                console.error('Failed to load config for reordering:', xhr);
+            }
+        });
+        }, 500); // Задержка 500ms перед сохранением
     }
     
     // Автоматическая проверка статуса всех серверов
@@ -1692,12 +2212,23 @@ $(document).ready(function () {
             pingDisplay = `<p class="card-text small mb-2"><i class="fas fa-network-wired"></i> Пинг: <strong>${pingValue} мс</strong></p>`;
         }
 
+        // Экранируем host и name для использования в data-атрибутах
+        const safeHost = (host || '').replace(/"/g, '&quot;');
+        const safeName = (name || '').replace(/"/g, '&quot;');
+        
         return $(`
             <div class="col-md-6 col-lg-4 mb-3">
-                <div class="card xui-server-tile ${enabled ? '' : 'bg-light'}" data-server-index="${index}">
+                <div class="card xui-server-tile ${enabled ? '' : 'bg-light'}" 
+                     data-server-index="${index}" 
+                     data-server-host="${safeHost}" 
+                     data-server-name="${safeName}"
+                     style="cursor: move;">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-start mb-2">
-                            <h6 class="card-title mb-0">${name}</h6>
+                            <div class="d-flex align-items-center" style="flex: 1;">
+                                <i class="fas fa-grip-vertical text-muted mr-2" style="cursor: grab; opacity: 0.5;" title="Перетащите для изменения порядка"></i>
+                                <h6 class="card-title mb-0" style="flex: 1;">${name}</h6>
+                            </div>
                             <span class="badge badge-${statusClass}">${statusLabel}</span>
                         </div>
                         <p class="card-text text-muted small mb-2">${host}</p>
@@ -1986,6 +2517,18 @@ $(document).ready(function () {
                     success: function () {
                         if (state.requestId !== currentRequestId) return;
                         $('#xuiServerModal').modal('hide');
+                        
+                        // Очищаем кэш ссылок подписки после изменения конфигурации сервера
+                        if (API_URLS.xuiClearCache) {
+                            $.ajax({
+                                url: API_URLS.xuiClearCache,
+                                method: 'POST',
+                                error: function(xhr) {
+                                    console.warn('Failed to clear subscription cache:', xhr);
+                                }
+                            });
+                        }
+                        
                             if (window.showToast) {
                                 showToast('success', 'Успешно', 'Сервер сохранен', { timer: 3000 });
                             }
@@ -2053,6 +2596,17 @@ $(document).ready(function () {
                         contentType: 'application/json',
                         data: JSON.stringify(data),
                         success: function () {
+                            // Очищаем кэш ссылок подписки после удаления сервера
+                            if (API_URLS.xuiClearCache) {
+                                $.ajax({
+                                    url: API_URLS.xuiClearCache,
+                                    method: 'POST',
+                                    error: function(xhr) {
+                                        console.warn('Failed to clear subscription cache:', xhr);
+                                    }
+                                });
+                            }
+                            
                             if (window.showToast) {
                                 showToast('success', 'Успешно', 'Сервер удален', { timer: 3000 });
                             }

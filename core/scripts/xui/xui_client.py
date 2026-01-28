@@ -612,7 +612,7 @@ class XUIClient:
         self.connection: Optional[Connection] = None
         self._logged_in = False
         self._last_login_time = None
-        self._login_cache_duration = 3600  # 1 час
+        self._login_cache_duration = 7200  # 2 часа (увеличено для уменьшения авторизаций)
         self._direct_http_cookies: Optional[Dict[str, str]] = None
         self._direct_http_last_login: Optional[datetime] = None
         

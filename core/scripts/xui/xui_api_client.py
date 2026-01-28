@@ -5,6 +5,12 @@
 https://www.postman.com/hsanaei/3x-ui/collection/q1l5l0u/3x-ui
 
 Все запросы используют HTTPS и соответствуют официальной документации API.
+
+ОПТИМИЗАЦИЯ АВТОРИЗАЦИИ:
+- Cookies кэшируются на 2 часа для уменьшения количества авторизаций
+- HTTP клиент переиспользует cookies между запросами
+- Автоматическая повторная авторизация при истечении сессии (401)
+- Connection pooling для переиспользования TCP соединений
 """
 
 import asyncio
@@ -138,7 +144,7 @@ class XUIAPIClient:
         self._http_client_loop: Optional[asyncio.AbstractEventLoop] = None
         self._cookies: Optional[Dict[str, str]] = None
         self._last_login_time: Optional[datetime] = None
-        self._login_cache_duration = 3600  # 1 час
+        self._login_cache_duration = 7200  # 2 часа (увеличено для уменьшения авторизаций)
         
         logger.info(
             f"XUIAPIClient initialized: host={self.original_host}, "
@@ -176,12 +182,14 @@ class XUIAPIClient:
                 except Exception as e:
                     logger.debug(f"Error closing old HTTP client: {e}")
             
-            # Создаем новый клиент
+            # Создаем новый клиент с cookies для переиспользования сессий
+            cookies_to_use = self._cookies if self._cookies else None
             self._http_client = httpx.AsyncClient(
                 timeout=httpx.Timeout(self.timeout, connect=5.0),
                 verify=self.verify_ssl,
                 follow_redirects=True,
                 http2=True,
+                cookies=cookies_to_use,  # Сохраняем cookies в клиенте для переиспользования
                 limits=httpx.Limits(
                     max_keepalive_connections=5,
                     max_connections=10,
@@ -189,7 +197,7 @@ class XUIAPIClient:
                 )
             )
             self._http_client_loop = current_loop
-            logger.debug(f"Created new HTTP client for {self.base_url} (loop={id(current_loop) if current_loop else 'None'})")
+            logger.debug(f"Created new HTTP client for {self.base_url} (loop={id(current_loop) if current_loop else 'None'}, cookies={'present' if cookies_to_use else 'none'})")
         
         return self._http_client
     
@@ -221,29 +229,48 @@ class XUIAPIClient:
     ) -> Optional[httpx.Response]:
         """
         Выполняет HTTP запрос с повторными попытками и экспоненциальной задержкой.
+        Автоматически повторяет авторизацию при ошибке 401.
         """
         client = await self._get_http_client()
         last_error = None
+        retry_auth = False
         
         for attempt in range(self.max_retries):
             try:
+                # Используем cookies из клиента, если они не переданы явно
+                request_cookies = cookies if cookies is not None else self._cookies
+                
                 if method.upper() == 'GET':
-                    response = await client.get(url, cookies=cookies, **kwargs)
+                    response = await client.get(url, cookies=request_cookies, **kwargs)
                 elif method.upper() == 'POST':
                     if json_data is not None:
-                        response = await client.post(url, cookies=cookies, json=json_data, **kwargs)
+                        response = await client.post(url, cookies=request_cookies, json=json_data, **kwargs)
                     else:
-                        response = await client.post(url, cookies=cookies, data=data, **kwargs)
+                        response = await client.post(url, cookies=request_cookies, data=data, **kwargs)
                 else:
-                    response = await client.request(method, url, cookies=cookies, json=json_data, **kwargs)
+                    response = await client.request(method, url, cookies=request_cookies, json=json_data, **kwargs)
                 
                 # Успешный ответ
                 if response.status_code in (200, 201):
                     return response
                 
-                # Ошибка авторизации - не повторяем
-                if response.status_code in (401, 403):
-                    logger.warning(f"Auth error {response.status_code} for {url}")
+                # Ошибка авторизации (401) - повторяем авторизацию один раз
+                if response.status_code == 401 and not retry_auth:
+                    logger.warning(f"Session expired (401) for {url}, re-authenticating...")
+                    # Очищаем кэш авторизации и повторяем авторизацию
+                    self._cookies = None
+                    self._last_login_time = None
+                    await self.login()
+                    retry_auth = True
+                    # Обновляем cookies в клиенте
+                    if self._cookies:
+                        client.cookies.update(self._cookies)
+                    # Повторяем запрос с новыми cookies
+                    continue
+                
+                # Ошибка доступа (403) - не повторяем
+                if response.status_code == 403:
+                    logger.warning(f"Access denied (403) for {url}")
                     return response
                 
                 # Серверная ошибка - повторяем
@@ -331,6 +358,10 @@ class XUIAPIClient:
                 logger.error(error_msg)
                 raise XUIAPIAuthError(error_msg)
             
+            # Обновляем cookies в HTTP клиенте для переиспользования
+            if self._http_client and not self._http_client.is_closed:
+                self._http_client.cookies.update(self._cookies)
+            
             self._last_login_time = datetime.now()
             logger.info(f"Successfully logged in to {login_url}")
             return True
@@ -370,13 +401,23 @@ class XUIAPIClient:
             raise XUIAPIAuthError(error_msg) from e
     
     async def _ensure_logged_in(self):
-        """Убеждается что пользователь авторизован"""
-        if not self._cookies or not self._last_login_time:
-            await self.login()
-        else:
+        """
+        Убеждается что пользователь авторизован.
+        Проверяет кэш и валидность cookies перед повторной авторизацией.
+        """
+        # Проверяем кэш авторизации
+        if self._cookies and self._last_login_time:
             elapsed = (datetime.now() - self._last_login_time).total_seconds()
-            if elapsed >= self._login_cache_duration:
-                await self.login()
+            if elapsed < self._login_cache_duration:
+                # Cookies еще валидны по времени, но проверяем их наличие в HTTP клиенте
+                client = await self._get_http_client()
+                if not client.cookies:
+                    # Восстанавливаем cookies в клиенте
+                    client.cookies.update(self._cookies)
+                return  # Используем кэшированную авторизацию
+        
+        # Нужна авторизация
+        await self.login()
     
     def _extract_api_obj(self, response_json: Any) -> Any:
         """Извлекает объект из ответа API"""
@@ -422,6 +463,7 @@ class XUIAPIClient:
         
         url = self._build_api_url("panel/api/inbounds/list")
         logger.debug(f"Getting inbounds list from: {url}")
+        # Используем cookies из HTTP клиента (они уже там сохранены)
         response = await self._request_with_retry('GET', url, cookies=self._cookies)
         
         if not response or response.status_code != 200:
@@ -828,18 +870,29 @@ class XUIAPIClient:
         response = await self._request_with_retry('GET', url, cookies=self._cookies)
         
         if not response or response.status_code != 200:
-            logger.warning(f"Failed to get client IPs {client_id}: status={response.status_code if response else 'No response'}")
+            logger.debug(f"Failed to get client IPs {client_id}: status={response.status_code if response else 'No response'}")
             return None
         
-        data = response.json()
-        obj = self._extract_api_obj(data)
-        
-        if isinstance(obj, list):
-            return obj
-        elif isinstance(obj, dict) and 'ips' in obj:
-            return obj['ips']
-        
-        return None
+        try:
+            data = response.json()
+            obj = self._extract_api_obj(data)
+            
+            ips = None
+            if isinstance(obj, list):
+                ips = obj
+            elif isinstance(obj, dict) and 'ips' in obj:
+                ips = obj['ips']
+            
+            # Логируем результат для отладки проблем с реверс-прокси
+            if ips:
+                logger.debug(f"Got {len(ips)} IPs for client {client_id}: {ips[:3]}...")  # Показываем первые 3 IP
+            else:
+                logger.debug(f"No IPs returned for client {client_id} (response: {data})")
+            
+            return ips if ips else None
+        except Exception as e:
+            logger.warning(f"Error parsing client IPs response for {client_id}: {e}")
+            return None
     
     async def get_online_clients(self) -> List[Dict[str, Any]]:
         """

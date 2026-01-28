@@ -245,6 +245,72 @@ body:not(.dark-mode) .form-control:focus {
     box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.15);
 }
 
+/* Стили для автозаполнения в светлой теме */
+body:not(.dark-mode) .form-control:-webkit-autofill,
+body:not(.dark-mode) .form-control:-webkit-autofill:hover,
+body:not(.dark-mode) .form-control:-webkit-autofill:focus,
+body:not(.dark-mode) .form-control:-webkit-autofill:active,
+body:not(.dark-mode) .form-control:autofill,
+body:not(.dark-mode) .form-control:autofill:hover,
+body:not(.dark-mode) .form-control:autofill:focus,
+body:not(.dark-mode) .form-control:autofill:active {
+    -webkit-box-shadow: 0 0 0 30px #fff inset !important;
+    box-shadow: 0 0 0 30px #fff inset !important;
+    -webkit-text-fill-color: #374151 !important;
+    color: #374151 !important;
+    background-color: #fff !important;
+    border-color: #E5E7EB !important;
+    transition: background-color 5000s ease-in-out 0s !important; /* Задержка изменения фона браузером */
+}
+
+body:not(.dark-mode) input:-webkit-autofill,
+body:not(.dark-mode) input:-webkit-autofill:hover,
+body:not(.dark-mode) input:-webkit-autofill:focus,
+body:not(.dark-mode) input:-webkit-autofill:active,
+body:not(.dark-mode) input:autofill,
+body:not(.dark-mode) input:autofill:hover,
+body:not(.dark-mode) input:autofill:focus,
+body:not(.dark-mode) input:autofill:active {
+    -webkit-box-shadow: 0 0 0 30px #fff inset !important;
+    box-shadow: 0 0 0 30px #fff inset !important;
+    -webkit-text-fill-color: #374151 !important;
+    color: #374151 !important;
+    background-color: #fff !important;
+    transition: background-color 5000s ease-in-out 0s !important;
+}
+
+body:not(.dark-mode) textarea:-webkit-autofill,
+body:not(.dark-mode) textarea:-webkit-autofill:hover,
+body:not(.dark-mode) textarea:-webkit-autofill:focus,
+body:not(.dark-mode) textarea:-webkit-autofill:active,
+body:not(.dark-mode) textarea:autofill,
+body:not(.dark-mode) textarea:autofill:hover,
+body:not(.dark-mode) textarea:autofill:focus,
+body:not(.dark-mode) textarea:autofill:active {
+    -webkit-box-shadow: 0 0 0 30px #fff inset !important;
+    box-shadow: 0 0 0 30px #fff inset !important;
+    -webkit-text-fill-color: #374151 !important;
+    color: #374151 !important;
+    background-color: #fff !important;
+    transition: background-color 5000s ease-in-out 0s !important;
+}
+
+body:not(.dark-mode) select:-webkit-autofill,
+body:not(.dark-mode) select:-webkit-autofill:hover,
+body:not(.dark-mode) select:-webkit-autofill:focus,
+body:not(.dark-mode) select:-webkit-autofill:active,
+body:not(.dark-mode) select:autofill,
+body:not(.dark-mode) select:autofill:hover,
+body:not(.dark-mode) select:autofill:focus,
+body:not(.dark-mode) select:autofill:active {
+    -webkit-box-shadow: 0 0 0 30px #fff inset !important;
+    box-shadow: 0 0 0 30px #fff inset !important;
+    -webkit-text-fill-color: #374151 !important;
+    color: #374151 !important;
+    background-color: #fff !important;
+    transition: background-color 5000s ease-in-out 0s !important;
+}
+
 /* Таблицы */
 body:not(.dark-mode) .table th { color: #6B7280; border-bottom-color: #E5E7EB !important; background: transparent; }
 body:not(.dark-mode) .table td { border-top-color: #F3F4F6; }
@@ -377,6 +443,72 @@ body.dark-mode .custom-select {
 }
 body.dark-mode select option { background-color: #1F2937; color: #FFFFFF; }
 body.dark-mode textarea.form-control { background-color: var(--ios-dark-elevated); color: #ffffff !important; }
+
+/* Стили для автозаполнения в темной теме */
+body.dark-mode .form-control:-webkit-autofill,
+body.dark-mode .form-control:-webkit-autofill:hover,
+body.dark-mode .form-control:-webkit-autofill:focus,
+body.dark-mode .form-control:-webkit-autofill:active,
+body.dark-mode .form-control:autofill,
+body.dark-mode .form-control:autofill:hover,
+body.dark-mode .form-control:autofill:focus,
+body.dark-mode .form-control:autofill:active {
+    -webkit-box-shadow: 0 0 0 30px var(--ios-dark-elevated) inset !important;
+    box-shadow: 0 0 0 30px var(--ios-dark-elevated) inset !important;
+    -webkit-text-fill-color: #F9FAFB !important;
+    color: #F9FAFB !important;
+    background-color: var(--ios-dark-elevated) !important;
+    border-color: rgba(255,255,255,0.08) !important;
+    transition: background-color 5000s ease-in-out 0s !important; /* Задержка изменения фона браузером */
+}
+
+body.dark-mode input:-webkit-autofill,
+body.dark-mode input:-webkit-autofill:hover,
+body.dark-mode input:-webkit-autofill:focus,
+body.dark-mode input:-webkit-autofill:active,
+body.dark-mode input:autofill,
+body.dark-mode input:autofill:hover,
+body.dark-mode input:autofill:focus,
+body.dark-mode input:autofill:active {
+    -webkit-box-shadow: 0 0 0 30px var(--ios-dark-elevated) inset !important;
+    box-shadow: 0 0 0 30px var(--ios-dark-elevated) inset !important;
+    -webkit-text-fill-color: #F9FAFB !important;
+    color: #F9FAFB !important;
+    background-color: var(--ios-dark-elevated) !important;
+    transition: background-color 5000s ease-in-out 0s !important;
+}
+
+body.dark-mode textarea:-webkit-autofill,
+body.dark-mode textarea:-webkit-autofill:hover,
+body.dark-mode textarea:-webkit-autofill:focus,
+body.dark-mode textarea:-webkit-autofill:active,
+body.dark-mode textarea:autofill,
+body.dark-mode textarea:autofill:hover,
+body.dark-mode textarea:autofill:focus,
+body.dark-mode textarea:autofill:active {
+    -webkit-box-shadow: 0 0 0 30px var(--ios-dark-elevated) inset !important;
+    box-shadow: 0 0 0 30px var(--ios-dark-elevated) inset !important;
+    -webkit-text-fill-color: #F9FAFB !important;
+    color: #F9FAFB !important;
+    background-color: var(--ios-dark-elevated) !important;
+    transition: background-color 5000s ease-in-out 0s !important;
+}
+
+body.dark-mode select:-webkit-autofill,
+body.dark-mode select:-webkit-autofill:hover,
+body.dark-mode select:-webkit-autofill:focus,
+body.dark-mode select:-webkit-autofill:active,
+body.dark-mode select:autofill,
+body.dark-mode select:autofill:hover,
+body.dark-mode select:autofill:focus,
+body.dark-mode select:autofill:active {
+    -webkit-box-shadow: 0 0 0 30px var(--ios-dark-elevated) inset !important;
+    box-shadow: 0 0 0 30px var(--ios-dark-elevated) inset !important;
+    -webkit-text-fill-color: #F9FAFB !important;
+    color: #F9FAFB !important;
+    background-color: var(--ios-dark-elevated) !important;
+    transition: background-color 5000s ease-in-out 0s !important;
+}
 
 /* Таблицы Dark */
 body.dark-mode .table { color: var(--ios-dark-text); background-color: transparent; }
@@ -808,4 +940,140 @@ body.dark-mode .xui-server-tile.bg-light:hover {
 .xui-server-tile .btn-xs:active:not(:disabled) {
   transform: translateY(0);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+/* Стили для drag-and-drop карточек серверов 3X-UI */
+.sortable-ghost {
+  opacity: 0.4;
+  background: #f0f0f0 !important;
+}
+
+.sortable-chosen {
+  cursor: grabbing !important;
+}
+
+.sortable-drag {
+  opacity: 0.8;
+}
+
+.xui-server-tile {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.xui-server-tile:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1) !important;
+}
+
+.xui-server-tile .fa-grip-vertical {
+  transition: opacity 0.2s ease;
+}
+
+.xui-server-tile:hover .fa-grip-vertical {
+  opacity: 0.8 !important;
+}
+
+.dark-mode .sortable-ghost {
+  background: #374151 !important;
+  opacity: 0.5;
+}
+
+/* --- КАРТОЧКИ УЗЛОВ (NODES) --- */
+.node-card {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: fadeInUp 0.4s ease-out;
+  animation-delay: calc(var(--index, 0) * 0.05s);
+}
+
+/* Компактные отступы для карточек узлов */
+.node-card .card-body {
+  padding: 0.75rem;
+}
+
+.node-card .card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin-bottom: 0;
+}
+
+.node-card .card-text {
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.node-card .text-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Кнопки в правом нижнем углу (как в карточках 3X-UI) */
+.node-card .btn-xs {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: all 0.2s ease;
+}
+
+.node-card .btn-xs:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.15);
+}
+
+.node-card .btn-xs:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+/* Иконка перетаскивания */
+.node-card .fa-grip-vertical {
+  transition: opacity 0.2s ease;
+}
+
+.node-card:hover .fa-grip-vertical {
+  opacity: 0.8 !important;
+}
+
+/* ==========================================================
+   ПОДДЕРЖКА ЭМОДЗИ ДЛЯ WINDOWS БРАУЗЕРОВ
+   ========================================================== */
+/* Убеждаемся, что Font Awesome иконки отображаются правильно */
+.fas, .far, .fab, .fal, .fad,
+.btn i,
+[class^="fa-"],
+[class*=" fa-"] {
+  font-family: "Font Awesome 5 Free", "Font Awesome 5 Brands", "Font Awesome 5 Pro" !important;
+  font-weight: 900;
+  font-style: normal;
+  font-variant: normal;
+  text-rendering: auto;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Специальный класс для элементов с эмодзи (особенно флагов) */
+.emoji-text {
+  font-family: "Segoe UI Emoji", "Segoe UI Symbol", "Apple Color Emoji", "Noto Color Emoji", "Twemoji Mozilla", "EmojiOne Color", "Android Emoji", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  font-feature-settings: "liga", "kern";
+  -webkit-font-feature-settings: "liga", "kern";
+  text-rendering: optimizeLegibility;
+  /* Важно для правильного отображения флагов стран */
+  font-variant-emoji: emoji;
+  -webkit-font-variant-emoji: emoji;
+  /* Принудительное использование эмодзи-шрифтов для флагов */
+  unicode-bidi: isolate;
+  /* Для правильного отображения региональных индикаторов (флагов) */
+  font-synthesis: none;
+  -webkit-font-synthesis: none;
+}
+
+/* Применяем к тексту в карточках узлов (но не к иконкам) */
+.node-card .card-title .emoji-text,
+.node-card .node-details .emoji-text,
+.node-card .node-details strong.emoji-text {
+  font-family: "Segoe UI Emoji", "Segoe UI Symbol", "Apple Color Emoji", "Noto Color Emoji", "Twemoji Mozilla", "EmojiOne Color", "Android Emoji", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+}
+
+/* Для полей ввода с эмодзи */
+.form-control {
+  font-family: "Segoe UI Emoji", "Segoe UI Symbol", "Apple Color Emoji", "Noto Color Emoji", "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
 }

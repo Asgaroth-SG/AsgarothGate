@@ -363,14 +363,14 @@ $(function () {
             clearInterval(xuiStatusUpdateInterval);
         }
         
-        // Обновляем статусы каждые 30 секунд
+        // Обновляем статусы каждые 15 секунд для более точного отображения
         xuiStatusUpdateInterval = setInterval(function() {
             if (!xuiStatusUpdateInProgress) {
                 loadXUIOnlineStatuses();
             }
-        }, 30000); // 30 секунд
+        }, 15000); // 15 секунд
         
-        console.log('XUI online status auto-update started (interval: 30s)');
+        console.log('XUI online status auto-update started (interval: 15s)');
     }
     
     // Остановка периодического обновления

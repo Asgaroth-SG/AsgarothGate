@@ -196,10 +196,23 @@ async def update_xui_config_api(body: XUIConfigInputBody):
         config_dict = body.model_dump(exclude_none=True)
         
         # Восстанавливаем скрытые пароли если они не изменились
+        # Используем поиск по host/name вместо индекса, чтобы сохранить порядок
         old_config = load_xui_config()
-        for i, new_server in enumerate(config_dict.get('xui_servers', [])):
-            if i < len(old_config.get('xui_servers', [])):
-                old_server = old_config['xui_servers'][i]
+        old_servers_by_key = {}
+        for old_server in old_config.get('xui_servers', []):
+            # Используем host или name как ключ для поиска (нормализуем пробелы)
+            key = (old_server.get('host') or old_server.get('name') or '').strip()
+            if key:
+                old_servers_by_key[key] = old_server
+        
+        # ВАЖНО: Сохраняем порядок серверов из нового конфига
+        # Восстанавливаем пароли, но не меняем порядок
+        for new_server in config_dict.get('xui_servers', []):
+            # Ищем старый сервер по host или name
+            key = (new_server.get('host') or new_server.get('name') or '').strip()
+            old_server = old_servers_by_key.get(key) if key else None
+            
+            if old_server:
                 # Если пароль скрыт (***) или пустой, используем старый
                 new_password = new_server.get('password', '')
                 if (new_password == '***' or new_password == '') and old_server.get('password') and old_server.get('password') != '***':
@@ -215,7 +228,26 @@ async def update_xui_config_api(body: XUIConfigInputBody):
                 normalize_xui_server_config(s) for s in config_dict.get('xui_servers', [])
             ]
         
+        # Логируем порядок серверов перед сохранением для отладки
+        import logging
+        logger = logging.getLogger(__name__)
+        server_order = [s.get('host') or s.get('name') or f'Server {i}' for i, s in enumerate(config_dict.get('xui_servers', []))]
+        logger.info(f"Saving X-UI config with server order: {server_order}")
+        
         save_xui_config(config_dict)
+        
+        # Проверяем, что порядок сохранился правильно
+        # Небольшая задержка для гарантии записи на диск
+        import time
+        time.sleep(0.1)  # 100ms задержка для записи на диск
+        
+        saved_config = load_xui_config()
+        saved_order = [s.get('host') or s.get('name') or f'Server {i}' for i, s in enumerate(saved_config.get('xui_servers', []))]
+        logger.info(f"Loaded X-UI config with server order: {saved_order}")
+        
+        # Проверяем, что порядок совпадает
+        if saved_order != server_order:
+            logger.warning(f"Server order mismatch after save! Expected: {server_order}, Got: {saved_order}")
         
         return DetailResponse(detail='X-UI configuration updated successfully.')
     except HTTPException:
@@ -633,6 +665,42 @@ async def get_xui_logs_api(lines: int = 50):
         raise HTTPException(status_code=500, detail=f'Error: {str(e)}')
 
 
+@router.post('/clear-subscription-cache', response_model=DetailResponse, summary='Clear X-UI Subscription Links Cache', name='clear_xui_subscription_cache_api')
+async def clear_xui_subscription_cache_api():
+    """
+    Очищает кэш ссылок подписки X-UI.
+    Используется после изменения порядка серверов или других изменений конфигурации.
+    
+    Returns:
+        DetailResponse: Результат очистки кэша
+    """
+    try:
+        import os
+        
+        cache_path = os.environ.get('XUI_LINKS_CACHE_PATH', '/etc/hysteria/xui_links_cache.json')
+        
+        # Удаляем файл кэша если существует
+        if os.path.exists(cache_path):
+            try:
+                os.remove(cache_path)
+                return DetailResponse(detail='Subscription links cache cleared successfully.')
+            except Exception as e:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f'Failed to delete cache file: {str(e)}'
+                )
+        else:
+            return DetailResponse(detail='Cache file does not exist, nothing to clear.')
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error clearing subscription cache: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f'Error: {str(e)}')
+
+
 @router.post('/sync-all', response_model=DetailResponse, summary='Sync All Users with X-UI', name='sync_all_users_xui_api')
 async def sync_all_users_xui_api():
     """
@@ -642,6 +710,9 @@ async def sync_all_users_xui_api():
         DetailResponse: Результат синхронизации
     """
     try:
+        import logging
+        logger = logging.getLogger(__name__)
+        
         from xui.config import get_xui_sync_manager
         from db.database import db
         from datetime import datetime
@@ -709,19 +780,27 @@ async def sync_all_users_xui_api():
             traffic_gb = int(traffic_bytes / (1024 ** 3)) if traffic_bytes > 0 else 0
             enable = not user.get('blocked', False)
             
-            success, error = sync_manager.sync_user_create(
-                hysteria_username=username,
-                expiry_days=expiry_days,
-                traffic_limit_gb=traffic_gb,
-                enable=enable,
-                user_plan=plan
-            )
-            
-            if success:
-                success_count += 1
-            else:
+            try:
+                success, error = sync_manager.sync_user_create(
+                    hysteria_username=username,
+                    expiry_days=expiry_days,
+                    traffic_limit_gb=traffic_gb,
+                    enable=enable,
+                    user_plan=plan
+                )
+                
+                if success:
+                    success_count += 1
+                else:
+                    failed_count += 1
+                    error_msg = error if error else "Unknown error"
+                    errors.append(f"{username}: {error_msg}")
+                    logger.warning(f"Sync failed for user {username}: {error_msg}")
+            except Exception as e:
                 failed_count += 1
-                errors.append(f"{username}: {error}")
+                error_msg = f"Exception during sync: {str(e)}"
+                errors.append(f"{username}: {error_msg}")
+                logger.error(f"Exception syncing user {username}: {e}", exc_info=True)
         
         # Сохраняем информацию о последнем запуске
         try:

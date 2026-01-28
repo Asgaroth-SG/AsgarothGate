@@ -171,6 +171,34 @@ def list_nodes():
         pin = node.get('pinSHA256', 'N/A')
         print(f"{name:<15} {node_type:<10} {ip:<25} {str(port):<8} {sni:<20} {insecure:<10} {obfs:<20} {pin}")
 
+def reorder_nodes(node_names: list[str]):
+    """
+    Reorders nodes according to the provided list of names.
+    
+    Args:
+        node_names: List of node names in the desired order.
+    """
+    nodes = read_nodes()
+    node_dict = {node['name']: node for node in nodes}
+    
+    # Проверяем, что все имена существуют
+    missing_names = [name for name in node_names if name not in node_dict]
+    if missing_names:
+        print(f"Error: Nodes not found: {', '.join(missing_names)}", file=sys.stderr)
+        sys.exit(1)
+    
+    # Проверяем, что все узлы включены
+    if len(node_names) != len(nodes):
+        print(f"Error: Number of nodes in order list ({len(node_names)}) doesn't match total nodes ({len(nodes)}).", file=sys.stderr)
+        sys.exit(1)
+    
+    # Создаем новый список в нужном порядке
+    reordered_nodes = [node_dict[name] for name in node_names]
+    
+    write_nodes(reordered_nodes)
+    print(f"Successfully reordered {len(reordered_nodes)} nodes.")
+
+
 def generate_cert():
     try:
         script_dir = Path(__file__).parent.resolve()
@@ -248,6 +276,9 @@ def main():
 
     subparsers.add_parser('list', help='List all configured nodes.')
     
+    reorder_parser = subparsers.add_parser('reorder', help='Reorder nodes.')
+    reorder_parser.add_argument('--names', type=str, nargs='+', required=True, help='List of node names in desired order.')
+    
     subparsers.add_parser('generate-cert', help="Generate blitz.crt and blitz.key.")
     
     args = parser.parse_args()
@@ -268,6 +299,8 @@ def main():
         delete_node(args.name)
     elif args.command == 'list':
         list_nodes()
+    elif args.command == 'reorder':
+        reorder_nodes(args.names)
     elif args.command == 'generate-cert':
         generate_cert()
 

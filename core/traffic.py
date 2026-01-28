@@ -92,8 +92,18 @@ class TrafficManager:
             live_traffic = self.client.get_traffic_stats(clear=True)
             live_status = self.client.get_online_clients()
             db_users = {u['_id']: u for u in self.db.get_all_users()}
+            
+            # Логируем полученные данные для отладки
+            if live_status:
+                logging.info(f"Retrieved {len(live_status)} online clients from Hysteria 2 API")
+                for username, status in list(live_status.items())[:5]:  # Логируем первые 5 для примера
+                    if hasattr(status, 'is_online') and status.is_online:
+                        conn_count = self._get_online_connection_count(status)
+                        logging.debug(f"Hysteria 2 online: {username} - {conn_count} connections")
+            else:
+                logging.warning("No online clients retrieved from Hysteria 2 API (live_status is empty)")
         except Exception as e:
-            logging.error(f"Error communicating with Hysteria2 API or DB: {e}")
+            logging.error(f"Error communicating with Hysteria2 API or DB: {e}", exc_info=True)
             return {}
 
         # Получаем онлайн пользователей из 3X-UI
@@ -115,20 +125,27 @@ class TrafficManager:
                 users_to_update.append((username, updates))
 
         if users_to_update:
+            logging.info(f"Updating {len(users_to_update)} users in database")
             for username, update_data in users_to_update:
                 try:
                     self.db.update_user(username, update_data)
                     db_users[username].update(update_data)
+                    # Логируем обновление статуса онлайн
+                    if 'online_count' in update_data:
+                        logging.debug(f"Updated {username}: online_count={update_data.get('online_count', 0)}, status={update_data.get('status', 'unchanged')}")
                 except Exception as e:
-                    logging.error(f"Failed to update user {username} in DB: {e}")
+                    logging.error(f"Failed to update user {username} in DB: {e}", exc_info=True)
+        else:
+            logging.debug("No users to update")
         return db_users
 
-    def _get_xui_online_users(self) -> Dict[str, int]:
+    def _get_xui_online_users(self) -> Dict[str, Dict[str, Any]]:
         """
         Получает список онлайн пользователей из всех X-UI серверов.
+        Сначала читает из кэша фонового опроса; при пустом кэше — запросы к API.
         
         Returns:
-            Словарь {username: online_count} для пользователей, которые онлайн в 3X-UI
+            Словарь {username: {'count': int, 'ips': List[str]}} для пользователей, которые онлайн в 3X-UI
         """
         online_users = {}
         
@@ -154,7 +171,70 @@ class TrafficManager:
             if not all_mappings:
                 return online_users
             
-            # Проверяем каждый сервер
+            # Читаем из кэша фонового опроса (без запросов к 3X-UI)
+            try:
+                from xui.xui_background_poller import get_cache
+                cache = get_cache()
+                if cache.get("by_host"):
+                    # Получаем детальную информацию с IP-адресами из кэша
+                    for username, mapping in all_mappings.items():
+                        uuid_val = mapping.get('xui_client_uuid')
+                        xui_host = mapping.get('xui_host')
+                        if not uuid_val:
+                            continue
+                        
+                        all_ips = []
+                        for host, data in cache.get("by_host", {}).items():
+                            if xui_host and host != xui_host:
+                                continue
+                            if not data.get("online"):
+                                continue
+                            for cl in data.get("online_clients") or []:
+                                cid = cl.get("id") or cl.get("email") or ""
+                                email = cl.get("email", "")
+                                if cid == uuid_val or (email and email.startswith(f"{username}_")):
+                                    ips = cl.get("ips", [])
+                                    if ips:
+                                        all_ips.extend(ips)
+                        
+                        if all_ips:
+                            # Убираем дубликаты IP-адресов
+                            unique_ips = list(dict.fromkeys(all_ips))
+                            online_users[username] = {
+                                'count': len(unique_ips),
+                                'ips': unique_ips
+                            }
+                        elif any(cl.get("id") == uuid_val or (cl.get("email", "").startswith(f"{username}_")) 
+                                for host, data in cache.get("by_host", {}).items() 
+                                if (not xui_host or host == xui_host) and data.get("online")
+                                for cl in data.get("online_clients", [])):
+                            # Клиент онлайн, но IP пустые (возможная проблема с реверс-прокси Caddy)
+                            logging.debug(f"User {username} is online in cache but has no IPs (possible reverse proxy issue)")
+                            online_users[username] = {
+                                'count': 1,  # Считаем как минимум 1 подключение
+                                'ips': []
+                            }
+                    if online_users:
+                        return online_users
+            except Exception as e:
+                logging.debug(f"Error reading from XUI cache: {e}")
+                # Fallback: используем старый метод если кэш недоступен
+                try:
+                    from xui.xui_background_poller import get_online_and_traffic_for_mappings
+                    xui_online_old, _ = get_online_and_traffic_for_mappings(all_mappings, servers)
+                    # Конвертируем старый формат в новый
+                    for username, count in xui_online_old.items():
+                        if username not in online_users:
+                            online_users[username] = {
+                                'count': count,
+                                'ips': []
+                            }
+                    if online_users:
+                        return online_users
+                except Exception:
+                    pass
+            
+            # Fallback: проверяем каждый сервер по API
             from xui.xui_api_wrapper import XUIAPIWrapper
             
             for server in servers:
@@ -217,9 +297,31 @@ class TrafficManager:
                             
                             # Проверяем по UUID
                             if client_uuid and client_id == client_uuid:
-                                online_count = len(client_ips) if client_ips else 1
-                                online_users[username] = online_count
-                                logging.debug(f"Found online user {username} by UUID {client_uuid} on {server.get('host')}")
+                                unique_ips = list(dict.fromkeys(client_ips)) if client_ips else []
+                                # Если IP пустые, но клиент онлайн, считаем как 1 подключение
+                                # Это может быть проблемой с реверс-прокси (Caddy не передает реальные IP)
+                                if not unique_ips:
+                                    logging.debug(f"Client {client_uuid} is online but has no IPs (possible reverse proxy issue with Caddy)")
+                                    online_count = 1  # Считаем как минимум 1 подключение
+                                else:
+                                    online_count = len(unique_ips)
+                                
+                                if username in online_users:
+                                    # Объединяем IP-адреса из разных серверов
+                                    existing_ips = online_users[username].get('ips', [])
+                                    combined_ips = list(dict.fromkeys(existing_ips + unique_ips))
+                                    # Если после объединения IP все еще пустые, но клиент онлайн, считаем как минимум 1
+                                    final_count = len(combined_ips) if combined_ips else max(online_users[username].get('count', 0), 1)
+                                    online_users[username] = {
+                                        'count': final_count,
+                                        'ips': combined_ips
+                                    }
+                                else:
+                                    online_users[username] = {
+                                        'count': online_count,
+                                        'ips': unique_ips if unique_ips else []
+                                    }
+                                logging.debug(f"Found online user {username} by UUID {client_uuid} on {server.get('host')} with {online_count} connections (IPs: {len(unique_ips)})")
                                 break
                             
                             # Проверяем по email
@@ -228,9 +330,30 @@ class TrafficManager:
                                 for inbound_id in inbound_ids:
                                     expected_email = f"{username}_{inbound_id}"
                                     if client_email == expected_email:
-                                        online_count = len(client_ips) if client_ips else 1
-                                        online_users[username] = online_count
-                                        logging.debug(f"Found online user {username} by email {client_email} on {server.get('host')}")
+                                        unique_ips = list(dict.fromkeys(client_ips)) if client_ips else []
+                                        # Если IP пустые, но клиент онлайн, считаем как 1 подключение
+                                        if not unique_ips:
+                                            logging.debug(f"Client {client_email} is online but has no IPs (possible reverse proxy issue with Caddy)")
+                                            online_count = 1  # Считаем как минимум 1 подключение
+                                        else:
+                                            online_count = len(unique_ips)
+                                        
+                                        if username in online_users:
+                                            # Объединяем IP-адреса из разных серверов
+                                            existing_ips = online_users[username].get('ips', [])
+                                            combined_ips = list(dict.fromkeys(existing_ips + unique_ips))
+                                            # Если после объединения IP все еще пустые, но клиент онлайн, считаем как минимум 1
+                                            final_count = len(combined_ips) if combined_ips else max(online_users[username].get('count', 0), 1)
+                                            online_users[username] = {
+                                                'count': final_count,
+                                                'ips': combined_ips
+                                            }
+                                        else:
+                                            online_users[username] = {
+                                                'count': online_count,
+                                                'ips': unique_ips if unique_ips else []
+                                            }
+                                        logging.debug(f"Found online user {username} by email {client_email} on {server.get('host')} with {online_count} connections (IPs: {len(unique_ips)})")
                                         break
                                 
                                 if username in online_users:
@@ -253,6 +376,7 @@ class TrafficManager:
     def _get_xui_traffic(self) -> Dict[str, Dict[str, int]]:
         """
         Получает трафик пользователей из всех X-UI серверов.
+        Сначала читает из кэша фонового опроса; при пустом кэше — запросы к API.
         
         Returns:
             Словарь {username: {'upload_bytes': int, 'download_bytes': int}} для пользователей с трафиком из 3X-UI
@@ -281,7 +405,17 @@ class TrafficManager:
             if not all_mappings:
                 return xui_traffic
             
-            # Проверяем каждый сервер
+            # Читаем из кэша фонового опроса (без запросов к 3X-UI)
+            try:
+                from xui.xui_background_poller import get_online_and_traffic_for_mappings, get_cache
+                cache = get_cache()
+                if cache.get("by_host"):
+                    _, traffic_by_user = get_online_and_traffic_for_mappings(all_mappings, servers)
+                    return traffic_by_user
+            except Exception:
+                pass
+            
+            # Fallback: проверяем каждый сервер по API
             from xui.xui_api_wrapper import XUIAPIWrapper
             
             for server in servers:
@@ -467,19 +601,31 @@ class TrafficManager:
         user_data: Dict, 
         live_traffic: Dict, 
         live_status: Dict,
-        xui_online_users: Dict[str, int] = None,
+        xui_online_users: Dict[str, Any] = None,
         xui_traffic: Dict[str, Dict[str, int]] = None
     ) -> Dict[str, Any]:
         updates = {}
-        online_count = self._get_online_connection_count(live_status.get(username))
+        hysteria_status = live_status.get(username)
+        online_count = self._get_online_connection_count(hysteria_status)
         is_online = online_count > 0
+        
+        # Логируем для отладки, если пользователь должен быть онлайн
+        if hysteria_status and hasattr(hysteria_status, 'is_online') and hysteria_status.is_online:
+            logging.debug(f"User {username} is online in Hysteria 2: {online_count} connections")
         
         # Проверяем статус онлайна из 3X-UI
         # Используем предварительно полученный список онлайн пользователей
         xui_online_count = 0
+        xui_ips = []
         is_online_xui = False
         if xui_online_users and username in xui_online_users:
-            xui_online_count = xui_online_users[username]
+            xui_data = xui_online_users[username]
+            if isinstance(xui_data, dict):
+                xui_online_count = xui_data.get('count', 0)
+                xui_ips = xui_data.get('ips', [])
+            else:
+                # Обратная совместимость со старым форматом (только число)
+                xui_online_count = int(xui_data) if xui_data else 0
             is_online_xui = xui_online_count > 0
         else:
             # Fallback: проверяем индивидуально (старый метод)
@@ -487,15 +633,57 @@ class TrafficManager:
             if is_online_xui:
                 xui_online_count = 1
         
+        # Собираем все IP-адреса подключенных устройств
+        all_connected_ips = []
+        
+        # Получаем IP-адреса из Hysteria 2 (если доступны)
+        hysteria_status = live_status.get(username)
+        if hysteria_status and hasattr(hysteria_status, 'connections'):
+            try:
+                connections = hysteria_status.connections
+                if isinstance(connections, list):
+                    # Если connections - список объектов с IP-адресами
+                    for conn in connections:
+                        if isinstance(conn, dict) and 'ip' in conn:
+                            all_connected_ips.append(conn['ip'])
+                        elif hasattr(conn, 'ip'):
+                            all_connected_ips.append(conn.ip)
+            except Exception:
+                pass
+        
+        # Добавляем IP-адреса из 3X-UI
+        if xui_ips:
+            all_connected_ips.extend(xui_ips)
+        
+        # Убираем дубликаты IP-адресов
+        unique_ips = list(dict.fromkeys(all_connected_ips))
+        
         # Если пользователь онлайн в 3X-UI, учитываем это
         if xui_online_count > 0:
-            # Используем максимальное значение из Hysteria 2 и 3X-UI
-            if xui_online_count > online_count:
-                online_count = xui_online_count
-                is_online = True
-            elif not is_online:
-                is_online = True
-                online_count = xui_online_count
+            # Суммируем количество подключений из Hysteria 2 и 3X-UI
+            # Пользователь может быть подключен к обоим сервисам одновременно
+            online_count = online_count + xui_online_count
+            is_online_xui = True
+        
+        # Сохраняем список IP-адресов подключенных устройств
+        # Обновляем всегда, чтобы синхронизировать данные
+        current_connected_ips = user_data.get('connected_ips', [])
+        if isinstance(current_connected_ips, str):
+            try:
+                import json
+                current_connected_ips = json.loads(current_connected_ips) if current_connected_ips else []
+            except:
+                current_connected_ips = []
+        elif not isinstance(current_connected_ips, list):
+            current_connected_ips = []
+        
+        # Обновляем только если список изменился
+        if set(unique_ips) != set(current_connected_ips):
+            updates['connected_ips'] = unique_ips
+            logging.debug(f"Updating connected_ips for {username}: {unique_ips}")
+        
+        # Обновляем is_online на основе итогового online_count после суммирования
+        is_online = online_count > 0
         
         if user_data.get('online_count') != online_count:
             updates['online_count'] = online_count
@@ -557,6 +745,17 @@ class TrafficManager:
         has_activity = is_online or (username in live_traffic and (live_traffic[username].upload_bytes > 0 or live_traffic[username].download_bytes > 0))
         current_status = user_data.get("status", STATUS_ON_HOLD)
 
+        # Определяем новый статус на основе online_count (который уже включает Hysteria 2 и 3X-UI)
+        # Если online_count > 0, пользователь должен быть Online
+        if online_count > 0:
+            new_status = STATUS_ONLINE
+        else:
+            # Если online_count = 0, статус зависит от активации
+            if is_activated:
+                new_status = STATUS_OFFLINE
+            else:
+                new_status = STATUS_ON_HOLD
+
         # Если пользователь онлайн в 3X-UI, активируем его даже без активности в Hysteria 2
         if is_online_xui and not is_activated:
             # Пользователь онлайн в 3X-UI, но не активирован - активируем и меняем статус на Online
@@ -569,10 +768,10 @@ class TrafficManager:
             updates["account_creation_date"] = self.today_date
             updates["status"] = STATUS_ONLINE if is_online else STATUS_OFFLINE
         elif is_activated:
-            # Для активированных пользователей учитываем статус из 3X-UI
-            new_status = STATUS_ONLINE if (is_online or is_online_xui) else STATUS_OFFLINE
+            # Для активированных пользователей обновляем статус на основе online_count
             if current_status != new_status:
                 updates["status"] = new_status
+                logging.debug(f"Updating status for {username}: {current_status} -> {new_status} (is_online={is_online}, is_online_xui={is_online_xui}, online_count={online_count})")
         elif not is_activated and not has_activity and current_status != STATUS_ON_HOLD:
             updates["status"] = STATUS_ON_HOLD
             
@@ -639,6 +838,14 @@ class TrafficManager:
                     xray_restart_needed = True
                 except Exception as e:
                     logging.warning(f"Failed to sync user {username} block status to 3X-UI: {e}")
+                
+                # Очистка кэша при блокировке пользователя
+                try:
+                    from cache_helper import clear_user_cache
+                    clear_user_cache(username)
+                    logging.debug(f"Cleared cache for blocked user: {username}")
+                except Exception as e:
+                    logging.warning(f"Failed to clear cache for user {username}: {e}")
             
             # Перезапускаем X-Ray после блокировки пользователей
             if xray_restart_needed:

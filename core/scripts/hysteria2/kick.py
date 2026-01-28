@@ -117,6 +117,15 @@ def main():
         
         for username in users_to_block:
             db.update_user(username, {'blocked': True})
+            
+            # Очистка кэша при блокировке пользователя
+            try:
+                from cache_helper import clear_user_cache
+                clear_user_cache(username)
+                logger.debug(f"Cleared cache for blocked user: {username}")
+            except Exception as e:
+                logger.warning(f"Failed to clear cache for user {username}: {e}")
+        
         logger.info("Successfully updated user statuses to 'blocked' in the database.")
 
         batch_size = 50 

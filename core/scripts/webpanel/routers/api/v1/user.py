@@ -238,7 +238,47 @@ async def get_users_xui_online_status_batch_api(request: UsernamesRequest):
         # Получаем все маппинги одним запросом (батчинг)
         mappings_dict = db.get_users_mappings_batch(request.usernames)
         
-        # Группируем пользователей по серверам для оптимизации запросов
+        # Читаем из кэша фонового опроса (без запросов к 3X-UI)
+        try:
+            from xui.xui_background_poller import get_cache
+            cache = get_cache()
+            if cache.get("by_host"):
+                results = {}
+                for uname in request.usernames:
+                    mapping = mappings_dict.get(uname.lower()) or mappings_dict.get(uname)
+                    if not mapping:
+                        results[uname] = {"online": False, "error": "User not synced with X-UI"}
+                        continue
+                    client_uuid = mapping.get("xui_client_uuid")
+                    xui_host = mapping.get("xui_host")
+                    if not client_uuid:
+                        results[uname] = {"online": False, "error": "No client UUID in mapping"}
+                        continue
+                    is_online = False
+                    client_ips = []
+                    for host, data in (cache.get("by_host") or {}).items():
+                        if xui_host and host != xui_host:
+                            continue
+                        for cl in (data.get("online_clients") or []):
+                            cid = cl.get("id") or cl.get("email") or ""
+                            email = (cl.get("email") or "")
+                            if cid == client_uuid or email.startswith(f"{uname}_"):
+                                is_online = True
+                                client_ips = cl.get("ips") or []
+                                break
+                        if is_online:
+                            break
+                    results[uname] = {
+                        "online": is_online,
+                        "client_uuid": client_uuid,
+                        "client_ips": client_ips,
+                        "xui_host": xui_host or (next(iter(cache["by_host"])) if cache.get("by_host") else None),
+                    }
+                return results
+        except Exception:
+            pass
+        
+        # Fallback: запросы к API 3X-UI
         results = {}
         
         def check_user_status(username: str) -> tuple:
@@ -442,6 +482,35 @@ async def get_user_xui_online_status_api(username: str):
                 "error": "No X-UI servers configured"
             }
         
+        # Читаем из кэша фонового опроса (без запросов к 3X-UI)
+        try:
+            from xui.xui_background_poller import get_cache
+            cache = get_cache()
+            if cache.get("by_host"):
+                is_online = False
+                client_ips = []
+                for host, data in (cache.get("by_host") or {}).items():
+                    if xui_host and host != xui_host:
+                        continue
+                    for cl in (data.get("online_clients") or []):
+                        cid = cl.get("id") or cl.get("email") or ""
+                        email = (cl.get("email") or "")
+                        if cid == client_uuid or email.startswith(f"{username}_"):
+                            is_online = True
+                            client_ips = cl.get("ips") or []
+                            break
+                    if is_online:
+                        break
+                return {
+                    "online": is_online,
+                    "client_uuid": client_uuid,
+                    "client_ips": client_ips,
+                    "xui_host": xui_host or (next(iter(cache["by_host"])) if cache.get("by_host") else None),
+                }
+        except Exception:
+            pass
+        
+        # Fallback: запрос к API 3X-UI
         # Находим сервер для этого пользователя
         target_server = None
         if xui_host:

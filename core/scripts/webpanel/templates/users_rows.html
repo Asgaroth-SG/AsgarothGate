@@ -40,7 +40,16 @@
         <td class="d-none d-md-table-cell">
             {% if user.status == "Online" %}
                 <span class="badge badge-success">Онлайн</span>
-                {% if user.online_count and user.online_count > 0 %}
+                {% if user.device_count and user.device_count > 0 %}
+                    <span class="badge badge-info" style="font-size: 0.75rem;" 
+                          {% if user.connected_ips and user.connected_ips|length > 0 %}
+                          data-toggle="tooltip" 
+                          data-placement="top" 
+                          title="Устройства: {{ user.connected_ips|join(', ') }}"
+                          {% endif %}>
+                        <i class="fas fa-mobile-alt"></i> {{ user.device_count }}
+                    </span>
+                {% elif user.online_count and user.online_count > 0 %}
                     <span class="badge badge-light text-dark" style="font-size: 0.75rem;">{{ user.online_count }}</span>
                 {% endif %}
             {% elif user.status == "Offline" %}
@@ -146,8 +155,17 @@
                     <span>
                     {% if user.status == "Online" %}
                         <span class="badge badge-success">Онлайн</span>
-                        {% if user.online_count and user.online_count > 0 %}
-                            ({{ user.online_count }})
+                        {% if user.device_count and user.device_count > 0 %}
+                            <span class="badge badge-info" style="font-size: 0.75rem;">
+                                <i class="fas fa-mobile-alt"></i> {{ user.device_count }} устройств
+                            </span>
+                            {% if user.connected_ips and user.connected_ips|length > 0 %}
+                                <p class="mt-1 mb-0"><small class="text-muted">
+                                    <strong>IP-адреса:</strong> {{ user.connected_ips|join(', ') }}
+                                </small></p>
+                            {% endif %}
+                        {% elif user.online_count and user.online_count > 0 %}
+                            ({{ user.online_count }} подключений)
                         {% endif %}
                     {% elif user.status == "Offline" %}
                         <span class="badge badge-secondary">Офлайн</span>

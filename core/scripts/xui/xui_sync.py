@@ -20,6 +20,7 @@ from xui.xui_api_wrapper import XUIAPIWrapper
 from xui.xui_api_client import XUIAPIError, XUIAPIAuthError, XUIAPIConnectionError
 from xui.xui_public_links import (
     build_user_public_links,
+    build_user_public_links_from_cache,
     load_server_public_configs,
     XUIServerPublicConfig
 )
@@ -849,6 +850,15 @@ class XUISyncManager:
                         username=hysteria_username  # Используется для генерации email: username_inbound_id
                     )
                     
+                    # Проверяем результат upsert_client
+                    # is_updated (первый элемент кортежа) - это булево значение успешности операции
+                    # Если False, значит операция не удалась, независимо от action
+                    if not is_updated:
+                        error_msg = f"Failed to upsert client in inbound {inbound_id} on {host}: upsert_client returned False (action: {action})"
+                        logger.error(error_msg)
+                        errors.append(error_msg)
+                        continue
+                    
                     # Обновляем лимит устройств если указан
                     if limit_ip is not None:
                         # Получаем клиента для обновления limit_ip
@@ -862,16 +872,26 @@ class XUISyncManager:
                     )
                 except XUIClientError as e:
                     error_msg = f"Failed to upsert client in inbound {inbound_id} on {host}: {e}"
-                    logger.error(error_msg)
+                    logger.error(error_msg, exc_info=True)
                     errors.append(error_msg)
                 except (XUIAuthError, XUIConnectionError) as e:
                     error_msg = f"Failed to connect to X-UI server {host}: {e}"
-                    logger.error(error_msg)
+                    logger.error(error_msg, exc_info=True)
+                    errors.append(error_msg)
+                except Exception as e:
+                    # Обрабатываем все остальные исключения
+                    error_msg = f"Unexpected error upserting client in inbound {inbound_id} on {host}: {e}"
+                    logger.error(error_msg, exc_info=True)
                     errors.append(error_msg)
         
         # Обновляем маппинг со всеми inbound_ids (включая новые)
         sync_status = "success" if not errors else "failed"
         error_message = "; ".join(errors) if errors else None
+        
+        logger.info(
+            f"Sync user {hysteria_username} completed: status={sync_status}, "
+            f"updated_inbounds={list(updated_inbound_ids)}, errors={len(errors)}"
+        )
         
         db.save_xui_mapping(
             hysteria_username=hysteria_username,
@@ -883,8 +903,10 @@ class XUISyncManager:
         )
         
         if errors:
+            logger.warning(f"Sync user {hysteria_username} failed with errors: {error_message}")
             return False, error_message
         
+        logger.info(f"Sync user {hysteria_username} completed successfully")
         return True, None
     
     def sync_user_delete(self, hysteria_username: str) -> Tuple[bool, Optional[str]]:
@@ -1058,8 +1080,34 @@ class XUISyncManager:
                 logger.warning("No public server configs found, falling back to legacy method")
                 return self._normalize_xui_links(self._get_user_vless_uris_legacy(hysteria_username))
             
-            # Генерируем публичные ссылки через новый модуль
-            logger.info(f"Generating public VLESS links for user {hysteria_username}")
+            # Локальная генерация VLESS из кэша (без API запросов)
+            user_data = db.get_user(hysteria_username)
+            user_plan = str((user_data or {}).get("plan", "standard")).lower().strip()
+            if user_plan not in ("standard", "premium"):
+                user_plan = "standard"
+            try:
+                from xui.xui_background_poller import get_inbounds_cache
+                from urllib.parse import urlparse
+                inbounds_by_host = get_inbounds_cache()
+                servers_for_plan = self._get_servers_for_plan(user_plan)
+                servers_for_plan_for_cache = []
+                for host, _client, sc in servers_for_plan:
+                    server_id = sc.get("name") or (urlparse(host).hostname if host else None) or host
+                    pc = server_public_configs.get(server_id)
+                    if pc:
+                        servers_for_plan_for_cache.append((host, server_id, pc))
+                if servers_for_plan_for_cache and inbounds_by_host:
+                    links = build_user_public_links_from_cache(
+                        hysteria_username, servers_for_plan_for_cache, inbounds_by_host
+                    )
+                    if links:
+                        logger.debug(f"Generated {len(links)} VLESS links from cache for {hysteria_username}")
+                        return self._normalize_xui_links(links)
+            except Exception as e:
+                logger.debug(f"VLESS from cache skipped for {hysteria_username}: {e}")
+            
+            # Генерируем публичные ссылки через API (fallback)
+            logger.info(f"Generating public VLESS links for user {hysteria_username} via API")
             links = build_user_public_links(
                 hysteria_username=hysteria_username,
                 xui_sync_manager=self,

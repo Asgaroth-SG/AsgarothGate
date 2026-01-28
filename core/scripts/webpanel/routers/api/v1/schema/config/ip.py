@@ -119,6 +119,10 @@ class DeleteNodeBody(BaseModel):
     name: str
 
 
+class ReorderNodesBody(BaseModel):
+    names: list[str]
+
+
 NodeListResponse = list[Node]
 
 

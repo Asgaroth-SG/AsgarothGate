@@ -18,7 +18,7 @@
 import logging
 import json
 import asyncio
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from urllib.parse import quote, unquote, urlparse, parse_qsl
 from dataclasses import dataclass
 
@@ -203,6 +203,77 @@ def build_public_vless_link(
     except Exception as e:
         logger.error(f"build_public_vless_link failed: {e}", exc_info=True)
         return None
+
+
+def build_user_public_links_from_cache(
+    hysteria_username: str,
+    servers_for_plan: List[Tuple[str, str, "XUIServerPublicConfig"]],
+    inbounds_by_host: Dict[str, Dict[int, Dict[str, Any]]],
+) -> List[Dict[str, Any]]:
+    """
+    Локальная генерация VLESS-ссылок без обращений к API 3X-UI.
+    Использует только кэш inbounds (из фонового опроса) и build_public_vless_link.
+    
+    Args:
+        hysteria_username: Имя пользователя в Hysteria 2
+        servers_for_plan: Список (host, server_id, public_config) для плана пользователя
+        inbounds_by_host: Кэш {host: {inbound_id: inbound_dict}} из xui_background_poller
+        
+    Returns:
+        Список словарей с ключами name, uri, server_id, inbound_id, network, server_config, ...
+    """
+    try:
+        from db.database import db
+    except Exception:
+        logger.debug("DB not available for build_user_public_links_from_cache")
+        return []
+    if not db:
+        return []
+    mapping = db.get_xui_mapping(hysteria_username)
+    if not mapping:
+        logger.debug(f"No X-UI mapping for {hysteria_username}")
+        return []
+    client_uuid = mapping.get("xui_client_uuid")
+    if not client_uuid:
+        return []
+    links = []
+    for host, server_id, public_config in servers_for_plan:
+        inbounds = inbounds_by_host.get(host, {})
+        for inbound_id, inbound in inbounds.items():
+            if (inbound.get("protocol") or "").lower() != "vless":
+                continue
+            stream_settings = inbound.get("streamSettings") or inbound.get("stream_settings")
+            network = (stream_settings.get("network") or "unknown") if isinstance(stream_settings, dict) else "unknown"
+            remark = (inbound.get("remark") or "").strip() or f"Inbound {inbound_id}"
+            uri = build_public_vless_link(
+                client_uuid=client_uuid,
+                inbound=inbound,
+                server_config=public_config,
+                remark=remark,
+            )
+            if uri:
+                links.append({
+                    "name": remark,
+                    "uri": uri,
+                    "server_id": server_id,
+                    "inbound_id": inbound_id,
+                    "network": network,
+                    "public_host": public_config.public_host,
+                    "public_port": public_config.public_port,
+                    "server_config": {
+                        "name": server_id,
+                        "host": host,
+                        "public_host": public_config.public_host,
+                        "public_port": public_config.public_port,
+                        "sni": public_config.sni,
+                        "link_host_rewrite_from": "127.0.0.1",
+                        "xhttp_alpn": public_config.xhttp_alpn,
+                        "xhttp_fp": public_config.xhttp_fp,
+                        "xhttp_mode": public_config.xhttp_mode,
+                        "grpc_authority": public_config.grpc_authority,
+                    },
+                })
+    return links
 
 
 def build_user_public_links(

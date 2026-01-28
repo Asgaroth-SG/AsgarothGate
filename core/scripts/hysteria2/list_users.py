@@ -173,10 +173,10 @@ def main():
                             # Проверяем по UUID
                             if client_uuid and client_id == client_uuid:
                                 online_count = len(client_ips) if client_ips else 1
-                                # Используем максимальное значение из Hysteria 2 и 3X-UI
+                                # Суммируем количество подключений из Hysteria 2 и 3X-UI
+                                # Пользователь может быть подключен к обоим сервисам одновременно
                                 current_count = users_dict[username].get('online_count', 0)
-                                if online_count > current_count:
-                                    users_dict[username]['online_count'] = online_count
+                                users_dict[username]['online_count'] = current_count + online_count
                                 break
                             
                             # Проверяем по email
@@ -186,10 +186,10 @@ def main():
                                     expected_email = f"{username}_{inbound_id}"
                                     if client_email == expected_email:
                                         online_count = len(client_ips) if client_ips else 1
-                                        # Используем максимальное значение из Hysteria 2 и 3X-UI
+                                        # Суммируем количество подключений из Hysteria 2 и 3X-UI
+                                        # Пользователь может быть подключен к обоим сервисам одновременно
                                         current_count = users_dict[username].get('online_count', 0)
-                                        if online_count > current_count:
-                                            users_dict[username]['online_count'] = online_count
+                                        users_dict[username]['online_count'] = current_count + online_count
                                         break
                                 
                                 if users_dict[username].get('online_count', 0) > 0:

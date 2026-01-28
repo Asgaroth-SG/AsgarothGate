@@ -41,6 +41,15 @@ def reset_user(username):
 
         if result.modified_count > 0:
             print(f"User '{username}' has been reset successfully.")
+            
+            # Очистка кэша при сбросе пользователя
+            try:
+                from cache_helper import clear_user_cache
+                clear_user_cache(username)
+            except Exception as e:
+                # Не блокируем сброс пользователя при ошибке очистки кэша
+                print(f"Warning: Cache clearing failed: {e}", file=sys.stderr)
+            
             return 0
         else:
             print(f"User '{username}' data was already in a reset state. No changes made.")

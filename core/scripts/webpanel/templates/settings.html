@@ -19,6 +19,7 @@
     data-get-all-nodes-url="{{ url_for('get_all_nodes') }}"
     data-add-node-url="{{ url_for('add_node') }}"
     data-delete-node-url="{{ url_for('delete_node') }}"
+    data-reorder-nodes-url="{{ url_for('reorder_nodes') }}"
     data-get-all-extra-configs-url="{{ url_for('get_all_extra_configs') }}"
     data-add-extra-config-url="{{ url_for('add_extra_config') }}"
     data-delete-extra-config-url="{{ url_for('delete_extra_config') }}"
@@ -52,6 +53,7 @@
     data-xui-test-connection-url="{{ url_for('test_xui_connection_api') }}"
     data-xui-sync-status-url="{{ url_for('get_xui_sync_status_api') }}"
     data-xui-sync-user-url="{{ url_for('sync_user_xui_api') }}"
+    data-xui-clear-cache-url="{{ url_for('clear_xui_subscription_cache_api') }}"
     data-xui-sync-all-url="{{ url_for('sync_all_users_xui_api') }}"
     data-xui-get-logs-url="{{ url_for('get_xui_logs_api') }}"
 >
@@ -226,90 +228,21 @@
                                 </div>
                             
                                 <div class="card card-outline card-secondary mt-4">
-                                    <div class="card-header">
+                                    <div class="card-header d-flex justify-content-between align-items-center">
                                         <h3 class="card-title">Внешние узлы (Nodes)</h3>
+                                        <button type="button" class="btn btn-sm btn-success" id="add_node_btn_modal">
+                                            <i class="fas fa-plus"></i> Добавить узел
+                                        </button>
                                     </div>
                                     <div class="card-body">
-                                        <div class="table-responsive">
-                                            <table class="table table-bordered table-striped" id="nodes_table">
-                                                <thead>
-                                                    <tr>
-                                                        <th>Название</th>
-                                                        <th>Тип</th>
-                                                        <th>IP/Домен</th>
-                                                        <th>Порт</th>
-                                                        <th>SNI</th>
-                                                        <th>OBFS</th>
-                                                        <th>Небезопасно</th>
-                                                        <th>Pin SHA256</th>
-                                                        <th>Действие</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody></tbody>
-                                            </table>
+                                        <!-- Сетка карточек узлов -->
+                                        <div id="nodes_grid" class="row">
+                                            <!-- Карточки узлов будут добавлены через JavaScript -->
                                         </div>
-                                        <div id="no_nodes_message" class="alert alert-info" style="display: none;">
-                                            Внешние узлы не настроены.
+                                        <div id="no_nodes_message" class="text-center text-muted py-4" style="display: none;">
+                                            <i class="fas fa-server fa-3x mb-3" style="opacity: 0.3;"></i>
+                                            <p>Нет настроенных узлов. Нажмите "Добавить узел" для настройки.</p>
                                         </div>
-                            
-                                        <hr>
-                                        <h5>Добавить новый узел</h5>
-                                        <form id="add_node_form">
-                                            <div class="form-row">
-                                                <div class="form-group col-md-4">
-                                                    <label for="node_name">Имя узла</label>
-                                                    <input type="text" class="form-control" id="node_name" placeholder="например, Node-US">
-                                                    <div class="invalid-feedback">Пожалуйста, введите уникальное имя.</div>
-                                                </div>
-                                                <div class="form-group col-md-4">
-                                                    <label for="node_type">Тип узла</label>
-                                                    <select class="form-control" id="node_type">
-                                                        <option value="standard" selected>Standard</option>
-                                                        <option value="premium">Premium</option>
-                                                    </select>
-                                                    <div class="invalid-feedback">Пожалуйста, выберите тип узла.</div>
-                                                </div>
-                                                <div class="form-group col-md-4">
-                                                    <label for="node_ip">IP Адрес / Домен</label>
-                                                    <input type="text" class="form-control" id="node_ip" placeholder="например, node.example.com или 1.2.3.4">
-                                                    <div class="invalid-feedback">Пожалуйста, введите корректный IP или домен.</div>
-                                                </div>
-                                            </div>
-                                            <div class="form-row">
-                                                <div class="form-group col-md-3">
-                                                    <label for="node_port">Порт</label>
-                                                    <input type="number" class="form-control" id="node_port" placeholder="например, 443">
-                                                    <div class="invalid-feedback">Пожалуйста, введите корректный порт (1-65535).</div>
-                                                </div>
-                                                <div class="form-group col-md-3">
-                                                    <label for="node_obfs">OBFS</label>
-                                                    <input type="text" class="form-control" id="node_obfs" placeholder="обфс-пароль">
-                                                    <div class="invalid-feedback">OBFS не может быть пустым, если указан.</div>
-                                                </div>
-                                                <div class="form-group col-md-6">
-                                                    <label for="node_sni">SNI</label>
-                                                    <input type="text" class="form-control" id="node_sni" placeholder="например, yourdomain.com">
-                                                    <div class="invalid-feedback">Пожалуйста, введите корректное доменное имя (не IP).</div>
-                                                </div>
-                                            </div>
-                                            <div class="form-group">
-                                                <label for="node_pin">Pin SHA256</label>
-                                                <input type="text" class="form-control" id="node_pin" placeholder="5D:23:0E:E9:10:AB:96:E0:43...">
-                                                <div class="invalid-feedback">Неверный формат SHA256 pin.</div>
-                                            </div>
-                                            <div class="form-group">
-                                                <div class="form-check">
-                                                    <input class="form-check-input" type="checkbox" id="node_insecure">
-                                                    <label class="form-check-label" for="node_insecure">
-                                                        Небезопасно (Allow Insecure)
-                                                    </label>
-                                                </div>
-                                            </div>
-                                            <button type="button" id="add_node_btn" class="btn btn-success">
-                                                <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
-                                                Добавить узел
-                                            </button>
-                                        </form>
                                     </div>
                                 </div>
                             </div>
@@ -684,6 +617,85 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
                 <button type="button" class="btn btn-primary" id="save_edited_config_btn">Сохранить</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модалка для добавления/редактирования узла -->
+<div class="modal fade" id="nodeModal" tabindex="-1" role="dialog" aria-labelledby="nodeModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="nodeModalLabel">Добавить узел</h5>
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <form id="node_form">
+                    <input type="hidden" id="node_edit_name" value="">
+                    <div class="form-row">
+                        <div class="form-group col-md-6">
+                            <label for="modal_node_name">Имя узла <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="modal_node_name" placeholder="например, Node-US" required>
+                            <div class="invalid-feedback">Пожалуйста, введите уникальное имя.</div>
+                        </div>
+                        <div class="form-group col-md-6">
+                            <label for="modal_node_type">Тип узла <span class="text-danger">*</span></label>
+                            <select class="form-control" id="modal_node_type" required>
+                                <option value="standard" selected>Standard</option>
+                                <option value="premium">Premium</option>
+                            </select>
+                            <div class="invalid-feedback">Пожалуйста, выберите тип узла.</div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group col-md-8">
+                            <label for="modal_node_ip">IP Адрес / Домен <span class="text-danger">*</span></label>
+                            <input type="text" class="form-control" id="modal_node_ip" placeholder="например, node.example.com или 1.2.3.4" required>
+                            <div class="invalid-feedback">Пожалуйста, введите корректный IP или домен.</div>
+                        </div>
+                        <div class="form-group col-md-4">
+                            <label for="modal_node_port">Порт</label>
+                            <input type="number" class="form-control" id="modal_node_port" placeholder="например, 443" min="1" max="65535">
+                            <div class="invalid-feedback">Пожалуйста, введите корректный порт (1-65535).</div>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group col-md-6">
+                            <label for="modal_node_sni">SNI</label>
+                            <input type="text" class="form-control" id="modal_node_sni" placeholder="например, yourdomain.com">
+                            <div class="invalid-feedback">Пожалуйста, введите корректное доменное имя (не IP).</div>
+                        </div>
+                        <div class="form-group col-md-6">
+                            <label for="modal_node_obfs">OBFS</label>
+                            <input type="text" class="form-control" id="modal_node_obfs" placeholder="обфс-пароль">
+                            <div class="invalid-feedback">OBFS не может быть пустым, если указан.</div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label for="modal_node_pin">Pin SHA256</label>
+                        <input type="text" class="form-control" id="modal_node_pin" placeholder="5D:23:0E:E9:10:AB:96:E0:43...">
+                        <small class="form-text text-muted">Формат: шестнадцатеричные значения через двоеточие</small>
+                        <div class="invalid-feedback">Неверный формат SHA256 pin.</div>
+                    </div>
+                    <div class="form-group">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="modal_node_insecure">
+                            <label class="form-check-label" for="modal_node_insecure">
+                                Небезопасно (Allow Insecure)
+                            </label>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-success" id="save_node_btn">
+                    <span class="spinner-border spinner-border-sm" role="status" aria-hidden="true" style="display: none;"></span>
+                    <span class="btn-text">Добавить</span>
+                </button>
             </div>
         </div>
     </div>

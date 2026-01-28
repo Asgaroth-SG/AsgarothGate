@@ -1220,61 +1220,85 @@ class SubscriptionManager:
                                 if age >= self._xui_links_cache_ttl:
                                     self._refresh_xui_links_async(username, user_plan)
                         
-                        # Если всё ещё нет кэша - генерируем синхронно для первого запроса
+                        # Если всё ещё нет кэша - проверяем, есть ли данные в фоновом опросе
                         if not cache_used:
-                            logger.info(f"No cache found for {username}, generating links synchronously...")
+                            # Сначала проверяем кэш фонового опроса (может быть уже готов)
                             try:
-                                # Генерируем ссылки синхронно - это должно быть быстро благодаря параллельной генерации
-                                logger.debug(f"Calling get_user_vless_uris for {username}...")
-                                generated_nodes = sync_manager.get_user_vless_uris(username) or []
-                                logger.debug(f"get_user_vless_uris returned {len(generated_nodes) if generated_nodes else 0} nodes")
-                                
-                                if generated_nodes:
-                                    vless_nodes = generated_nodes
-                                    cache_used = True
-                                    logger.info(f"Successfully generated {len(generated_nodes)} links for {username}")
+                                from xui.xui_background_poller import get_inbounds_cache
+                                inbounds_by_host = get_inbounds_cache()
+                                if inbounds_by_host:
+                                    # Пытаемся использовать кэш из фонового опроса для быстрой генерации
+                                    from xui.xui_public_links import build_user_public_links_from_cache
+                                    from xui.config import load_xui_config, get_xui_sync_manager
+                                    from urllib.parse import urlparse
                                     
-                                    # Сохраняем в кэш для следующих запросов
-                                    if self._xui_links_cache_ttl > 0:
-                                        with self._xui_links_cache_lock:
-                                            self._xui_links_cache[cache_key] = (time.time(), list(generated_nodes))
-                                        self._save_xui_links_cache()
-                                        logger.debug(f"Cached {len(generated_nodes)} links for {username} (TTL={self._xui_links_cache_ttl}s)")
-                                else:
-                                    logger.warning(f"No links generated for {username} - check X-UI configuration and user mapping")
-                                    vless_nodes = []
-                            except Exception as e:
-                                logger.error(f"Error generating links for {username}: {e}", exc_info=True)
-                                # При ошибке возвращаем пустой список, но не блокируем запрос
-                                vless_nodes = []
-                                
-                                # Запускаем генерацию в фоне для следующего запроса
-                                with self._xui_links_cache_lock:
-                                    if cache_key not in self._xui_links_refreshing:
-                                        self._xui_links_refreshing.add(cache_key)
+                                    xui_config = load_xui_config()
+                                    if xui_config.get('enabled'):
+                                        from xui.xui_public_links import load_server_public_configs
+                                        server_public_configs = load_server_public_configs(xui_config)
+                                        servers_for_plan = sync_manager._get_servers_for_plan(user_plan)
+                                        servers_for_plan_for_cache = []
+                                        for host, _client, sc in servers_for_plan:
+                                            server_id = sc.get("name") or (urlparse(host).hostname if host else None) or host
+                                            pc = server_public_configs.get(server_id)
+                                            if pc:
+                                                servers_for_plan_for_cache.append((host, server_id, pc))
                                         
-                                        def generate_in_background():
-                                            try:
-                                                logger.debug(f"Background: generating links for {username}...")
-                                                generated_nodes = sync_manager.get_user_vless_uris(username) or []
+                                        if servers_for_plan_for_cache and inbounds_by_host:
+                                            cache_links = build_user_public_links_from_cache(
+                                                username, servers_for_plan_for_cache, inbounds_by_host
+                                            )
+                                            if cache_links:
+                                                vless_nodes = cache_links
+                                                cache_used = True
+                                                logger.info(f"Generated {len(cache_links)} links from background poller cache for {username}")
+                                                # Сохраняем в кэш
                                                 if self._xui_links_cache_ttl > 0:
                                                     with self._xui_links_cache_lock:
-                                                        self._xui_links_cache[cache_key] = (time.time(), list(generated_nodes))
+                                                        self._xui_links_cache[cache_key] = (time.time(), list(cache_links))
                                                     self._save_xui_links_cache()
-                                                    logger.debug(f"Background: cached {len(generated_nodes)} links for {username} (TTL={self._xui_links_cache_ttl}s)")
-                                            except Exception as e:
-                                                logger.error(f"Background: error generating links for {username}: {e}", exc_info=True)
-                                            finally:
-                                                with self._xui_links_cache_lock:
-                                                    self._xui_links_refreshing.discard(cache_key)
+                            except Exception as e:
+                                logger.debug(f"Could not use background poller cache: {e}")
+                            
+                            # Если кэш фонового опроса недоступен, генерируем с таймаутом
+                            if not cache_used:
+                                logger.info(f"No cache found for {username}, generating links with timeout...")
+                                try:
+                                    # Используем asyncio.wait_for для таймаута генерации ссылок (максимум 8 секунд)
+                                    # Это предотвращает таймаут всего запроса подписки
+                                    try:
+                                        generated_nodes = await asyncio.wait_for(
+                                            asyncio.to_thread(sync_manager.get_user_vless_uris, username),
+                                            timeout=8.0  # Таймаут 8 секунд для генерации VLESS ссылок
+                                        ) or []
+                                    except asyncio.TimeoutError:
+                                        logger.warning(f"VLESS link generation timed out for {username} (8s), returning subscription without VLESS links")
+                                        generated_nodes = []
+                                        # Запускаем генерацию в фоне для следующего запроса
+                                        self._refresh_xui_links_async(username, user_plan)
+                                    
+                                    if generated_nodes:
+                                        vless_nodes = generated_nodes
+                                        cache_used = True
+                                        logger.info(f"Successfully generated {len(generated_nodes)} links for {username}")
                                         
-                                        try:
-                                            import threading
-                                            thread = threading.Thread(target=generate_in_background, daemon=True)
-                                            thread.start()
-                                        except Exception as e:
-                                            logger.error(f"Failed to start background link generation for {username}: {e}", exc_info=True)
-                                            self._xui_links_refreshing.discard(cache_key)
+                                        # Сохраняем в кэш для следующих запросов
+                                        if self._xui_links_cache_ttl > 0:
+                                            with self._xui_links_cache_lock:
+                                                self._xui_links_cache[cache_key] = (time.time(), list(generated_nodes))
+                                            self._save_xui_links_cache()
+                                            logger.debug(f"Cached {len(generated_nodes)} links for {username} (TTL={self._xui_links_cache_ttl}s)")
+                                    else:
+                                        logger.warning(f"No links generated for {username} - check X-UI configuration and user mapping")
+                                        vless_nodes = []
+                                        # Запускаем генерацию в фоне для следующего запроса
+                                        self._refresh_xui_links_async(username, user_plan)
+                                except Exception as e:
+                                    logger.error(f"Error generating links for {username}: {e}", exc_info=True)
+                                    # При ошибке возвращаем пустой список, но не блокируем запрос
+                                    vless_nodes = []
+                                    self._refresh_xui_links_async(username, user_plan)
+                                
                     
                     if vless_nodes:
                         logger.info(f"Processing {len(vless_nodes)} VLESS nodes for {username}")
@@ -1482,6 +1506,9 @@ class HysteriaServer:
         self.app.router.add_get(f'{base_path}/sub/normal/{{password_token}}', self.handle)
         self.app.router.add_get(f'{base_path}/robots.txt', self.robots_handler)
         self.app.router.add_route('*', f'{base_path}/{{tail:.*}}', self.handle_404_subpath)
+        
+        # Запускаем фоновый опрос 3X-UI при старте сервера
+        self._start_background_poller()
 
     def _load_config(self) -> AppConfig:
         domain = os.getenv('HYSTERIA_DOMAIN', 'localhost')
@@ -1823,6 +1850,31 @@ class HysteriaServer:
 
     async def handle_script(self, request: web.Request) -> web.Response:
         return web.FileResponse(os.path.join(self.config.template_dir, 'script.js'))
+
+    def _start_background_poller(self):
+        """Запускает фоновый опрос 3X-UI при старте сервера для предзагрузки данных."""
+        try:
+            from xui.config import load_xui_config
+            from xui.xui_background_poller import start_background_poller
+            from db.database import db
+
+            def _get_mappings():
+                if not db:
+                    return {}
+                out = {}
+                for u in (db.get_all_users() or []):
+                    uid = u.get('_id')
+                    if not uid:
+                        continue
+                    m = db.get_xui_mapping(uid)
+                    if m:
+                        out[uid] = m
+                return out
+
+            poller_thread = start_background_poller(load_xui_config, _get_mappings)
+            logger.info("XUI background poller started for normalsub server")
+        except Exception as e:
+            logger.warning(f"XUI background poller not started for normalsub: {e}")
 
     def run(self):
         print(f"Starting Hysteria Normalsub server on {self.config.aiohttp_listen_address}:{self.config.aiohttp_listen_port}")

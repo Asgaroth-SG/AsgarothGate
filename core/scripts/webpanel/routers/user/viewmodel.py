@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Optional, List
 
 class User(BaseModel):
     username: str
@@ -14,6 +14,8 @@ class User(BaseModel):
     unlimited_ip: bool
     max_ips: int = 0
     online_count: int = 0
+    connected_ips: Optional[List[str]] = None
+    device_count: int = 0
     note: Optional[str] = None
     # Тариф пользователя: 'standard' или 'premium'
     plan: str = "standard"
@@ -111,6 +113,8 @@ class User(BaseModel):
                 'unlimited_ip': False,
                 'max_ips': max_ips,  # Используем обработанное значение
                 'online_count': 0,
+                'connected_ips': [],
+                'device_count': 0,
                 'note': user_data.get('note', None),
                 'plan': plan,
             }
@@ -151,7 +155,31 @@ class User(BaseModel):
         traffic_used_display = f"{used_formatted}/{quota_formatted} ({percentage:.1f}%)"
 
         # Определяем финальный статус пользователя
-        final_status = user_data.get('status', 'Not Active')
+        # Если online_count > 0, пользователь должен быть Online
+        online_count = user_data.get('online_count', 0)
+        db_status = user_data.get('status', 'Not Active')
+        
+        if online_count > 0:
+            final_status = 'Online'
+        elif db_status in ['Online', 'Offline', 'On-hold']:
+            final_status = db_status
+        else:
+            final_status = 'Not Active'
+        
+        # Получаем список подключенных IP-адресов (устройств)
+        connected_ips = user_data.get('connected_ips', [])
+        if isinstance(connected_ips, str):
+            # Если это строка (старый формат), пытаемся распарсить
+            try:
+                import json
+                connected_ips = json.loads(connected_ips) if connected_ips else []
+            except:
+                connected_ips = []
+        elif not isinstance(connected_ips, list):
+            connected_ips = []
+        
+        # Количество уникальных устройств = количество уникальных IP-адресов
+        device_count = len(connected_ips) if connected_ips else 0
         
         # УБРАНА синхронная проверка X-UI статуса из viewmodel
         # Это было критическое узкое место - блокировало рендеринг страницы на 1-5 секунд
@@ -169,7 +197,9 @@ class User(BaseModel):
             'enable': not user_data.get('blocked', False),
             'unlimited_ip': user_data.get('unlimited_user', False),
             'max_ips': max_ips,  # Используем обработанное значение
-            'online_count': user_data.get('online_count', 0),
+            'online_count': online_count,
+            'connected_ips': connected_ips,
+            'device_count': device_count,
             'note': user_data.get('note', None),
             'plan': plan,
         }

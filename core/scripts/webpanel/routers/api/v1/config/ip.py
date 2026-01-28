@@ -9,6 +9,7 @@ from ..schema.config.ip import (
     StatusResponse,
     AddNodeBody,
     DeleteNodeBody,
+    ReorderNodesBody,
     NodeListResponse,
     NodesTrafficPayload,
 )
@@ -147,10 +148,26 @@ async def delete_node(body: DeleteNodeBody):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@router.post('/nodes/reorder', response_model=DetailResponse, summary='Reorder External Nodes', name='reorder_nodes')
+async def reorder_nodes(body: ReorderNodesBody):
+    """
+    Reorders external nodes according to the provided list of names.
+
+    Args:
+        body: Request body containing the list of node names in desired order.
+    """
+    try:
+        cli_api.reorder_nodes(body.names)
+        return DetailResponse(detail=f"Successfully reordered {len(body.names)} nodes.")
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @router.post('/nodestraffic', response_model=DetailResponse, summary='Receive and Aggregate Traffic from Node')
 async def receive_node_traffic(body: NodesTrafficPayload):
     """
     Receives traffic delta from a node and adds it to the user's total in the database.
+    Also updates user online status and online_count from the node.
     Authentication is handled by the AuthMiddleware.
     """
     if db is None:
@@ -163,14 +180,49 @@ async def receive_node_traffic(body: NodesTrafficPayload):
             if not db_user:
                 continue
 
+            # Агрегируем трафик
             new_upload = db_user.get('upload_bytes', 0) + user_traffic.upload_bytes
             new_download = db_user.get('download_bytes', 0) + user_traffic.download_bytes
+
+            # Объединяем статусы: если пользователь онлайн на узле или локально - он онлайн
+            node_online_count = user_traffic.online_count
+            local_online_count = db_user.get('online_count', 0)
+            
+            # Суммируем подключения из разных источников
+            # local_online_count уже включает подключения с локального Hysteria 2 и 3X-UI (через traffic.py)
+            # node_online_count - это подключения с внешнего узла
+            # Если пользователь подключен к локальному серверу и к внешнему узлу - суммируем
+            # Но нужно учесть, что при повторных запросах с узла local_online_count уже может включать
+            # подключения с этого узла, поэтому используем максимальное значение для избежания дублирования
+            # Однако, если это первый запрос с узла или пользователь подключен к разным источникам - суммируем
+            if node_online_count > 0 and local_online_count > 0:
+                # Пользователь подключен к обоим источникам - суммируем
+                combined_online_count = local_online_count + node_online_count
+            else:
+                # Используем максимальное значение (избегаем дублирования при повторных запросах)
+                combined_online_count = max(local_online_count, node_online_count)
+            
+            # Определяем статус: Online если есть подключения на узле или локально
+            node_status = user_traffic.status
+            local_status = db_user.get('status', 'Offline')
+            
+            # Если пользователь онлайн на узле, статус должен быть Online
+            if node_online_count > 0:
+                combined_status = 'Online'
+            elif combined_online_count > 0:
+                combined_status = 'Online'
+            elif local_status == 'Online' and node_online_count == 0:
+                # Если локально онлайн, но на узле нет - оставляем локальный статус
+                combined_status = local_status
+            else:
+                # Используем статус с узла, если локально офлайн
+                combined_status = node_status if node_status in ['Online', 'Offline', 'On-hold'] else local_status
 
             update_data = {
                 'upload_bytes': new_upload,
                 'download_bytes': new_download,
-                'status': user_traffic.status,
-                'online_count': user_traffic.online_count,
+                'status': combined_status,
+                'online_count': combined_online_count,
             }
 
             if not db_user.get('account_creation_date') and user_traffic.account_creation_date:

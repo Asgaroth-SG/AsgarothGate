@@ -22,6 +22,15 @@ def remove_users(usernames):
             # Не блокируем удаление пользователя при ошибке синхронизации
             print(f"Warning: X-UI sync failed: {e}", file=sys.stderr)
         
+        # Очистка кэша перед удалением
+        try:
+            from cache_helper import clear_user_cache
+            for username in usernames:
+                clear_user_cache(username)
+        except Exception as e:
+            # Не блокируем удаление пользователя при ошибке очистки кэша
+            print(f"Warning: Cache clearing failed: {e}", file=sys.stderr)
+        
         result = db.delete_users(usernames)
         
         if result.deleted_count > 0:

@@ -117,6 +117,17 @@ def edit_user(
             except Exception as e:
                 # Не блокируем обновление пользователя при ошибке синхронизации
                 print(f"Warning: X-UI sync failed: {e}", file=sys.stderr)
+        
+        # Очистка кэша при критических изменениях
+        # Очищаем кэш для старого и нового имени (если было переименование)
+        try:
+            from cache_helper import clear_user_cache
+            clear_user_cache(username_lower)
+            if new_username and new_username_lower != username_lower:
+                clear_user_cache(new_username_lower)
+        except Exception as e:
+            # Не блокируем обновление пользователя при ошибке очистки кэша
+            print(f"Warning: Cache clearing failed: {e}", file=sys.stderr)
 
     except Exception as e:
         print(f"An error occurred during update: {e}", file=sys.stderr)

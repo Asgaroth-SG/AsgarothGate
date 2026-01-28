@@ -600,6 +600,17 @@ def list_nodes():
     return run_cmd(['python3', Command.NODE_MANAGER.value, 'list'])
 
 
+def reorder_nodes(node_names: list[str]):
+    """
+    Reorders nodes according to the provided list of names.
+    
+    Args:
+        node_names: List of node names in the desired order.
+    """
+    command = ['python3', Command.NODE_MANAGER.value, 'reorder', '--names'] + node_names
+    return run_cmd(command)
+
+
 def generate_node_cert():
     """
     Generates a self-signed certificate for nodes.
