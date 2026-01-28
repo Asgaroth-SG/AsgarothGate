@@ -105,7 +105,13 @@ EOL
         cat <<EOL >> "$CADDY_CONFIG_FILE"
     #XHTTP
     route $XHTTP_PATH/* {
-        reverse_proxy 127.0.0.1:$XHTTP_PORT
+        reverse_proxy 127.0.0.1:$XHTTP_PORT {
+            # Передаем реальный IP клиента для правильного определения устройств в 3X-UI
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+        }
     }
 EOL
     fi
@@ -118,7 +124,13 @@ EOL
         header Content-Type application/grpc*
     }
     handle @grpc {
-        reverse_proxy h2c://127.0.0.1:$GRPC_PORT
+        reverse_proxy h2c://127.0.0.1:$GRPC_PORT {
+            # Передаем реальный IP клиента для gRPC соединений
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+        }
     }
 EOL
     fi
@@ -126,7 +138,13 @@ EOL
     cat <<EOL >> "$CADDY_CONFIG_FILE"
     # Веб-панель
     route /$ROOT_PATH/* {
-        reverse_proxy http://127.0.0.1:28260
+        reverse_proxy http://127.0.0.1:28260 {
+            # Передаем реальный IP клиента для веб-панели
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Forwarded-Host {host}
+        }
     }
 EOL
 

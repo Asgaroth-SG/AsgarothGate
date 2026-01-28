@@ -330,6 +330,34 @@ else
     warn "Не удалось загрузить scheduler.sh, продолжаем без настройки сервисов..."
 fi
 
+# ========== Обновление конфигурации Caddy для веб-панели ==========
+update_caddy_config_if_needed() {
+    local WEBPANEL_ENV_FILE="$HYSTERIA_INSTALL_DIR/core/scripts/webpanel/.env"
+    local WEBPANEL_SHELL="$HYSTERIA_INSTALL_DIR/core/scripts/webpanel/webpanel_shell.sh"
+    local CADDY_CONFIG_FILE="$HYSTERIA_INSTALL_DIR/core/scripts/webpanel/Caddyfile"
+    
+    if [[ -f "$WEBPANEL_ENV_FILE" ]] && [[ -f "$WEBPANEL_SHELL" ]]; then
+        info "Обнаружена настроенная веб-панель. Обновление конфигурации Caddy..."
+        
+        # Вызываем функцию update_caddy_file из webpanel_shell.sh через bash
+        # Это гарантирует, что функция будет доступна и выполнится корректно
+        if bash -c "source '$HYSTERIA_INSTALL_DIR/core/scripts/utils.sh' 2>/dev/null; source '$WEBPANEL_SHELL' 2>/dev/null && update_caddy_file" 2>&1; then
+            if [[ -f "$CADDY_CONFIG_FILE" ]]; then
+                success "Конфигурация Caddy успешно обновлена с заголовками для передачи реального IP клиентов."
+                info "Все блоки reverse_proxy теперь включают заголовки X-Real-IP, X-Forwarded-For и другие."
+            else
+                warn "Конфигурация Caddy не была создана. Возможно, веб-панель не настроена полностью."
+            fi
+        else
+            warn "Не удалось обновить конфигурацию Caddy. Проверьте, что веб-панель настроена корректно."
+        fi
+    else
+        info "Веб-панель не настроена (отсутствует .env файл). Пропуск обновления конфигурации Caddy."
+    fi
+}
+
+update_caddy_config_if_needed
+
 # ========== Перезапуск сервисов ==========
 info "Перезагрузка демона systemd..."
 systemctl daemon-reload
