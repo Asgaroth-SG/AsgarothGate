@@ -83,6 +83,33 @@ update_caddy_file() {
         echo -e "${red}Ошибка: Отсутствует одна или несколько переменных окружения.${NC}"
         return 1
     fi
+    
+    # Извлекаем XHTTP и gRPC настройки из существующего Caddyfile, если они не заданы в .env
+    if [ -z "$XHTTP_PATH" ] || [ -z "$XHTTP_PORT" ]; then
+        if [ -f "$CADDY_CONFIG_FILE" ]; then
+            # Ищем маршрут XHTTP в существующем файле
+            local xhttp_route=$(grep -A 1 "route.*xhttp" "$CADDY_CONFIG_FILE" | head -1 | sed 's/.*route \([^ ]*\).*/\1/' | sed 's|/*$||' | sed 's|^/||')
+            local xhttp_port=$(grep -A 3 "route.*xhttp" "$CADDY_CONFIG_FILE" | grep "reverse_proxy" | grep -oP '127\.0\.0\.1:\K[0-9]+' | head -1)
+            
+            if [ -n "$xhttp_route" ] && [ -n "$xhttp_port" ]; then
+                XHTTP_PATH="/$xhttp_route"
+                XHTTP_PORT="$xhttp_port"
+                echo "Обнаружены настройки XHTTP из существующей конфигурации: путь=$XHTTP_PATH, порт=$XHTTP_PORT"
+            fi
+        fi
+    fi
+    
+    if [ -z "$GRPC_PORT" ]; then
+        if [ -f "$CADDY_CONFIG_FILE" ]; then
+            # Ищем порт gRPC в существующем файле
+            local grpc_port=$(grep -A 5 "@grpc" "$CADDY_CONFIG_FILE" | grep "reverse_proxy.*h2c" | grep -oP '127\.0\.0\.1:\K[0-9]+' | head -1)
+            
+            if [ -n "$grpc_port" ]; then
+                GRPC_PORT="$grpc_port"
+                echo "Обнаружен порт gRPC из существующей конфигурации: $GRPC_PORT"
+            fi
+        fi
+    fi
 
     cat <<EOL > "$CADDY_CONFIG_FILE"
 {
