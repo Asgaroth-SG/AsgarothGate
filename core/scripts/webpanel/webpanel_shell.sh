@@ -60,7 +60,12 @@ EOL
 }
 
 update_caddy_file() {
-    source /etc/hysteria/core/scripts/webpanel/.env
+    if [ ! -f "$WEBPANEL_ENV_FILE" ]; then
+        echo -e "${red}Ошибка: Файл .env веб-панели не найден: $WEBPANEL_ENV_FILE${NC}"
+        return 1
+    fi
+    
+    source "$WEBPANEL_ENV_FILE"
     
     local SUB_PATH=""
     local SUB_PORT="28261"
@@ -748,76 +753,79 @@ stop_service() {
     rm -f "$CADDY_CONFIG_FILE"
 }
 
-case "$1" in
-    start)
-        if [ -z "$2" ] || [ -z "$3" ]; then
-            echo -e "${red}Использование: $0 start <DOMAIN> <PORT> [ADMIN_USERNAME] [ADMIN_PASSWORD] [EXPIRATION_MINUTES] [DEBUG] [DECOY_PATH]${NC}"
+# Выполняем case только если скрипт вызывается напрямую, а не через source
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    case "$1" in
+        start)
+            if [ -z "$2" ] || [ -z "$3" ]; then
+                echo -e "${red}Использование: $0 start <DOMAIN> <PORT> [ADMIN_USERNAME] [ADMIN_PASSWORD] [EXPIRATION_MINUTES] [DEBUG] [DECOY_PATH]${NC}"
+                exit 1
+            fi
+            start_service "$2" "$3" "$4" "$5" "$6" "$7" "$8"
+            ;;
+        stop)
+            stop_service
+            ;;
+        decoy)
+            if [ -z "$2" ] || [ -z "$3" ]; then
+                echo -e "${red}Использование: $0 decoy <DOMAIN> <PATH_TO_DECOY_SITE>${NC}"
+                exit 1
+            fi
+            setup_decoy_site "$2" "$3"
+            ;;
+        stopdecoy)
+            stop_decoy_site
+            ;;
+        resetcreds)
+            shift 
+            reset_credentials "$@"
+            ;;
+        changeexp)
+            change_expiration "$2"
+            ;;
+        changeroot)
+            change_root_path "$2"
+            ;;
+        changedomain)
+            shift
+            change_port_domain "$@"
+            ;;
+        url)
+            show_webpanel_url
+            ;;
+        api-token)
+            show_webpanel_api_token
+            ;;
+        genconfig)
+            update_caddy_file
+            ;;
+        setxui)
+            if [ -z "$2" ] || [ -z "$3" ]; then
+                echo -e "${red}Использование: $0 setxui <XHTTP_PATH> <XHTTP_PORT> [GRPC_PORT]${NC}"
+                echo -e "${yellow}Пример: $0 setxui /xhttp/9f3a1cfba29df6b437aed633b158d0e9 20000 20001${NC}"
+                exit 1
+            fi
+            set_xui_proxy "$2" "$3" "$4"
+            ;;
+        removexui)
+            remove_xui_proxy
+            ;;
+        *)
+            echo -e "${red}Использование: $0 {start|stop|decoy|stopdecoy|resetcreds|changeexp|changeroot|changedomain|url|api-token|setxui|removexui|genconfig} [опции]${NC}"
+            echo -e "${yellow}start <DOMAIN> <PORT> [ADMIN_USERNAME] [ADMIN_PASSWORD] [EXPIRATION_MINUTES] [DEBUG] [DECOY_PATH]${NC}"
+            echo -e "${yellow}stop${NC}"
+            echo -e "${yellow}decoy <DOMAIN> <PATH_TO_DECOY_SITE>${NC}"
+            echo -e "${yellow}stopdecoy${NC}"
+            echo -e "${yellow}resetcreds [-u new_username] [-p new_password]${NC}"
+            echo -e "${yellow}changeexp <NEW_EXPIRATION_MINUTES>${NC}"
+            echo -e "${yellow}changeroot [NEW_ROOT_PATH] # Генерирует случайный, если не указан${NC}"
+            echo -e "${yellow}changedomain [-d new_domain] [-p new_port]${NC}"
+            echo -e "${yellow}url${NC}"
+            echo -e "${yellow}api-token${NC}"
+            echo -e "${yellow}setxui <XHTTP_PATH> <XHTTP_PORT> [GRPC_PORT] # Настройка прокси для 3X-UI${NC}"
+            echo -e "${yellow}removexui # Удаление настроек прокси для 3X-UI${NC}"
+            echo -e "${yellow}genconfig # Пересоздать Caddyfile из .env${NC}"
             exit 1
-        fi
-        start_service "$2" "$3" "$4" "$5" "$6" "$7" "$8"
-        ;;
-    stop)
-        stop_service
-        ;;
-    decoy)
-        if [ -z "$2" ] || [ -z "$3" ]; then
-            echo -e "${red}Использование: $0 decoy <DOMAIN> <PATH_TO_DECOY_SITE>${NC}"
-            exit 1
-        fi
-        setup_decoy_site "$2" "$3"
-        ;;
-    stopdecoy)
-        stop_decoy_site
-        ;;
-    resetcreds)
-        shift 
-        reset_credentials "$@"
-        ;;
-    changeexp)
-        change_expiration "$2"
-        ;;
-    changeroot)
-        change_root_path "$2"
-        ;;
-    changedomain)
-        shift
-        change_port_domain "$@"
-        ;;
-    url)
-        show_webpanel_url
-        ;;
-    api-token)
-        show_webpanel_api_token
-        ;;
-    genconfig)
-        update_caddy_file
-        ;;
-    setxui)
-        if [ -z "$2" ] || [ -z "$3" ]; then
-            echo -e "${red}Использование: $0 setxui <XHTTP_PATH> <XHTTP_PORT> [GRPC_PORT]${NC}"
-            echo -e "${yellow}Пример: $0 setxui /xhttp/9f3a1cfba29df6b437aed633b158d0e9 20000 20001${NC}"
-            exit 1
-        fi
-        set_xui_proxy "$2" "$3" "$4"
-        ;;
-    removexui)
-        remove_xui_proxy
-        ;;
-	*)
-        echo -e "${red}Использование: $0 {start|stop|decoy|stopdecoy|resetcreds|changeexp|changeroot|changedomain|url|api-token|setxui|removexui|genconfig} [опции]${NC}"
-        echo -e "${yellow}start <DOMAIN> <PORT> [ADMIN_USERNAME] [ADMIN_PASSWORD] [EXPIRATION_MINUTES] [DEBUG] [DECOY_PATH]${NC}"
-        echo -e "${yellow}stop${NC}"
-        echo -e "${yellow}decoy <DOMAIN> <PATH_TO_DECOY_SITE>${NC}"
-        echo -e "${yellow}stopdecoy${NC}"
-        echo -e "${yellow}resetcreds [-u new_username] [-p new_password]${NC}"
-        echo -e "${yellow}changeexp <NEW_EXPIRATION_MINUTES>${NC}"
-        echo -e "${yellow}changeroot [NEW_ROOT_PATH] # Генерирует случайный, если не указан${NC}"
-        echo -e "${yellow}changedomain [-d new_domain] [-p new_port]${NC}"
-        echo -e "${yellow}url${NC}"
-        echo -e "${yellow}api-token${NC}"
-        echo -e "${yellow}setxui <XHTTP_PATH> <XHTTP_PORT> [GRPC_PORT] # Настройка прокси для 3X-UI${NC}"
-        echo -e "${yellow}removexui # Удаление настроек прокси для 3X-UI${NC}"
-        echo -e "${yellow}genconfig # Пересоздать Caddyfile из .env${NC}"
-        exit 1
-        ;;
-esac
+            ;;
+    esac
+fi
