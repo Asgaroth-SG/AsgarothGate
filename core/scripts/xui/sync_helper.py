@@ -7,6 +7,7 @@
 import logging
 import sys
 from pathlib import Path
+from typing import Optional
 
 # Добавляем путь к модулям
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -16,7 +17,7 @@ from xui.config import get_xui_sync_manager
 logger = logging.getLogger(__name__)
 
 
-def sync_user_create(username: str, expiry_days: int, traffic_limit_gb: int, enable: bool = True, user_plan: str = "standard") -> bool:
+def sync_user_create(username: str, expiry_days: int, traffic_limit_gb: int, enable: bool = True, user_plan: str = "standard", devices: Optional[int] = None) -> bool:
     """
     Синхронизирует создание пользователя с X-UI.
     
@@ -26,6 +27,7 @@ def sync_user_create(username: str, expiry_days: int, traffic_limit_gb: int, ena
         traffic_limit_gb: Лимит трафика в GB
         enable: Включен ли пользователь
         user_plan: План пользователя (standard/premium)
+        devices: Лимит IP-адресов (если None, получается из БД)
     
     Returns:
         True если синхронизация успешна или отключена
@@ -40,7 +42,8 @@ def sync_user_create(username: str, expiry_days: int, traffic_limit_gb: int, ena
             expiry_days=expiry_days,
             traffic_limit_gb=traffic_limit_gb,
             enable=enable,
-            user_plan=user_plan
+            user_plan=user_plan,
+            devices=devices
         )
         
         if not success:
@@ -59,7 +62,9 @@ def sync_user_update(
     expiry_days: int = None,
     traffic_limit_gb: int = None,
     enable: bool = None,
-    user_plan: str = None
+    user_plan: str = None,
+    devices: int = None,
+    replace_devices: bool = True
 ) -> bool:
     """
     Синхронизирует обновление пользователя с X-UI.
@@ -70,6 +75,8 @@ def sync_user_update(
         traffic_limit_gb: Новый лимит трафика в GB (None = не менять)
         enable: Новый статус включения (None = не менять)
         user_plan: Новый план пользователя (None = не менять)
+        devices: Новый лимит IP-адресов (None = получить из БД)
+        replace_devices: Если True, заменяет лимит устройств (по умолчанию True)
     
     Returns:
         True если синхронизация успешна или отключена
@@ -84,7 +91,9 @@ def sync_user_update(
             expiry_days=expiry_days,
             traffic_limit_gb=traffic_limit_gb,
             enable=enable,
-            user_plan=user_plan
+            user_plan=user_plan,
+            devices=devices,
+            replace_devices=replace_devices
         )
         
         if not success:

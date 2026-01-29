@@ -105,6 +105,25 @@ def edit_user(
                     sync_enable = not updates['blocked']
                 sync_plan = updates.get('plan') if 'plan' in updates else None
                 
+                # Определяем devices из updates или из БД
+                sync_devices = None
+                if 'unlimited_user' in updates or 'max_ips' in updates:
+                    # Если изменились настройки IP лимита, передаем новое значение
+                    unlimited_user = updates.get('unlimited_user')
+                    max_ips = updates.get('max_ips')
+                    # Если значения не в updates, получаем из текущего пользователя
+                    if unlimited_user is None or max_ips is None:
+                        current_user = db.get_user(username_lower)
+                        if current_user:
+                            unlimited_user = unlimited_user if unlimited_user is not None else current_user.get('unlimited_user', False)
+                            max_ips = max_ips if max_ips is not None else current_user.get('max_ips', 0)
+                    
+                    if unlimited_user:
+                        sync_devices = 0  # Безлимитный IP
+                    elif max_ips and max_ips > 0:
+                        sync_devices = max_ips
+                    # Если max_ips = 0, sync_devices остается None (будет получено из БД)
+                
                 # Синхронизируем с новым именем если было переименование
                 sync_username = new_username_lower if new_username else username_lower
                 sync_user_update(
@@ -112,7 +131,9 @@ def edit_user(
                     expiry_days=sync_expiry,
                     traffic_limit_gb=sync_traffic,
                     enable=sync_enable,
-                    user_plan=sync_plan
+                    user_plan=sync_plan,
+                    devices=sync_devices,
+                    replace_devices=True
                 )
             except Exception as e:
                 # Не блокируем обновление пользователя при ошибке синхронизации

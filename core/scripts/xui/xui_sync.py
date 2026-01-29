@@ -413,7 +413,8 @@ class XUISyncManager:
         expiry_days: int,
         traffic_limit_gb: float,
         enable: bool = True,
-        user_plan: str = "standard"
+        user_plan: str = "standard",
+        devices: Optional[int] = None
     ) -> Tuple[bool, Optional[str]]:
         """
         Синхронизирует создание пользователя с X-UI.
@@ -423,6 +424,8 @@ class XUISyncManager:
             expiry_days: Дни до истечения
             traffic_limit_gb: Лимит трафика в GB
             enable: Включен ли пользователь
+            user_plan: План пользователя (standard/premium)
+            devices: Лимит IP-адресов (если None, получается из БД)
         
         Returns:
             Tuple (success: bool, error_message: Optional[str])
@@ -432,6 +435,22 @@ class XUISyncManager:
         
         if not db:
             return False, "Database not available"
+        
+        # Получаем данные пользователя из БД для определения limit_ip
+        user_data = db.get_user(hysteria_username)
+        if user_data:
+            # Определяем limit_ip из данных пользователя
+            if devices is None:
+                unlimited_user = user_data.get('unlimited_user', False)
+                max_ips = user_data.get('max_ips', 0)
+                
+                if unlimited_user:
+                    # Безлимитный IP = 0 в 3X-UI
+                    devices = 0
+                elif max_ips > 0:
+                    # Используем персональный лимит
+                    devices = max_ips
+                # Если max_ips = 0, то devices остается None (не передаем лимит)
         
         # Проверяем, есть ли уже маппинг
         existing_mapping = db.get_xui_mapping(hysteria_username)
@@ -444,7 +463,9 @@ class XUISyncManager:
                 expiry_days=expiry_days,
                 traffic_limit_gb=traffic_limit_gb,
                 enable=enable,
-                user_plan=user_plan
+                user_plan=user_plan,
+                devices=devices,
+                replace_devices=True
             )
         
         # Генерируем UUID
@@ -453,6 +474,9 @@ class XUISyncManager:
         # Конвертируем параметры
         expiry_timestamp = self._convert_expiry_days_to_timestamp(expiry_days)
         traffic_bytes = self._convert_traffic_gb_to_bytes(traffic_limit_gb)
+        
+        # Определяем limit_ip для передачи в 3X-UI
+        limit_ip = devices if devices is not None else None
         
         # Логируем для отладки конвертации трафика
         logger.info(
@@ -500,7 +524,8 @@ class XUISyncManager:
                     traffic_limit=traffic_bytes,  # Должно быть в БАЙТАХ!
                     enable=enable,
                     email=f"{hysteria_username}_{inbound_id}",
-                    username=hysteria_username
+                    username=hysteria_username,
+                    limit_ip=limit_ip  # Передаем лимит IP-адресов
                 )
                 logger.info(
                     f"Successfully {action} client {client_uuid} (email: {hysteria_username}_{inbound_id}) in inbound {inbound_id} "
@@ -629,7 +654,8 @@ class XUISyncManager:
                                 expiry_time=expiry_timestamp,
                                 traffic_limit=traffic_bytes,
                                 enable=enable,
-                                username=hysteria_username
+                                username=hysteria_username,
+                                limit_ip=limit_ip  # Передаем лимит IP-адресов
                             )
                             all_inbound_ids.append(inbound_id)
                             logger.info(f"Successfully {action} client {client_uuid} in inbound {inbound_id} on server {host}")
@@ -757,7 +783,18 @@ class XUISyncManager:
             enable = enable if enable is not None else not user_data.get('blocked', False)
             plan_for_create = user_plan or user_data.get('plan', 'standard')
             
-            return self.sync_user_create(hysteria_username, expiry_days, int(traffic_limit_gb), enable, plan_for_create)
+            # Определяем devices из БД если не указан
+            if devices is None:
+                unlimited_user = user_data.get('unlimited_user', False)
+                max_ips = user_data.get('max_ips', 0)
+                
+                if unlimited_user:
+                    devices = 0  # Безлимитный IP
+                elif max_ips > 0:
+                    devices = max_ips
+                # Если max_ips = 0, devices остается None
+            
+            return self.sync_user_create(hysteria_username, expiry_days, int(traffic_limit_gb), enable, plan_for_create, devices)
         
         client_uuid = mapping.get('xui_client_uuid')
         inbound_ids = mapping.get('inbound_ids', [])
@@ -827,18 +864,31 @@ class XUISyncManager:
             # Получаем актуальные inbounds для этого сервера
             server_inbound_ids = self._get_inbound_ids(client, server_config)
             
+            # Определяем limit_ip из devices или из БД
+            limit_ip = None
+            if devices is not None:
+                if replace_devices:
+                    # Заменяем лимит устройств
+                    limit_ip = devices
+                else:
+                    # Добавляем к текущему лимиту (требует получения текущего клиента)
+                    # Пока просто устанавливаем новый лимит
+                    limit_ip = devices
+            else:
+                # Если devices не указан, получаем из БД пользователя
+                user_data = db.get_user(hysteria_username)
+                if user_data:
+                    unlimited_user = user_data.get('unlimited_user', False)
+                    max_ips = user_data.get('max_ips', 0)
+                    
+                    if unlimited_user:
+                        limit_ip = 0  # Безлимитный IP
+                    elif max_ips > 0:
+                        limit_ip = max_ips
+                    # Если max_ips = 0, limit_ip остается None (не передаем лимит)
+            
             for inbound_id in server_inbound_ids:
                 try:
-                    # Если нужно заменить лимит устройств, получаем текущий клиент
-                    limit_ip = None
-                    if devices is not None:
-                        if replace_devices:
-                            # Заменяем лимит устройств
-                            limit_ip = devices
-                        else:
-                            # Добавляем к текущему лимиту (требует получения текущего клиента)
-                            # Пока просто устанавливаем новый лимит
-                            limit_ip = devices
                     
                     # Используем upsert_client для правильной обработки существующих клиентов
                     is_updated, action = client.upsert_client(
@@ -847,7 +897,8 @@ class XUISyncManager:
                         expiry_time=expiry_timestamp,
                         traffic_limit=traffic_bytes,
                         enable=enable,
-                        username=hysteria_username  # Используется для генерации email: username_inbound_id
+                        username=hysteria_username,  # Используется для генерации email: username_inbound_id
+                        limit_ip=limit_ip  # Передаем лимит IP-адресов (если указан)
                     )
                     
                     # Проверяем результат upsert_client
@@ -859,12 +910,8 @@ class XUISyncManager:
                         errors.append(error_msg)
                         continue
                     
-                    # Обновляем лимит устройств если указан
                     if limit_ip is not None:
-                        # Получаем клиента для обновления limit_ip
-                        # Это требует дополнительной логики в XUIClient
-                        # Пока пропускаем, так как upsert_client не поддерживает limit_ip напрямую
-                        logger.debug(f"limit_ip update requested but not yet implemented in upsert_client")
+                        logger.debug(f"Updated limitIp for client {client_uuid} in inbound {inbound_id} to {limit_ip}")
                     updated_inbound_ids.add(inbound_id)  # Добавляем в список обновленных
                     logger.info(
                         f"{action.capitalize()} client {client_uuid} (email: {hysteria_username}_{inbound_id}) in inbound {inbound_id} "

@@ -86,12 +86,23 @@ def add_user(
             # Синхронизация с X-UI
             try:
                 from xui.sync_helper import sync_user_create
+                # Определяем devices из user_data
+                devices = None
+                unlimited_user = user_data.get("unlimited_user", False)
+                max_ips = user_data.get("max_ips", 0)
+                if unlimited_user:
+                    devices = 0  # Безлимитный IP
+                elif max_ips > 0:
+                    devices = max_ips
+                # Если max_ips = 0, devices остается None (будет получено из БД в sync_user_create)
+                
                 sync_user_create(
                     username=username_lower,
                     expiry_days=expiration_days,
                     traffic_limit_gb=traffic_gb,
                     enable=not user_data.get("blocked", False),
-                    user_plan=user_data.get("plan", "standard")
+                    user_plan=user_data.get("plan", "standard"),
+                    devices=devices
                 )
             except Exception as e:
                 # Не блокируем создание пользователя при ошибке синхронизации

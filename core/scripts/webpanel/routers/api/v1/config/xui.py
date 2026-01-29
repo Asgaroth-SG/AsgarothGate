@@ -594,12 +594,23 @@ async def sync_user_xui_api(body: XUISyncUserBody):
         traffic_gb = int(traffic_bytes / (1024 ** 3)) if traffic_bytes > 0 else 0
         enable = not user_data.get('blocked', False)
         
+        # Определяем devices из user_data для передачи в 3X-UI
+        devices = None
+        unlimited_user = user_data.get('unlimited_user', False)
+        max_ips = user_data.get('max_ips', 0)
+        if unlimited_user:
+            devices = 0  # Безлимитный IP
+        elif max_ips > 0:
+            devices = max_ips
+        # Если max_ips = 0, devices остается None (будет получено из БД в sync_user_create)
+        
         success, error = sync_manager.sync_user_create(
             hysteria_username=body.username,
             expiry_days=expiry_days,
             traffic_limit_gb=traffic_gb,
             enable=enable,
-            user_plan=plan
+            user_plan=plan,
+            devices=devices
         )
         
         if success:
@@ -780,13 +791,24 @@ async def sync_all_users_xui_api():
             traffic_gb = int(traffic_bytes / (1024 ** 3)) if traffic_bytes > 0 else 0
             enable = not user.get('blocked', False)
             
+            # Определяем devices из user для передачи в 3X-UI
+            devices = None
+            unlimited_user = user.get('unlimited_user', False)
+            max_ips = user.get('max_ips', 0)
+            if unlimited_user:
+                devices = 0  # Безлимитный IP
+            elif max_ips > 0:
+                devices = max_ips
+            # Если max_ips = 0, devices остается None (будет получено из БД в sync_user_create)
+            
             try:
                 success, error = sync_manager.sync_user_create(
                     hysteria_username=username,
                     expiry_days=expiry_days,
                     traffic_limit_gb=traffic_gb,
                     enable=enable,
-                    user_plan=plan
+                    user_plan=plan,
+                    devices=devices
                 )
                 
                 if success:

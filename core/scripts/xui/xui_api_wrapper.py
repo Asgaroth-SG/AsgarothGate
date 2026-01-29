@@ -194,7 +194,8 @@ class XUIAPIWrapper:
         expiry_time: Optional[int] = None,
         traffic_limit: Optional[int] = None,
         enable: bool = True,
-        username: Optional[str] = None
+        username: Optional[str] = None,
+        limit_ip: Optional[int] = None
     ) -> Tuple[bool, str]:
         """
         Создает или обновляет клиента (совместимость с XUIClient).
@@ -206,6 +207,7 @@ class XUIAPIWrapper:
             traffic_limit: Лимит трафика в байтах
             enable: Включен ли клиент
             username: Имя пользователя (для email)
+            limit_ip: Лимит количества IP-адресов (0 = без ограничений)
         
         Returns:
             Tuple (is_updated: bool, action: str)
@@ -231,6 +233,10 @@ class XUIAPIWrapper:
         if traffic_limit is not None:
             # Используем totalGB в байтах (как в текущей реализации)
             client_data['totalGB'] = traffic_limit
+        
+        if limit_ip is not None:
+            # Добавляем лимит IP-адресов (0 = без ограничений)
+            client_data['limitIp'] = limit_ip
         
         # Проверяем, существует ли клиент
         inbound = self.get_inbound(inbound_id)
@@ -270,7 +276,8 @@ class XUIAPIWrapper:
         traffic_limit: Optional[int] = None,
         enable: bool = True,
         email: Optional[str] = None,
-        username: Optional[str] = None
+        username: Optional[str] = None,
+        limit_ip: Optional[int] = None
     ) -> Tuple[bool, str]:
         """
         Асинхронная версия upsert_client (для совместимости с xui_sync).
@@ -283,6 +290,7 @@ class XUIAPIWrapper:
             enable: Включен ли клиент
             email: Email клиента (опционально)
             username: Имя пользователя (для email)
+            limit_ip: Лимит количества IP-адресов (0 = без ограничений)
         
         Returns:
             Tuple (is_updated: bool, action: str)
@@ -309,6 +317,10 @@ class XUIAPIWrapper:
         if traffic_limit is not None:
             # Используем totalGB в байтах (как в текущей реализации)
             client_data['totalGB'] = traffic_limit
+        
+        if limit_ip is not None:
+            # Добавляем лимит IP-адресов (0 = без ограничений)
+            client_data['limitIp'] = limit_ip
         
         # Проверяем, существует ли клиент
         inbound = await self.api_client.get_inbound(inbound_id)

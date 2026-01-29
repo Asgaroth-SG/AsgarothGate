@@ -93,7 +93,8 @@ update_caddy_file() {
     if [ -z "$XHTTP_PATH" ] || [ -z "$XHTTP_PORT" ]; then
         if [ -f "$CADDY_CONFIG_FILE" ]; then
             # Ищем маршрут XHTTP в существующем файле
-            local xhttp_route=$(grep -A 1 "route.*xhttp" "$CADDY_CONFIG_FILE" | head -1 | sed 's/.*route \([^ ]*\).*/\1/' | sed 's|/*$||' | sed 's|^/||')
+            # Удаляем все /* в конце пути (может быть несколько)
+            local xhttp_route=$(grep -A 1 "route.*xhttp" "$CADDY_CONFIG_FILE" | head -1 | sed 's/.*route \([^ ]*\).*/\1/' | sed 's|/\*\+$||' | sed 's|^/||')
             local xhttp_port=$(grep -A 3 "route.*xhttp" "$CADDY_CONFIG_FILE" | grep "reverse_proxy" | grep -oP '127\.0\.0\.1:\K[0-9]+' | head -1)
             
             if [ -n "$xhttp_route" ] && [ -n "$xhttp_port" ]; then
@@ -102,6 +103,11 @@ update_caddy_file() {
                 echo "Обнаружены настройки XHTTP из существующей конфигурации: путь=$XHTTP_PATH, порт=$XHTTP_PORT"
             fi
         fi
+    fi
+    
+    # Очищаем XHTTP_PATH от лишних /* в конце (на случай если задан в .env)
+    if [ -n "$XHTTP_PATH" ]; then
+        XHTTP_PATH=$(echo "$XHTTP_PATH" | sed 's|/\*\+$||')
     fi
     
     if [ -z "$GRPC_PORT" ]; then
@@ -134,9 +140,11 @@ EOL
 
     # Добавляем XHTTP маршрут, если настроен
     if [ -n "$XHTTP_PATH" ] && [ -n "$XHTTP_PORT" ]; then
+        # Убеждаемся что путь начинается с / и не заканчивается на /*
+        local xhttp_path_clean=$(echo "$XHTTP_PATH" | sed 's|^/*|/|' | sed 's|/\*\+$||')
         cat <<EOL >> "$CADDY_CONFIG_FILE"
     #XHTTP
-    route $XHTTP_PATH/* {
+    route ${xhttp_path_clean}/* {
         reverse_proxy 127.0.0.1:$XHTTP_PORT {
             # Передаем реальный IP клиента для правильного определения устройств в 3X-UI
             header_up X-Real-IP {remote_host}
@@ -167,9 +175,11 @@ EOL
 EOL
     fi
 
+    # Очищаем ROOT_PATH от лишних символов
+    local root_path_clean=$(echo "$ROOT_PATH" | sed 's|^/*||' | sed 's|/\*\+$||')
     cat <<EOL >> "$CADDY_CONFIG_FILE"
     # Веб-панель
-    route /$ROOT_PATH/* {
+    route /${root_path_clean}/* {
         reverse_proxy http://127.0.0.1:28260 {
             # Передаем реальный IP клиента для веб-панели
             header_up X-Real-IP {remote_host}
@@ -183,10 +193,12 @@ EOL
     local MERGE_SUBS=false
     if [ -n "$SUB_PATH" ] && [ "$SUB_DOMAIN" == "$DOMAIN" ] && [ "$SUB_EXT_PORT" == "$PORT" ]; then
         MERGE_SUBS=true
+        # Очищаем SUB_PATH от лишних символов
+        local sub_path_clean=$(echo "$SUB_PATH" | sed 's|^/*||' | sed 's|/\*\+$||')
         cat <<EOL >> "$CADDY_CONFIG_FILE"
     
     # Подписки
-    route /$SUB_PATH/* {
+    route /${sub_path_clean}/* {
         reverse_proxy http://127.0.0.1:$SUB_PORT {
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-For {remote_host}
@@ -200,18 +212,18 @@ EOL
     cat <<EOL >> "$CADDY_CONFIG_FILE"
     
     @otherPaths {
-        not path /$ROOT_PATH/*
+        not path /${root_path_clean}/*
 EOL
     
     # Исключаем XHTTP путь из @otherPaths, если настроен
     if [ -n "$XHTTP_PATH" ]; then
-        # Убираем начальный слэш если есть, для сравнения
-        local xhttp_path_clean="${XHTTP_PATH#/}"
-        echo "        not path $XHTTP_PATH/*" >> "$CADDY_CONFIG_FILE"
+        # Используем уже очищенный путь
+        local xhttp_path_for_exclude=$(echo "$XHTTP_PATH" | sed 's|^/*|/|' | sed 's|/\*\+$||')
+        echo "        not path ${xhttp_path_for_exclude}/*" >> "$CADDY_CONFIG_FILE"
     fi
     
     if [ "$MERGE_SUBS" = true ]; then
-        echo "        not path /$SUB_PATH/*" >> "$CADDY_CONFIG_FILE"
+        echo "        not path /${sub_path_clean}/*" >> "$CADDY_CONFIG_FILE"
     fi
 
     cat <<EOL >> "$CADDY_CONFIG_FILE"
@@ -233,11 +245,12 @@ EOL
 EOL
 
     if [ -n "$SUB_PATH" ] && ([ "$SUB_DOMAIN" != "$DOMAIN" ] || [ "$SUB_EXT_PORT" != "$PORT" ]); then
-        
+        # Очищаем SUB_PATH от лишних символов для отдельного блока
+        local sub_path_clean_separate=$(echo "$SUB_PATH" | sed 's|^/*||' | sed 's|/\*\+$||')
         cat <<EOL >> "$CADDY_CONFIG_FILE"
 
 $SUB_DOMAIN:$SUB_EXT_PORT {
-    route /$SUB_PATH/* {
+    route /${sub_path_clean_separate}/* {
         reverse_proxy http://127.0.0.1:$SUB_PORT {
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-For {remote_host}
@@ -248,7 +261,7 @@ $SUB_DOMAIN:$SUB_EXT_PORT {
     
     # Блокируем всё остальное на домене подписок
     @blocked {
-        not path /$SUB_PATH/*
+        not path /${sub_path_clean_separate}/*
     }
     abort @blocked
 }
