@@ -293,21 +293,38 @@ fi
 find "$HYSTERIA_INSTALL_DIR/core/scripts" -type f -name "*.sh" -exec chmod +x {} \; 2>/dev/null || true
 success "Права доступа обновлены."
 
-# ========== Виртуальное окружение ==========
+# ========== Виртуальное окружение и установка зависимостей ==========
 info "Настройка виртуального окружения и установка зависимостей..."
 cd "$HYSTERIA_INSTALL_DIR"
-python3 -m venv "$HYSTERIA_VENV_DIR"
-source "$HYSTERIA_VENV_DIR/bin/activate"
-pip install --upgrade pip >/dev/null
-pip install -r requirements.txt >/dev/null
+if [[ ! -d "$HYSTERIA_VENV_DIR" ]]; then
+    info "Создание виртуального окружения $HYSTERIA_VENV_DIR..."
+    python3 -m venv "$HYSTERIA_VENV_DIR"
+    success "Виртуальное окружение создано."
+else
+    info "Виртуальное окружение уже существует, обновление зависимостей..."
+fi
+PIP="$HYSTERIA_VENV_DIR/bin/pip"
+PYTHON_VENV="$HYSTERIA_VENV_DIR/bin/python3"
+"$PIP" install --upgrade pip -q
+if [[ -f "$HYSTERIA_INSTALL_DIR/requirements.txt" ]]; then
+    if "$PIP" install -r "$HYSTERIA_INSTALL_DIR/requirements.txt" -q; then
+        success "Зависимости из requirements.txt установлены (в т.ч. click для CLI)."
+    else
+        warn "Частичная ошибка при установке из requirements.txt. Повторная попытка с выводом..."
+        "$PIP" install -r "$HYSTERIA_INSTALL_DIR/requirements.txt" || error "Установка зависимостей не удалась. Проверьте доступ к PyPI."
+    fi
+else
+    warn "Файл requirements.txt не найден. Установка минимального набора (click и др.)..."
+    "$PIP" install click pymongo python-dotenv schedule requests -q
+fi
 # Установка py3xui и nest-asyncio для интеграции с 3X-UI
 info "Установка py3xui и nest-asyncio для интеграции с 3X-UI..."
-if pip install py3xui nest-asyncio >/dev/null 2>&1; then
+if "$PIP" install py3xui nest-asyncio -q 2>/dev/null; then
     success "py3xui и nest-asyncio установлены."
 else
-    warn "Не удалось установить py3xui/nest-asyncio. Установите вручную: pip install py3xui nest-asyncio"
+    warn "Не удалось установить py3xui/nest-asyncio. Установите вручную: $PIP install py3xui nest-asyncio"
 fi
-success "Среда Python готова."
+success "Среда Python готова. CLI запускайте так: $PYTHON_VENV core/cli.py <команда>"
 
 # ========== Миграция данных ==========
 migrate_json_to_mongo
